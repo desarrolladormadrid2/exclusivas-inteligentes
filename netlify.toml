@@ -1,0 +1,23 @@
+[build]
+  command = "npm run build"
+  publish = "dist/client"
+  functions = "netlify/functions"
+  ignore = "node scripts/hosting-ignore.mjs"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[functions]
+  node_bundler = "esbuild"
+  included_files = ["dist/**", "api/**", "remote-db-sync.mjs"]
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/*"
+  to = "/.netlify/functions/app"
+  status = 200
