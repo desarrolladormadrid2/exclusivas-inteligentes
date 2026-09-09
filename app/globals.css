@@ -3483,7 +3483,9 @@ footer span {
 .form-accordion[open] .record-form,
 .form-accordion[open] .order-general-fields,
 .form-accordion[open] .quote-lines-editor,
-.form-accordion[open] .quote-line-add { width: 100%; overflow-x: hidden; }
+.form-accordion[open] .quote-line-add { width: 100%; overflow: visible; }
+.quote-lines-editor { position: relative; z-index: 5; overflow: visible; }
+.quote-line-add { position: relative; z-index: 6; overflow: visible; }
 .quote-product-picker { min-width: 0; }
 .quote-lines-total { padding-bottom: 2px; }
 .quote-lines-total { width: 100%; min-width: 0; box-sizing: border-box; }

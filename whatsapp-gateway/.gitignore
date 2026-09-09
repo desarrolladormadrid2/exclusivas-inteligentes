@@ -1,7 +1,9 @@
 .env
+!.env.example
 node_modules/
 sessions/
 logs/
+tools/wmic.exe
 *.log
 
 # managed

@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.66";
+const APP_VERSION = "2.0.67";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const initialModules = [
@@ -2837,6 +2837,21 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       return next;
     }));
   }, [active, user?.username]);
+  useEffect(() => {
+    if (!formOpen || !["Pedidos", "Presupuestos"].includes(active) || (lookups.products || []).length) return;
+    fetchCompactLookup("products", user?.username || "Usuario local").then((products) => {
+      if (products.length) setLookups((current: any) => ({ ...current, products }));
+    });
+  }, [active, formOpen, user?.username, lookups.products]);
+  useEffect(() => {
+    if (!formOpen || !["Pedidos", "Presupuestos"].includes(active) || !quoteProductSearch.trim() || (lookups.products || []).length) return;
+    fetch(`/api/products?view=lookup&limit=2000&query=${encodeURIComponent(quoteProductSearch.trim())}`, { cache: "no-store", headers: { "X-Actor": user?.username || "Usuario local" } })
+      .then((response) => response.ok ? response.json() : [])
+      .then((products) => {
+        if (Array.isArray(products) && products.length) setLookups((current: any) => ({ ...current, products }));
+      })
+      .catch(() => undefined);
+  }, [active, formOpen, quoteProductSearch, user?.username, lookups.products]);
   async function attachExpenseFile(file: File) {
     if (file.size > 8 * 1024 * 1024) {
       alert("El justificante no puede superar 8 MB.");
@@ -3695,7 +3710,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     function newOrderRequested() {
       setQuoteLines([]);
       setQuoteProductSearch("");
-      beginForm({ code: nextOrderCode(), status: "Nuevo", quantity: 1 });
+       beginForm({ code: nextOrderCode(), status: "Nuevo", created_by: user?.username || "Usuario local", quantity: 1 });
       setFormOpen(true);
     }
     window.addEventListener("crm:nuevo-pedido", newOrderRequested);

@@ -1,6 +1,6 @@
 {
   "name": "site-creator-vinext-starter",
-  "version": "2.0.66",
+  "version": "2.0.67",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -9,7 +9,7 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "start:selfhost": "node server-selfhost.mjs",
+    "start:selfhost": "node --env-file=.env.local server-selfhost.mjs",
     "db:seed-historico": "node seed-historico.mjs",
     "db:seed-operativa-semana": "node scripts/seed-operativa-semana.mjs",
     "db:datos-reales": "node depurar-datos-reales.mjs",
