@@ -46,15 +46,14 @@ try {
   Start-Process -FilePath 'C:\Program Files\nodejs\node.exe' -ArgumentList '--env-file=.env.local','server-selfhost.mjs' -WorkingDirectory $productionRoot -WindowStyle Hidden
 
   $healthDeadline = (Get-Date).AddSeconds(30)
+  $health = $null
   do {
-    try {
-      $health = Invoke-WebRequest -Uri 'http://127.0.0.1:3000/' -UseBasicParsing -TimeoutSec 3
-      if ($health.StatusCode -eq 200) { break }
-    } catch { }
+    & node -e "const h=require('http').request({host:'127.0.0.1',port:3000,path:'/',timeout:15000},r=>process.exit(r.statusCode===200?0:1));h.on('timeout',()=>process.exit(1));h.on('error',()=>process.exit(2));h.end()" 2>$null
+    if ($LASTEXITCODE -eq 0) { $health = $true; break }
     Start-Sleep -Seconds 1
   } while ((Get-Date) -lt $healthDeadline)
 
-  if (-not $health -or $health.StatusCode -ne 200) {
+  if (-not $health) {
     throw 'The CRM did not become healthy after restart.'
   }
 } finally {
