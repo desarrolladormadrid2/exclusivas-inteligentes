@@ -2787,6 +2787,10 @@ export async function crmApiHandler(req, res) {
           if (!shippingLocation) return send(res, 400, { error: "La ubicación de envío no pertenece al cliente seleccionado" });
           d.address = shippingLocation.address || d.address || "";
         }
+        if (t === "orders" && d.code) {
+          const existingOrder = db.prepare("SELECT * FROM orders WHERE code=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 LIMIT 1").get(String(d.code));
+          if (existingOrder) return send(res, 200, { ...existingOrder, idempotent: true });
+        }
         const keys = Object.keys(d),
           r = db
             .prepare(

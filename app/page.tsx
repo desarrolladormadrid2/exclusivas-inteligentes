@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.74";
+const APP_VERSION = "2.0.76";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const initialModules = [
@@ -2444,6 +2444,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   formRef.current = form;
   const [editing, setEditing] = useState<any>(null);
   const [formOpen, setFormOpen] = useState(false);
+  const [recordSaving, setRecordSaving] = useState(false);
+  const recordSaveLock = useRef(false);
   const [supplierSearch, setSupplierSearch] = useState("");
   const [newSupplierOpen, setNewSupplierOpen] = useState(false);
   const [newSupplierSaving, setNewSupplierSaving] = useState(false);
@@ -3043,6 +3045,18 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     finally { setNewSupplierSaving(false); }
   }
   async function saveRecord(e: any, formOverride?: any) {
+    e.preventDefault();
+    if (recordSaveLock.current) return;
+    recordSaveLock.current = true;
+    setRecordSaving(true);
+    try {
+      await saveRecordUnsafe(e, formOverride);
+    } finally {
+      recordSaveLock.current = false;
+      setRecordSaving(false);
+    }
+  }
+  async function saveRecordUnsafe(e: any, formOverride?: any) {
     e.preventDefault();
     const currentForm = formOverride && Object.keys(formOverride).length ? formOverride : formRef.current;
     if (isOrderForm && editing && isOrderSent(editing)) {
@@ -5065,7 +5079,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           {formTitle}{formDirty && <em className="unsaved-indicator"> · Cambios sin guardar</em>}{" "}
           <span>{formOpen || editing ? "−" : "+"}</span>
         </summary>
-        <form className={`record-form${active === "Productos" ? " product-master-form" : ""}`} onSubmit={save}>
+          <form className={`record-form${active === "Productos" ? " product-master-form" : ""}`} onSubmit={save}>
           {active === "Presupuestos" && editing && <div className="quote-record-toolbar" role="toolbar" aria-label="Acciones del presupuesto">
             <div><b>Presupuesto comercial</b><small>Previsualiza, envía al cliente o conviértelo en pedido conservando este documento.</small></div>
             <div><button type="button" className="button secondary" onClick={() => void openPreview(editing)}>Vista previa / PDF</button><button type="button" className="button secondary" onClick={() => void sendQuoteToClient(editing)}>Enviar al cliente</button><button type="button" className="button primary" disabled={editing.status === "Convertido"} onClick={() => void convertQuoteToOrder(editing)}>{editing.status === "Convertido" ? "Convertido a pedido" : "Convertir a pedido"}</button></div>
@@ -5195,8 +5209,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
               </small>
             </label>
           )}
-          {active !== "Entradas" && <button className="button primary">
-            {editing ? "Guardar cambios" : formTitle}
+          {active !== "Entradas" && <button className="button primary" disabled={recordSaving}>
+            {recordSaving ? "Guardando…" : editing ? "Guardar cambios" : formTitle}
           </button>}
           {editing && active !== "Entradas" && (
             <button
