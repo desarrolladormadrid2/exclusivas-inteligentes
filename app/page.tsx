@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.70";
+const APP_VERSION = "2.0.71";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const initialModules = [
@@ -5349,12 +5349,15 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             <tr>
                 {isProducts && <th className="product-check-column"><span className="sr-only">Seleccionar</span></th>}
                 {isProducts && <th className="product-image-column">Imagen</th>}
-                {visibleFields.map((f: string) => (
-                  <th key={f} className={isDateField(f) ? "sortable-date-column" : undefined}>
-                    <button type="button" className="table-sort-button" onClick={() => { setStockSort("none"); setDateSort(null); setTableSort((current) => current?.field === f ? { field: f, direction: current.direction === "asc" ? "desc" : "asc" } : { field: f, direction: "asc" }); }} aria-label={`Ordenar ${c.labels[c.fields.indexOf(f)] || f}`} title="Ordenar columna">{c.labels[c.fields.indexOf(f)] || f}<span aria-hidden="true">{tableSort?.field === f ? (tableSort.direction === "asc" ? " ↑" : " ↓") : " ↕"}</span></button>
-                  </th>
+                {isProducts && <th className="product-lots-column">LOTES</th>}
+                {visibleFields.map((f: string, fieldIndex: number) => (
+                  <Fragment key={f}>
+                    <th className={isDateField(f) ? "sortable-date-column" : undefined}>
+                      <button type="button" className="table-sort-button" onClick={() => { setStockSort("none"); setDateSort(null); setTableSort((current) => current?.field === f ? { field: f, direction: current.direction === "asc" ? "desc" : "asc" } : { field: f, direction: "asc" }); }} aria-label={`Ordenar ${c.labels[c.fields.indexOf(f)] || f}`} title="Ordenar columna">{c.labels[c.fields.indexOf(f)] || f}<span aria-hidden="true">{tableSort?.field === f ? (tableSort.direction === "asc" ? " ↑" : " ↓") : " ↕"}</span></button>
+                    </th>
+                    {active === "Stock" && fieldIndex === 0 && <th className="product-lots-column">LOTES</th>}
+                  </Fragment>
                 ))}
-                {(active === "Stock" || active === "Productos") && <th className="product-lots-column">LOTES</th>}
                 <th>ACCIONES</th>
               </tr>
             </thead>
@@ -5363,30 +5366,33 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                   <tr key={r.id ?? r.product_id} data-inline-row={r.id ?? r.product_id} data-row-modal={active === "Presupuestos" || active === "Pedidos" || active === "Envíos" || usesRecordModal || active === "Entradas" ? "true" : undefined} className={`${isProducts && Number(r.stock || 0) - Number(r.stock_reserved || 0) <= Number(r.min_stock || 0) ? "product-row-critical" : ""}${isLoadPreparation && Number(r.urgent) === 1 ? " prep-row-urgent" : ""}${isLoadPreparation && r.status === "Preparado con incidencia" ? " prep-row-incident" : ""}${Number(r.deleted) === 1 ? " deleted-row" : ""}${active === "Pedidos" ? " order-list-row" : ""}`} onClick={(event) => { if (inlineEditing === (r.id ?? r.product_id) || (event.target as HTMLElement).closest("button, input, select, textarea, a, details, summary")) return; if (active === "Entradas") { void openEntryDetail(r); return; } if (active === "Envíos") { void openPreview(r); return; } if (active === "Presupuestos" || active === "Pedidos") { if (active === "Pedidos" && isOrderSent(r)) void openPreview(r); else void openRecordModal(r); return; } if (isLoadPreparation) { void openPreparationRow(r); return; } if (usesRecordModal) { void openRecordModal(r); return; } beginInline(r); }}>
                     {isProducts && <td className="product-check-column" data-label="Seleccionar"><input type="checkbox" checked={selectedProductIds.includes(Number(r.id))} onChange={() => toggleProductSelection(Number(r.id))} aria-label={`Seleccionar ${r.name}`} /></td>}
                     {isProducts && <td className="product-image-column" data-label="Imagen"><button type="button" className={`product-thumbnail-button${productImageSource(r) ? "" : " product-reference-thumbnail"}`} onClick={() => setProductDetail(r)} aria-label={`Abrir imagen de ${r.name}`}>{<img src={productDisplayImageSource(r)} alt={productImageSource(r) ? "" : `Imagen de referencia para ${r.name}`} loading="lazy" />}</button></td>}
-                    {visibleFields.map((f: string) => (
-                      <td key={f} data-label={c.labels[c.fields.indexOf(f)] || f} className={`${stockCellClass(r, f)}${active === "Stock" && ["stock", "stock_reserved", "available_stock", "min_stock"].includes(f) && Number(r[f]) < 0 ? " stock-negative" : ""}`}>
-                        {inlineEditing === (r.id ?? r.product_id) ? (
-                          renderInlineEditor(f, r)
-                        ) : (
-                            f === "billing_status"
-                            ? <span className={`billing-status billing-status-${String(r.billing_status || "Sin facturar").toLowerCase().replaceAll(" ", "-")}`}>{r.billing_status || "Sin facturar"}</span>
-                            : f === "payment_status"
-                            ? <span className={`payment-status payment-status-${getOrderPaymentStatus(r).toLowerCase().replaceAll(" ", "-")}`}>{getOrderPaymentStatus(r)}</span>
-                            : f === "shipping_status"
-                            ? <span className={`shipping-status shipping-status-${getOrderShippingStatus(r).toLowerCase().replaceAll(" ", "-")}`}>{getOrderShippingStatus(r)}</span>
-                            : f === "client_id" && r.client_name
-                            ? `${r.client_name}${r.client_city ? ` · ${r.client_city}` : ""}`
-                            : (f === "address" || f === "origin_address") && (r[f] === "[object Object]" || (r[f] && typeof r[f] === "object"))
-                              ? (typeof r[f] === "object"
-                                ? String(r[f].address || r[f].name || r[f].label || "—")
-                                : String(getClient(r.client_id)?.address || "—"))
-                              : formatTableValue(f, r[f]) === "[object Object]"
-                                ? "—"
-                                : formatTableValue(f, r[f])
-                        )}
-                      </td>
+                    {isProducts && renderProductLots(r)}
+                    {visibleFields.map((f: string, fieldIndex: number) => (
+                      <Fragment key={f}>
+                        <td data-label={c.labels[c.fields.indexOf(f)] || f} className={`${stockCellClass(r, f)}${active === "Stock" && ["stock", "stock_reserved", "available_stock", "min_stock"].includes(f) && Number(r[f]) < 0 ? " stock-negative" : ""}`}>
+                          {inlineEditing === (r.id ?? r.product_id) ? (
+                            renderInlineEditor(f, r)
+                          ) : (
+                              f === "billing_status"
+                              ? <span className={`billing-status billing-status-${String(r.billing_status || "Sin facturar").toLowerCase().replaceAll(" ", "-")}`}>{r.billing_status || "Sin facturar"}</span>
+                              : f === "payment_status"
+                              ? <span className={`payment-status payment-status-${getOrderPaymentStatus(r).toLowerCase().replaceAll(" ", "-")}`}>{getOrderPaymentStatus(r)}</span>
+                              : f === "shipping_status"
+                              ? <span className={`shipping-status shipping-status-${getOrderShippingStatus(r).toLowerCase().replaceAll(" ", "-")}`}>{getOrderShippingStatus(r)}</span>
+                              : f === "client_id" && r.client_name
+                              ? `${r.client_name}${r.client_city ? ` · ${r.client_city}` : ""}`
+                              : (f === "address" || f === "origin_address") && (r[f] === "[object Object]" || (r[f] && typeof r[f] === "object"))
+                                ? (typeof r[f] === "object"
+                                  ? String(r[f].address || r[f].name || r[f].label || "—")
+                                  : String(getClient(r.client_id)?.address || "—"))
+                                : formatTableValue(f, r[f]) === "[object Object]"
+                                  ? "—"
+                                  : formatTableValue(f, r[f])
+                          )}
+                        </td>
+                        {active === "Stock" && fieldIndex === 0 && renderProductLots(r)}
+                      </Fragment>
                     ))}
-                    {(active === "Stock" || active === "Productos") && renderProductLots(r)}
                     <td data-label="Acciones">
                       <div className="row-actions">
                         {isLoadPreparation && (
