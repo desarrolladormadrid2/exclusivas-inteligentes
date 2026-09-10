@@ -27,7 +27,8 @@ try {
   $crmProcesses = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" |
     Where-Object { $_.CommandLine -like '*server-selfhost.mjs*' }
   $crmProcesses | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-  Start-ScheduledTask -TaskName $taskName
+  Start-Sleep -Seconds 2
+  Start-Process -FilePath 'node' -ArgumentList '--env-file=.env.local','server-selfhost.mjs' -WorkingDirectory $productionRoot -WindowStyle Hidden
 } finally {
   Pop-Location
 }
