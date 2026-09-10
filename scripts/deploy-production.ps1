@@ -24,11 +24,39 @@ try {
   if (-not (Test-Path -LiteralPath '.env.local')) { throw 'Missing persistent .env.local in production directory.' }
   $env:NODE_ENV = 'production'
   npm.cmd ci --omit=dev
+
+  # Stop the scheduled task as well as its Node child.  Starting a task while
+  # its PowerShell wrapper is still finishing is ignored when the task uses
+  # MultipleInstances=IgnoreNew, which can leave production offline.
+  Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
   $crmProcesses = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" |
     Where-Object { $_.CommandLine -like '*server-selfhost.mjs*' }
   $crmProcesses | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-  Start-Sleep -Seconds 2
-  Start-Process -FilePath 'node' -ArgumentList '--env-file=.env.local','server-selfhost.mjs' -WorkingDirectory $productionRoot -WindowStyle Hidden
+
+  $deadline = (Get-Date).AddSeconds(30)
+  do {
+    $taskInfo = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
+    $remaining = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" |
+      Where-Object { $_.CommandLine -like '*server-selfhost.mjs*' }
+    if ((-not $taskInfo -or $taskInfo.State -ne 'Running') -and -not $remaining) { break }
+    Start-Sleep -Seconds 1
+  } while ((Get-Date) -lt $deadline)
+
+  if ($remaining) { throw 'The previous CRM process did not stop within 30 seconds.' }
+  Start-Process -FilePath 'C:\Program Files\nodejs\node.exe' -ArgumentList '--env-file=.env.local','server-selfhost.mjs' -WorkingDirectory $productionRoot -WindowStyle Hidden
+
+  $healthDeadline = (Get-Date).AddSeconds(30)
+  do {
+    try {
+      $health = Invoke-WebRequest -Uri 'http://127.0.0.1:3000/' -UseBasicParsing -TimeoutSec 3
+      if ($health.StatusCode -eq 200) { break }
+    } catch { }
+    Start-Sleep -Seconds 1
+  } while ((Get-Date) -lt $healthDeadline)
+
+  if (-not $health -or $health.StatusCode -ne 200) {
+    throw 'The CRM did not become healthy after restart.'
+  }
 } finally {
   Pop-Location
 }
