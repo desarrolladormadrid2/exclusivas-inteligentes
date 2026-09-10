@@ -1,0 +1,47 @@
+name: Deploy production to miniPC
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: exclusivas-inteligentes-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, Windows, exclusivas-inteligentes]
+    timeout-minutes: 30
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Install dependencies
+        shell: powershell
+        run: npm ci
+
+      - name: Run tests
+        shell: powershell
+        run: npm test
+
+      - name: Build production bundle
+        shell: powershell
+        run: npm run build
+
+      - name: Validate production version
+        shell: powershell
+        run: .\scripts\check-production-version.ps1
+
+      - name: Deploy and restart CRM
+        shell: powershell
+        run: .\scripts\deploy-production.ps1
+
+      - name: Verify production endpoints
+        shell: powershell
+        run: .\scripts\verify-production.ps1

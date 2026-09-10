@@ -1,29 +1,41 @@
 # Exclusivas Inteligentes
 
-CRM local para una distribuidora de bebidas.
+CRM self-hosted de producción para una distribuidora de bebidas.
 
 ## Inicio
 
-Usa el acceso directo del escritorio **Exclusivas Inteligentes**. El lanzador ejecuta la migración SQLite, levanta la API local y abre el CRM.
+El miniPC ejecuta el CRM mediante un runner de GitHub Actions self-hosted y la tarea persistente de Windows `ExclusivasInteligentes\CRM self-hosted`.
 
 ### Mover a otro equipo
 
 1. Instala Node.js 22 o superior en el nuevo equipo.
-2. Descomprime esta carpeta completa en una ruta sin permisos especiales, por ejemplo `C:\Excluvas Inteligentes`.
-3. Ejecuta `Excluvas Inteligentes.bat`.
-4. Opcionalmente ejecuta `crear-acceso-directo.ps1` para crear el acceso directo en el Escritorio.
-5. Para cerrar la aplicación ejecuta `cerrar-excluvas.bat`.
+2. Configura las variables fuera de Git en `.env.local`.
+3. Ejecuta `scripts\install-production-task.ps1` como administrador.
+4. Configura el runner self-hosted fuera del directorio del proyecto.
 
-El paquete incluye la base SQLite y los datos de prueba. No incluye claves de IA ni contraseñas externas.
+El proyecto no usa SQLite local en producción. La base de datos es Turso y las credenciales permanecen en `.env.local`, fuera del control de versiones.
 
 Usuarios iniciales:
 
 - Luis / `Temporal2026` — administrador
 - Jose / `Temporal2026` — usuario
 
-## Datos
+## Producción en miniPC
 
-La base se guarda en `data/excluvas.sqlite`. El lanzador ejecuta `migrate.mjs` antes de arrancar para actualizar bases creadas por versiones anteriores.
+- Proyecto persistente: `C:\Users\luism\Desktop\exclusivas-inteligentes`
+- Runner: `C:\Users\luism\actions-runner\exclusivas-inteligentes`
+- Servicio/tarea: `ExclusivasInteligentes\CRM self-hosted`
+- Puerto: `3000`
+- URL local: `http://127.0.0.1:3000`
+- URL pública: `https://crm.desarrolladormadrid.com`
+- Entorno: `C:\Users\luism\Desktop\exclusivas-inteligentes\.env.local`
+- Base de datos: Turso remoto, configurada mediante `.env.local`
+- Logs del self-hosted: `C:\ProgramData\ExclusivasInteligentes\logs`
+- Sesiones de WhatsApp: `C:\Users\luism\Desktop\exclusivas-inteligentes\whatsapp-gateway\sessions`
+- Copias: `C:\Users\luism\Desktop\exclusivas-inteligentes\backups` o la ruta configurada por el servicio
+- Reinicio CRM: `Start-ScheduledTask -TaskName 'ExclusivasInteligentes\\CRM self-hosted'`
+
+El gateway de WhatsApp es independiente y no se reinicia en despliegues del CRM.
 
 ## Asistente
 

@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$logPath = Join-Path $projectRoot 'logs\selfhost.log'
+$runtimeRoot = 'C:\ProgramData\ExclusivasInteligentes'
+$logPath = Join-Path $runtimeRoot 'logs\selfhost.log'
 New-Item -ItemType Directory -Path (Split-Path -Parent $logPath) -Force | Out-Null
 Set-Location $projectRoot
 $env:NODE_ENV = 'production'
