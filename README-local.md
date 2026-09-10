@@ -34,6 +34,7 @@ Usuarios iniciales:
 - Sesiones de WhatsApp: `C:\Users\luism\Desktop\exclusivas-inteligentes\whatsapp-gateway\sessions`
 - Copias: `C:\Users\luism\Desktop\exclusivas-inteligentes\backups` o la ruta configurada por el servicio
 - Reinicio CRM: `Start-ScheduledTask -TaskName 'ExclusivasInteligentes\\CRM self-hosted'`
+- Runner GitHub: `minipc-exclusivas-inteligentes` con etiqueta `exclusivas-inteligentes`
 
 El gateway de WhatsApp es independiente y no se reinicia en despliegues del CRM.
 
