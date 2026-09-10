@@ -25,27 +25,30 @@ try {
   $env:NODE_ENV = 'production'
   npm.cmd ci --omit=dev
 
-  # Stop the scheduled task as well as its Node child.  Starting a task while
-  # its PowerShell wrapper is still finishing is ignored when the task uses
-  # MultipleInstances=IgnoreNew, which can leave production offline.
-  Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-  $crmProcesses = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" |
-    Where-Object { $_.CommandLine -like '*server-selfhost.mjs*' }
-  $crmProcesses | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  # Restart via the SYSTEM watchdog task (flag-based). The runner cannot kill
+  # the SYSTEM-owned CRM directly (Win32_Process CommandLine is empty for it
+  # and Stop-Process fails), which previously left a stale process serving an
+  # old build manifest. We signal the watchdog to force a restart by port.
+  $flagPath = Join-Path $productionRoot 'scripts\restart.flag'
+  $prePid = (Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1).OwningProcess
+  Set-Content -LiteralPath $flagPath -Value 'restart' -Encoding ascii -NoNewline
 
-  $deadline = (Get-Date).AddSeconds(30)
+  $restartDeadline = (Get-Date).AddSeconds(150)
+  $newPid = $null
   do {
-    $taskInfo = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
-    $remaining = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" |
-      Where-Object { $_.CommandLine -like '*server-selfhost.mjs*' }
-    if ((-not $taskInfo -or $taskInfo.State -ne 'Running') -and -not $remaining) { break }
-    Start-Sleep -Seconds 1
-  } while ((Get-Date) -lt $deadline)
+    $listener = Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($listener) {
+      $newPid = $listener.OwningProcess
+      if ($newPid -ne $prePid) { break }
+    }
+    Start-Sleep -Seconds 3
+  } while ((Get-Date) -lt $restartDeadline)
 
-  if ($remaining) { throw 'The previous CRM process did not stop within 30 seconds.' }
-  Start-Process -FilePath 'C:\Program Files\nodejs\node.exe' -ArgumentList '--env-file=.env.local','server-selfhost.mjs' -WorkingDirectory $productionRoot -WindowStyle Hidden
+  if (-not $newPid -or $newPid -eq $prePid) {
+    throw 'The CRM did not restart (watchdog did not swap the process on port 3000).'
+  }
 
-  $healthDeadline = (Get-Date).AddSeconds(30)
+  $healthDeadline = (Get-Date).AddSeconds(45)
   $health = $null
   do {
     & node -e "const h=require('http').request({host:'127.0.0.1',port:3000,path:'/',timeout:15000},r=>process.exit(r.statusCode===200?0:1));h.on('timeout',()=>process.exit(1));h.on('error',()=>process.exit(2));h.end()" 2>$null
