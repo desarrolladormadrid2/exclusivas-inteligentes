@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.89";
+const APP_VERSION = "2.0.90";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const initialModules = [
@@ -2520,6 +2520,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const [preparationOpeningTimeDraft, setPreparationOpeningTimeDraft] = useState("");
   const [preparationClosingTimeDraft, setPreparationClosingTimeDraft] = useState("");
   const [preparationAddressSaving, setPreparationAddressSaving] = useState(false);
+  const [preparationPackagesSaving, setPreparationPackagesSaving] = useState(false);
   const [preparationAddressMessage, setPreparationAddressMessage] = useState("");
   const [preparationAddressError, setPreparationAddressError] = useState("");
   const [preparationUpdateClient, setPreparationUpdateClient] = useState(false);
@@ -4187,6 +4188,27 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     else setProductOptions((current) => current.map((product) => { const saved = results.find((result) => Number(result.product.id) === Number(product.id)); return saved ? { ...product, warehouse_location: saved.value } : product; }));
     setLocationSavingId(null);
   }
+  async function savePreparationPackages() {
+    if (!preview?.id || !isLoadPreparation) return;
+    const packages = Math.max(1, Math.floor(Number(preview.packages || 1)));
+    setPreparationPackagesSaving(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/shipments/${preview.id}`, {
+        method: "PUT",
+        headers: actorHeaders,
+        body: JSON.stringify({ packages }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "No se pudo guardar el número de bultos.");
+      setPreview((current: any) => current ? { ...current, packages } : current);
+      setRows((current) => current.map((item) => item.id === preview.id ? { ...item, packages } : item));
+    } catch (error: any) {
+      setError(error?.message || "No se pudo guardar el número de bultos.");
+    } finally {
+      setPreparationPackagesSaving(false);
+    }
+  }
   async function savePreparationDeliveryAddress() {
     if (!preview?.id || !isLoadPreparation) return;
     const address = preparationAddressDraft.trim();
@@ -5821,7 +5843,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                   // línea debe volver a mostrarse como completa antes de
                   // pulsar Validar.
                   const lineIsComplete = preparedQuantity >= requestedQuantity;
-                  const lineIsValidated = Number(line.prepared) === 1 && line.preparation_status === "Preparado";
+                  const lineIsValidated = lineIsComplete && Number(line.prepared) === 1 && line.preparation_status === "Preparado";
                   const displayLineStatus = lineIsComplete
                     ? lineIsValidated ? "Validado" : "Pendiente de validar"
                     : line.preparation_status === "Incidencia"
@@ -5832,7 +5854,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                     : displayLineStatus.toLowerCase();
                   return (
                   <Fragment key={line.id}>
-                  <tr key={line.id}>
+                  <tr key={line.id} className={`prep-line-row prep-line-row-${displayLineStatusClass}`}>
                     {isLoadPreparation ? <><td><div className="prep-location-field"><input aria-label={`Ubicación de ${product?.name || "producto"}`} value={locationDrafts[String(product?.id)] ?? product?.warehouse_location ?? ""} placeholder="Ej. B-126" onChange={(event) => setLocationDrafts((current) => ({ ...current, [String(product?.id)]: event.target.value }))} disabled={locationSavingId === -1} /><BarcodeScanner label="Escanear ubicación" disabled={locationSavingId === -1} onDetected={(value) => setLocationDrafts((current) => ({ ...current, [String(product?.id)]: value }))} /></div></td><td><div className="prep-product-cell"><b>{product?.name || `Producto #${line.product_id}`}</b><BarcodeScanner label="Escanear producto" onDetected={(value) => { const normalized = value.trim().toLowerCase(); const matched = productOptions.find((option: any) => [option.barcode, option.sku, option.code].some((candidate: any) => String(candidate || "").trim().toLowerCase() === normalized)); if (!matched) return setPreparationScanMessage({ text: "Código no reconocido. Revisa el producto o usa el campo manual.", kind: "error" }); if (Number(matched.id) !== Number(line.product_id)) return setPreparationScanMessage({ text: "El código corresponde a otro producto. Revisa la línea.", kind: "warning" }); setPreparationScanMessage({ text: `Producto correcto: ${matched.name || product?.name || "producto"}.`, kind: "success" }); }} /></div></td><td><div className="prep-traceability-fields"><label>Lote<input aria-label={`Lote de ${product?.name || "producto"}`} value={line.lot_code || ""} placeholder="Ej. L-2026-001" disabled={preparationTraceabilitySavingId === Number(line.id)} onChange={(event) => setPreviewLines((current) => current.map((item) => item.id === line.id ? { ...item, lot_code: event.target.value } : item))} onBlur={(event) => void updatePreparationTraceability(line, { lot_code: event.currentTarget.value.trim() || null })} /></label><label>Caducidad<input aria-label={`Fecha de caducidad de ${product?.name || "producto"}`} type="date" value={line.expiry_date || ""} disabled={preparationTraceabilitySavingId === Number(line.id)} onChange={(event) => setPreviewLines((current) => current.map((item) => item.id === line.id ? { ...item, expiry_date: event.target.value } : item))} onBlur={(event) => void updatePreparationTraceability(line, { expiry_date: event.currentTarget.value || null })} /></label></div></td></> : <td>{product?.name || `Producto #${line.product_id}`}</td>}
                     <td>{isLoadPreparation || (["Pedidos", "Presupuestos", "Facturas", "Albaranes"].includes(active) && (line.quantity_unit || line.quantity_requested)) ? <div className="prep-quantity-summary"><b>{line.quantity_requested || line.quantity} {quantityUnitLabel(line.quantity_unit)}{(line.quantity_requested || line.quantity) !== 1 && !String(line.quantity_unit || "unidad").startsWith("pack_") ? "s" : ""}</b><small>· {line.quantity} unidades totales</small></div> : line.quantity}</td>
                     {isLoadPreparation && <td><div className="prep-line-controls"><input className="prep-real-quantity" aria-label={`Cantidad preparada de ${product?.name || "producto"}`} type="number" min="0" max={requestedQuantity} step="any" value={line.prepared_quantity ?? 0} onFocus={(event) => event.currentTarget.select()} onChange={(event) => { const raw = event.target.value; setPreviewLines((current) => current.map((item) => { if (item.id !== line.id) return item; if (raw === "") return { ...item, prepared_quantity: "" }; const requested = Number(item.quantity || 0); return { ...item, prepared_quantity: Math.min(requested, Math.max(0, Number(raw) || 0)) }; })) }} onBlur={() => { if (line.prepared_quantity === "") setPreviewLines((current) => current.map((item) => item.id === line.id ? { ...item, prepared_quantity: 0 } : item)); }} /><span className="prep-unit-caption">uds.</span></div></td>}
@@ -5859,6 +5881,10 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                 )}
               </tbody>
             </table>}
+            {isLoadPreparation && <section className="prep-packages-panel" aria-label="Bultos reales">
+              <div><b>Bultos reales</b><small>Indica cuántos bultos salen realmente en este envío. Se reflejará en la etiqueta.</small></div>
+              <input type="number" min="1" step="1" aria-label="Número de bultos reales" value={preview.packages ?? 1} onChange={(event) => setPreview((current: any) => current ? { ...current, packages: event.target.value } : current)} onBlur={() => void savePreparationPackages()} disabled={preparationPackagesSaving} />
+            </section>}
             {isLoadPreparation && <div className="prep-location-save-all"><button type="button" className="button primary" onClick={() => void savePreparationLocations()} disabled={locationSavingId === -1}>{locationSavingId === -1 ? "Guardando cambios…" : "Guardar cambios"}</button></div>}
             {isLoadPreparation && actionableIncompletePreparationLines.length > 0 && (
               <section className="prep-bulk-incident" aria-label="Incidencias de preparación">
