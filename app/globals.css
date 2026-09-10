@@ -5456,6 +5456,8 @@ body:has(.reparto-page) .assistant-global{display:none !important}
   .load-preparation-manager .preview-lines tbody > tr:not(.prep-incident-full-row):not(.prep-incident-resolve-row) > td:nth-child(3)::before { content: "Lotes, caducidad y cantidad"; }
   .load-preparation-manager .preview-lines tbody > tr:not(.prep-incident-full-row):not(.prep-incident-resolve-row) > td:nth-child(5)::before { content: "Total por lotes"; }
 }
+.load-preparation-manager .preview-lines tbody > tr:not(.prep-incident-full-row):not(.prep-incident-resolve-row) > td:nth-child(3)::before { content: "Lotes, caducidad y cantidad"; }
+.load-preparation-manager .preview-lines tbody > tr:not(.prep-incident-full-row):not(.prep-incident-resolve-row) > td:nth-child(5)::before { content: "Total por lotes"; }
 .prep-packages-panel {
   display: flex;
   align-items: center;
