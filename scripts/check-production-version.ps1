@@ -7,7 +7,7 @@ $documentationOnly = $changed.Count -gt 0 -and ($changed | Where-Object {
   $_ -notmatch '(^|/)(README|CHANGELOG)(\.|$)' -and
   $_ -notmatch '(^|/)tests/' -and
   $_ -notmatch '(^|/)\.env\.example$' -and
-  $_ -notmatch '^scripts/install-(minipc-services|production-task)\.ps1$'
+  $_ -notmatch '^scripts/(check-production-version|deploy-production|install-(minipc-services|production-task)|start-selfhost|verify-production)\.ps1$'
 }).Count -eq 0
 
 if ($documentationOnly) {
