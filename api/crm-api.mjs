@@ -397,8 +397,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS goods_receipts(id INTEGER PRIMARY KEY AUTOIN
 for (const column of ["purchase_invoice_id INTEGER", "validation_status TEXT DEFAULT 'Pendiente'", "validated_by TEXT", "validated_at TEXT"]) {
   try { db.exec(`ALTER TABLE goods_receipts ADD COLUMN ${column}`); } catch {}
 }
-db.exec(`CREATE TABLE IF NOT EXISTS goods_receipt_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,receipt_id INTEGER NOT NULL,product_id INTEGER NOT NULL,product_name_snapshot TEXT,expected_quantity REAL DEFAULT 0,received_quantity REAL DEFAULT 0,damaged_quantity REAL DEFAULT 0,substituted_quantity REAL DEFAULT 0,substitute_product_id INTEGER,unit_cost REAL DEFAULT 0,expected_value REAL DEFAULT 0,received_value REAL DEFAULT 0,economic_difference REAL DEFAULT 0,status TEXT DEFAULT 'Correcta',notes TEXT,location_verified_status TEXT DEFAULT 'Pendiente',location_verified_code TEXT,location_verified_reason TEXT,location_verified_by TEXT,location_verified_at TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
-for (const column of ["damaged_quantity REAL DEFAULT 0", "substituted_quantity REAL DEFAULT 0", "substitute_product_id INTEGER", "expected_value REAL DEFAULT 0", "received_value REAL DEFAULT 0", "economic_difference REAL DEFAULT 0", "location_verified_status TEXT DEFAULT 'Pendiente'", "location_verified_code TEXT", "location_verified_reason TEXT", "location_verified_by TEXT", "location_verified_at TEXT"]) {
+db.exec(`CREATE TABLE IF NOT EXISTS goods_receipt_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,receipt_id INTEGER NOT NULL,product_id INTEGER NOT NULL,product_name_snapshot TEXT,expected_quantity REAL DEFAULT 0,received_quantity REAL DEFAULT 0,damaged_quantity REAL DEFAULT 0,substituted_quantity REAL DEFAULT 0,substitute_product_id INTEGER,unit_cost REAL DEFAULT 0,expected_value REAL DEFAULT 0,received_value REAL DEFAULT 0,economic_difference REAL DEFAULT 0,status TEXT DEFAULT 'Correcta',lot_id INTEGER,lot_code TEXT,expiry_date TEXT,notes TEXT,location_verified_status TEXT DEFAULT 'Pendiente',location_verified_code TEXT,location_verified_reason TEXT,location_verified_by TEXT,location_verified_at TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
+for (const column of ["damaged_quantity REAL DEFAULT 0", "substituted_quantity REAL DEFAULT 0", "substitute_product_id INTEGER", "expected_value REAL DEFAULT 0", "received_value REAL DEFAULT 0", "economic_difference REAL DEFAULT 0", "lot_id INTEGER", "lot_code TEXT", "expiry_date TEXT", "location_verified_status TEXT DEFAULT 'Pendiente'", "location_verified_code TEXT", "location_verified_reason TEXT", "location_verified_by TEXT", "location_verified_at TEXT"]) {
   try { db.exec(`ALTER TABLE goods_receipt_lines ADD COLUMN ${column}`); } catch {}
 }
 db.exec(`CREATE TABLE IF NOT EXISTS goods_receipt_incidents(id INTEGER PRIMARY KEY AUTOINCREMENT,receipt_id INTEGER NOT NULL,receipt_line_id INTEGER,supplier_id INTEGER,type TEXT DEFAULT 'Diferencia',description TEXT NOT NULL,expected_quantity REAL,received_quantity REAL,damaged_quantity REAL DEFAULT 0,substituted_quantity REAL DEFAULT 0,substitute_product_id INTEGER,economic_difference REAL DEFAULT 0,status TEXT DEFAULT 'Abierta',attachment_name TEXT,attachment_mime TEXT,attachment_data TEXT,attachments_json TEXT,claim_status TEXT DEFAULT 'No reclamada',claim_message TEXT,claim_created_by TEXT,claim_created_at TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
@@ -1061,7 +1061,7 @@ const lookupFields = {
   invoices: ["id", "code", "order_id", "client_id", "amount", "status", "created_at", "issue_date", "due_date"],
   purchase_orders: ["id", "code", "supplier_id", "status", "order_date", "expected_date", "amount", "validation_status"],
   goods_receipts: ["id", "code", "supplier_id", "purchase_order_id", "purchase_invoice_id", "warehouse_id", "receipt_date", "status", "validation_status", "validated_by", "validated_at", "line_count", "incident_count", "received_by", "notes"],
-  goods_receipt_lines: ["id", "receipt_id", "product_id", "product_name_snapshot", "expected_quantity", "received_quantity", "damaged_quantity", "substituted_quantity", "substitute_product_id", "unit_cost", "expected_value", "received_value", "economic_difference", "status", "notes", "location_verified_status", "location_verified_code", "location_verified_reason", "location_verified_by", "location_verified_at"],
+  goods_receipt_lines: ["id", "receipt_id", "product_id", "product_name_snapshot", "expected_quantity", "received_quantity", "damaged_quantity", "substituted_quantity", "substitute_product_id", "unit_cost", "expected_value", "received_value", "economic_difference", "status", "lot_id", "lot_code", "expiry_date", "notes", "location_verified_status", "location_verified_code", "location_verified_reason", "location_verified_by", "location_verified_at"],
   goods_receipt_incidents: ["id", "receipt_id", "receipt_line_id", "supplier_id", "type", "description", "expected_quantity", "received_quantity", "damaged_quantity", "substituted_quantity", "substitute_product_id", "economic_difference", "status", "claim_status", "attachment_name", "attachment_mime", "created_by", "created_at"],
   payments: ["id", "invoice_id", "amount", "payment_date", "method"],
   inventory_movements: ["id", "product_id", "warehouse_id", "movement_type", "quantity", "stock_effect", "reference", "movement_date", "notes"],
@@ -2077,8 +2077,11 @@ export async function crmApiHandler(req, res) {
           const damaged = Math.min(received, Math.max(0, Number(input.damaged_quantity || 0)));
           const substituted = Math.min(received, Math.max(0, Number(input.substituted_quantity || 0)));
           const substituteProductId = Number(input.substitute_product_id || 0) || null;
+          const lotCode = String(input.lot_code || "").trim().slice(0, 120);
+          const expiryDate = String(input.expiry_date || "").trim().slice(0, 10) || null;
           if (!product) return send(res, 400, { error: "Uno de los productos no existe" });
           if (!Number.isFinite(expected) || expected < 0 || !Number.isFinite(received) || received < 0) return send(res, 400, { error: `Cantidad no válida para ${product.name}` });
+          if (expiryDate && !/^\d{4}-\d{2}-\d{2}$/.test(expiryDate)) return send(res, 400, { error: `Fecha de caducidad no válida para ${product.name}` });
           if (substituted > 0 && !substituteProductId) return send(res, 400, { error: `Selecciona el producto sustituto para ${product.name}` });
           if (substituteProductId && !db.prepare("SELECT id FROM products WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(substituteProductId)) return send(res, 400, { error: `El producto sustituto de ${product.name} no existe` });
           const rawAttachments = Array.isArray(input.attachments) ? input.attachments : [];
@@ -2097,7 +2100,7 @@ export async function crmApiHandler(req, res) {
           }
           const expectedValue = expected * Math.max(0, Number(input.unit_cost || 0));
           const receivedValue = received * Math.max(0, Number(input.unit_cost || 0));
-          lines.push({ productId, product, expected, received, damaged, substituted, substituteProductId, unitCost: Math.max(0, Number(input.unit_cost || 0)), expectedValue, receivedValue, economicDifference: receivedValue - expectedValue, status, notes: String(input.notes || "").trim(), incidentDescription: String(input.incident_description || "").trim(), attachments });
+          lines.push({ productId, product, expected, received, damaged, substituted, substituteProductId, lotCode, expiryDate, unitCost: Math.max(0, Number(input.unit_cost || 0)), expectedValue, receivedValue, economicDifference: receivedValue - expectedValue, status, notes: String(input.notes || "").trim(), incidentDescription: String(input.incident_description || "").trim(), attachments });
         }
         if (!lines.length) return send(res, 400, { error: "Las líneas deben tener alguna cantidad recibida o una incidencia" });
         const hasIncident = lines.some((line) => line.status !== "Correcta" || line.incidentDescription || line.attachments.length || line.damaged > 0 || line.substituted > 0 || (line.expected !== line.received));
@@ -2110,17 +2113,29 @@ export async function crmApiHandler(req, res) {
         try {
           const created = db.prepare("INSERT INTO goods_receipts(code,supplier_id,purchase_order_id,purchase_invoice_id,warehouse_id,receipt_date,status,validation_status,validated_by,validated_at,notes,created_by,received_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(code, supplierId, purchaseOrderId, purchaseInvoiceId, warehouseId, receiptDate, status, validationStatus, validatedBy, validatedAt, String(d.notes || "").trim(), actor, String(d.received_by || actor), now, now);
           const receiptId = Number(created.lastInsertRowid);
-          const insertLine = db.prepare("INSERT INTO goods_receipt_lines(receipt_id,product_id,product_name_snapshot,expected_quantity,received_quantity,damaged_quantity,substituted_quantity,substitute_product_id,unit_cost,expected_value,received_value,economic_difference,status,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+          const insertLine = db.prepare("INSERT INTO goods_receipt_lines(receipt_id,product_id,product_name_snapshot,expected_quantity,received_quantity,damaged_quantity,substituted_quantity,substitute_product_id,unit_cost,expected_value,received_value,economic_difference,status,lot_code,expiry_date,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
           const insertMovement = db.prepare("INSERT INTO inventory_movements(product_id,warehouse_id,movement_type,quantity,reference,movement_date,notes,receipt_id,created_by) VALUES(?,?,?,?,?,?,?,?,?)");
+          const findLot = db.prepare("SELECT id FROM product_lots WHERE product_id=? AND lot_code=? AND (warehouse_id=? OR warehouse_id IS NULL) ORDER BY id LIMIT 1");
+          const insertLot = db.prepare("INSERT INTO product_lots(product_id,lot_code,quantity,waste_quantity,expiry_date,received_date,warehouse_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)");
+          const updateLot = db.prepare("UPDATE product_lots SET quantity=COALESCE(quantity,0)+?,waste_quantity=COALESCE(waste_quantity,0)+?,expiry_date=COALESCE(?,expiry_date),received_date=COALESCE(?,received_date),warehouse_id=COALESCE(warehouse_id,?),updated_at=? WHERE id=?");
+          const updateLineLot = db.prepare("UPDATE goods_receipt_lines SET lot_id=? WHERE id=?");
           const insertIncident = db.prepare("INSERT INTO goods_receipt_incidents(receipt_id,receipt_line_id,supplier_id,type,description,expected_quantity,received_quantity,damaged_quantity,substituted_quantity,substitute_product_id,economic_difference,status,attachment_name,attachment_mime,attachment_data,attachments_json,claim_status,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
           const incidents = [];
           for (const line of lines) {
-            const lineResult = insertLine.run(receiptId, line.productId, line.product.name, line.expected, line.received, line.damaged, line.substituted, line.substituteProductId, line.unitCost, line.expectedValue, line.receivedValue, line.economicDifference, line.status, line.notes, now, now);
+            const lineResult = insertLine.run(receiptId, line.productId, line.product.name, line.expected, line.received, line.damaged, line.substituted, line.substituteProductId, line.unitCost, line.expectedValue, line.receivedValue, line.economicDifference, line.status, line.lotCode || null, line.expiryDate, line.notes, now, now);
             const lineId = Number(lineResult.lastInsertRowid);
             const usableOriginal = Math.max(0, line.received - line.damaged - line.substituted);
             if (usableOriginal > 0) {
               insertMovement.run(line.productId, warehouseId, "Entrada", usableOriginal, code, receiptDate, `Recepción ${code} · ${line.product.name}`, receiptId, actor);
               db.prepare("UPDATE products SET stock=COALESCE(stock,0)+?,cost_price=CASE WHEN ? > 0 THEN ? ELSE cost_price END,real_cost=CASE WHEN ? > 0 THEN ? ELSE real_cost END,updated_at=? WHERE id=?").run(usableOriginal, line.unitCost, line.unitCost, line.unitCost, line.unitCost, now, line.productId);
+            }
+            if (line.lotCode && (usableOriginal > 0 || line.damaged > 0)) {
+              const existingLot = findLot.get(line.productId, line.lotCode, warehouseId);
+              const lotId = existingLot
+                ? Number(existingLot.id)
+                : Number(insertLot.run(line.productId, line.lotCode, usableOriginal, line.damaged, line.expiryDate, receiptDate, warehouseId, now, now).lastInsertRowid);
+              if (existingLot) updateLot.run(usableOriginal, line.damaged, line.expiryDate, receiptDate, warehouseId, now, lotId);
+              updateLineLot.run(lotId, lineId);
             }
             if (line.substituteProductId && line.substituted > 0) {
               insertMovement.run(line.substituteProductId, warehouseId, "Entrada", line.substituted, code, receiptDate, `Sustitución en recepción ${code} · ${line.product.name}`, receiptId, actor);
