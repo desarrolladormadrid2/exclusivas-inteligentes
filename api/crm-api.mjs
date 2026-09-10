@@ -2378,6 +2378,10 @@ export async function crmApiHandler(req, res) {
         const order = db.prepare("SELECT * FROM orders WHERE id=?").get(orderId);
         if (!order) return send(res, 404, { error: "Pedido no encontrado" });
         const delivery = action === "convert-delivery";
+        if (delivery) {
+          const existingDelivery = db.prepare("SELECT id,code FROM delivery_notes WHERE order_id=? AND COALESCE(deleted,0)=0 ORDER BY id DESC LIMIT 1").get(order.id);
+          if (existingDelivery) return send(res, 409, { error: `El pedido ${order.code} ya tiene el albarán ${existingDelivery.code}`, ...existingDelivery });
+        }
         if (!delivery) {
           const existingInvoice = db.prepare("SELECT i.code FROM invoices i LEFT JOIN invoice_orders io ON io.invoice_id=i.id AND io.order_id=? WHERE (i.order_id=? OR io.order_id=?) AND COALESCE(i.status,'')<>'Anulada' AND COALESCE(i.deleted,0)=0 LIMIT 1").get(order.id, order.id, order.id);
           if (order.status === "Facturado" || existingInvoice) return send(res, 409, { error: `El pedido ${order.code} ya está facturado${existingInvoice?.code ? ` en ${existingInvoice.code}` : ""}` });

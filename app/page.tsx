@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.82";
+const APP_VERSION = "2.0.83";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const initialModules = [
@@ -3826,20 +3826,33 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   async function convertOrder(row: any, type: "invoice" | "delivery") {
     const r = await fetch(
       `/api/orders/convert-${type}/${row.id}`,
-      { method: "POST" },
+      { method: "POST", headers: actorHeaders },
     );
     const d = await r.json();
     if (!r.ok) return alert(d.error || "No se pudo generar el documento");
     alert(
       `${type === "invoice" ? "Factura" : "Albarán"} ${d.code} creado correctamente`,
     );
+    const nextStatus = type === "invoice" ? "Facturado" : "Preparado";
+    const nextValues = type === "invoice"
+      ? { status: nextStatus, billing_status: "Facturado", invoice_id: d.id }
+      : { status: nextStatus, shipping_status: "Preparado", delivery_note_id: d.id };
     setRows((current) =>
       current.map((x) =>
         x.id === row.id
-          ? { ...x, status: type === "invoice" ? "Facturado" : "Preparado" }
+          ? { ...x, ...nextValues }
           : x,
       ),
     );
+    setForm((current: any) => current?.id === row.id ? { ...current, ...nextValues } : current);
+    setEditing((current: any) => current?.id === row.id ? { ...current, ...nextValues } : current);
+    const resource = type === "invoice" ? "invoices" : "delivery_notes";
+    try {
+      const refreshed = await fetch(`/api/${resource}?refresh=${Date.now()}`, { cache: "no-store" }).then((response) => response.ok ? response.json() : []);
+      setLookups((current: any) => ({ ...current, [resource]: Array.isArray(refreshed) ? refreshed : [d, ...(current[resource] || [])] }));
+    } catch {
+      setLookups((current: any) => ({ ...current, [resource]: [d, ...(current[resource] || [])] }));
+    }
   }
   async function convertDeliveryToInvoice(row: any) {
     const r = await fetch(
@@ -5181,7 +5194,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             <>
             {editing && <div className="order-record-toolbar" role="toolbar" aria-label="Acciones del pedido">
               <div><b>{isOrderSent(editing) ? "Pedido cerrado" : "Pedido editable"}</b><small>{isOrderSent(editing) ? "El pedido ya ha salido del almacén; consulta su documento desde aquí." : "Puedes modificar los datos y las líneas antes de enviarlo."}</small></div>
-              <div>{!isOrderSent(editing) && <>{editing.status === "Bloqueado" || editing.status === "Pospuesto" ? <button type="button" className="button primary" onClick={() => void manageOrder(editing, "Pendiente")}>Reactivar pedido</button> : <><button type="button" className="button secondary" onClick={() => void manageOrder(editing, "Bloqueado")}>Bloquear pedido</button><button type="button" className="button secondary" onClick={() => void manageOrder(editing, "Pospuesto")}>Posponer pedido</button></>}<button type="button" className="button danger" onClick={() => void manageOrder(editing, "Cancelado")}>Anular pedido</button></>}{<button type="button" className="button secondary" onClick={() => void openPreview(editing)}>Ver detalle</button>}{getOrderShipment(editing) ? <button type="button" className="button workflow" onClick={() => void openOrderLoadNote(editing)}>Abrir nota de carga</button> : <button type="button" className="button workflow" onClick={() => void createOrderLoadNote(editing)}>Crear nota de carga</button>}</div>
+              <div>{!isOrderSent(editing) && <>{editing.status === "Bloqueado" || editing.status === "Pospuesto" ? <button type="button" className="button primary" onClick={() => void manageOrder(editing, "Pendiente")}>Reactivar pedido</button> : <><button type="button" className="button secondary" onClick={() => void manageOrder(editing, "Bloqueado")}>Bloquear pedido</button><button type="button" className="button secondary" onClick={() => void manageOrder(editing, "Pospuesto")}>Posponer pedido</button></>}<button type="button" className="button danger" onClick={() => void manageOrder(editing, "Cancelado")}>Anular pedido</button></>}{<button type="button" className="button secondary" onClick={() => void openPreview(editing)}>Ver detalle</button>}{getOrderShipment(editing) ? <button type="button" className="button workflow" onClick={() => void openOrderLoadNote(editing)}>Abrir nota de carga</button> : <button type="button" className="button workflow" onClick={() => void createOrderLoadNote(editing)}>Crear nota de carga</button>}<button type="button" className="button secondary" onClick={() => void convertOrder(editing, "delivery")} disabled={Boolean(editing.delivery_note_id)}>Crear albarán</button><button type="button" className="button primary" onClick={() => void convertOrder(editing, "invoice")} disabled={getOrderBillingStatus(editing) === "Facturado"}>Crear factura</button></div>
             </div>}
             <details className="order-general-accordion" open>
               <summary><b>Datos generales del pedido</b><span><em className="order-created-date">Fecha del pedido: {formatSpanishDateValue(String(form.created_at || tabletTodayInput()).slice(0, 10), false)}</em> · {orderGeneralComplete ? <em className="accordion-complete" title="Campos obligatorios completos">✓ Completo</em> : <em className="accordion-pending">Pendiente de completar</em>} · Mostrar más/menos</span></summary>
