@@ -723,6 +723,20 @@ try { db.exec("ALTER TABLE order_lines ADD COLUMN prepared INTEGER DEFAULT 0"); 
 try { db.exec("ALTER TABLE order_lines ADD COLUMN prepared_quantity REAL DEFAULT 0"); } catch {}
 try { db.exec("ALTER TABLE order_lines ADD COLUMN preparation_status TEXT DEFAULT 'Pendiente'"); } catch {}
 for (const column of ["incident_resolution", "incident_resolved_at", "incident_resolved_by"]) { try { db.exec(`ALTER TABLE order_lines ADD COLUMN ${column} TEXT`); } catch {} }
+// Recupera las indicaciones de pedidos antiguos en sus notas de carga cuando
+// estas se crearon con el texto genérico anterior. La condición evita tocar
+// anotaciones que el almacén ya haya escrito manualmente.
+try {
+  const legacyShipmentNotes = db.prepare("SELECT s.id,s.urgent,o.notes FROM shipments s JOIN orders o ON o.id=s.order_id WHERE TRIM(COALESCE(o.notes,''))<>'' AND TRIM(COALESCE(s.notes,'')) IN ('', 'Preparación pendiente de revisión.', 'Nota de carga creada desde el pedido.')").all();
+  const updateLegacyShipmentNotes = db.prepare("UPDATE shipments SET notes=? WHERE id=?");
+  for (const shipment of legacyShipmentNotes) {
+    const notes = [
+      Number(shipment.urgent || 0) === 1 ? "PEDIDO URGENTE · Revisar todas las líneas antes de preparar." : "",
+      String(shipment.notes || "").trim(),
+    ].filter(Boolean).join("\n");
+    if (notes) updateLegacyShipmentNotes.run(notes, Number(shipment.id));
+  }
+} catch {}
 if (!db.prepare("SELECT COUNT(*) n FROM users").get().n) {
   db.prepare("INSERT INTO users(username,password,role) VALUES(?,?,?)").run(
     "Luis",
