@@ -5,6 +5,13 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createRemoteDatabaseSync } from "../remote-db-sync.mjs";
+const APP_VERSION = (() => {
+  try {
+    return String(JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version || "desconocida");
+  } catch {
+    return "desconocida";
+  }
+})();
 const dir = join(process.cwd(), "data");
 const envPath = join(process.cwd(), ".env.local");
 if (existsSync(envPath)) {
@@ -1322,6 +1329,9 @@ export async function crmApiHandler(req, res) {
       .split("/")
       .filter(Boolean);
     try {
+      if (p[1] === "version" && req.method === "GET") {
+        return send(res, 200, { ok: true, version: APP_VERSION, environment: process.env.NODE_ENV || "production" });
+      }
       const actor = req.headers["x-actor"] || "Usuario local";
       if (p[1] === "public" && p[2] === "shipments" && p[3] && req.method === "GET") {
         const trackingToken = decodeURIComponent(String(p[3]));
