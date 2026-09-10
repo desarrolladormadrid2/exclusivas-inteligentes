@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.73";
+const APP_VERSION = "2.0.74";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const initialModules = [
@@ -4957,6 +4957,12 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const isOrderForm = c.api === "orders";
   const formEntity = active === "Facturas" && form.status === "Proforma" ? "proforma" : (isOrderForm ? "pedido" : (createActionLabels[active] || "Crear registro").replace(/^Crear /, ""));
   const formTitle = `${editing ? "Editar" : "Crear"} ${formEntity}`;
+  const orderScheduleFields = ["preparation_date", "shipping_date", "delivery_date"];
+  const orderScheduleHelp: Record<string, string> = {
+    preparation_date: "El almacén prepara las líneas este día.",
+    shipping_date: "El pedido sale con el reparto este día.",
+    delivery_date: "Fecha prevista de llegada al cliente.",
+  };
   return (
     <>
     <div className={`manager${isLoadPreparation ? " load-preparation-manager" : ""}`}>
@@ -5123,9 +5129,26 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             <details className="order-general-accordion" open>
               <summary><b>Datos generales del pedido</b><span><em className="order-created-date">Fecha del pedido: {formatSpanishDateValue(String(form.created_at || tabletTodayInput()).slice(0, 10), false)}</em> · {orderGeneralComplete ? <em className="accordion-complete" title="Campos obligatorios completos">✓ Completo</em> : <em className="accordion-pending">Pendiente de completar</em>} · Mostrar más/menos</span></summary>
               <div className="order-general-fields">
-                {c.fields.filter((f: string) => !["product_id", "quantity", "unit_price", "discount", "amount", "billing_status", "payment_status", "shipping_status", "prepared_by", "shipped_by", "delivered_by"].includes(f)).map((f: string) => renderFormField(f, c.fields.indexOf(f)))}
+                {c.fields.filter((f: string) => !["product_id", "quantity", "unit_price", "discount", "amount", "billing_status", "payment_status", "shipping_status", "prepared_by", "shipped_by", "delivered_by", ...orderScheduleFields].includes(f)).map((f: string) => renderFormField(f, c.fields.indexOf(f)))}
               </div>
             </details>
+            <section className="order-schedule-panel" aria-labelledby="order-schedule-title">
+              <div className="order-schedule-head">
+                <div>
+                  <b id="order-schedule-title">Planificación del pedido</b>
+                  <small>Estas fechas organizan la preparación del almacén, la salida y la entrega.</small>
+                </div>
+                <span>Preparación → envío → entrega</span>
+              </div>
+              <div className="order-schedule-grid">
+                {orderScheduleFields.map((field) => (
+                  <div className={`order-schedule-card order-schedule-${field.replace("_date", "")}`} key={field}>
+                    {renderFormField(field, c.fields.indexOf(field))}
+                    <small>{orderScheduleHelp[field]}</small>
+                  </div>
+                ))}
+              </div>
+            </section>
             </>
           ) : c.fields.map((f: string) => renderFormField(f, c.fields.indexOf(f)))}
           {(active === "Presupuestos" || isOrderForm) && (
