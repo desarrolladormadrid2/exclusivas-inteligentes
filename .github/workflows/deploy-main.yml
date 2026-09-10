@@ -27,25 +27,25 @@ jobs:
           fetch-depth: 2
 
       - name: Install dependencies
-        shell: powershell
+        shell: powershell -ExecutionPolicy Bypass -Command "& '{0}'"
         run: npm ci
 
       - name: Run tests
-        shell: powershell
+        shell: powershell -ExecutionPolicy Bypass -Command "& '{0}'"
         run: npm test
 
       - name: Build production bundle
-        shell: powershell
+        shell: powershell -ExecutionPolicy Bypass -Command "& '{0}'"
         run: npm run build
 
       - name: Validate production version
-        shell: powershell
+        shell: powershell -ExecutionPolicy Bypass -Command "& '{0}'"
         run: .\scripts\check-production-version.ps1
 
       - name: Deploy and restart CRM
-        shell: powershell
+        shell: powershell -ExecutionPolicy Bypass -Command "& '{0}'"
         run: .\scripts\deploy-production.ps1
 
       - name: Verify production endpoints
-        shell: powershell
+        shell: powershell -ExecutionPolicy Bypass -Command "& '{0}'"
         run: .\scripts\verify-production.ps1
