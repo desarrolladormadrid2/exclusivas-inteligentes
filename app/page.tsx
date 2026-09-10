@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.76";
+const APP_VERSION = "2.0.77";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const initialModules = [
@@ -2511,6 +2511,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const [preparationAnnotationError, setPreparationAnnotationError] = useState("");
   const [preparationScanMessage, setPreparationScanMessage] = useState<{ text: string; kind: "success" | "warning" | "error" } | null>(null);
   const [preparationLineSavingId, setPreparationLineSavingId] = useState<number | null>(null);
+  const [preparationAssignee, setPreparationAssignee] = useState("");
+  const [preparationAssigneeSaving, setPreparationAssigneeSaving] = useState(false);
   const [preparationValidationMessage, setPreparationValidationMessage] = useState("");
   const [preparationAddressDraft, setPreparationAddressDraft] = useState("");
   const [preparationCityDraft, setPreparationCityDraft] = useState("");
@@ -2694,6 +2696,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     purchase_orders: [],
     payments: [],
     inventory_movements: [],
+    users: [],
   });
   const getClient = (id: any) => (lookups.clients || []).find((item: any) => Number(item.id) === Number(id));
   useEffect(() => {
@@ -2828,7 +2831,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       Compras: ["suppliers", "products", "purchase_orders", "invoices"],
       "Compras inteligentes": ["suppliers", "products", "purchase_orders"],
       Almacenes: ["warehouses", "products"],
-      "Preparación de pedidos": ["clients", "orders", "products", "collection_points", "shipments"],
+      "Preparación de pedidos": ["clients", "orders", "products", "collection_points", "shipments", "users"],
       "Lugares de recogida": ["clients", "collection_points"],
       Entradas: ["products", "warehouses", "suppliers", "purchase_orders", "invoices"],
       Salidas: ["clients", "orders", "collection_points", "shipments"],
@@ -3996,6 +3999,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       setPreparationAnnotationError("");
       setPreparationScanMessage(null);
       setPreparationValidationMessage("");
+      setPreparationAssignee(String(row.prepared_by || user?.username || ""));
       const rowLocation = (lookups.collection_points || []).find((item: any) => Number(item.id) === Number(row.collection_point_id));
       const rowClient = (lookups.clients || []).find((item: any) => Number(item.id) === Number(row.client_id));
       setPreparationAddressDraft(String(row.address || rowLocation?.address || rowClient?.address || ""));
@@ -4227,15 +4231,29 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     if (saved) setPreparationValidationMessage(`Línea validada: ${productOptions.find((product: any) => Number(product.id) === Number(line.product_id))?.name || "producto"}.`);
     setPreparationLineSavingId(null);
   }
-  async function startPreparation() {
-    if (!preview?.id || !isLoadPreparation || ["Preparado", "Preparado con incidencia"].includes(String(preview.status || "")) || (String(preview.status || "") === "Preparando" && String(preview.prepared_by || "").trim())) return;
+  async function startPreparation(assignee = preparationAssignee) {
+    const selectedAssignee = String(assignee || user?.username || "").trim();
+    if (!preview?.id || !isLoadPreparation || !selectedAssignee || ["Preparado", "Preparado con incidencia"].includes(String(preview.status || ""))) return;
+    if (String(preview.status || "") === "Preparando" && String(preview.prepared_by || "").trim() === selectedAssignee) return;
+    setPreparationAssigneeSaving(true);
+    setError("");
     const now = new Date().toISOString();
-    const startedBy = user?.username || "Usuario local";
-    const changes = { status: "Preparando", prepared_by: startedBy, preparation_started_at: now, preparation_started_by: startedBy };
-    const response = await fetch(`/api/shipments/${preview.id}`, { method: "PUT", headers: actorHeaders, body: JSON.stringify({ ...preview, ...changes }) });
-    if (!response.ok) return setError("No se pudo iniciar la preparación. Revisa la conexión e inténtalo de nuevo.");
-    setPreview((current: any) => current ? { ...current, ...changes } : current);
-    setRows((current) => current.map((item) => item.id === preview.id ? { ...item, ...changes } : item));
+    const changes = {
+      status: "Preparando",
+      prepared_by: selectedAssignee,
+      preparation_started_at: preview.preparation_started_at || now,
+      preparation_started_by: preview.preparation_started_by || selectedAssignee,
+    };
+    try {
+      const response = await fetch(`/api/shipments/${preview.id}`, { method: "PUT", headers: actorHeaders, body: JSON.stringify({ ...preview, ...changes }) });
+      if (!response.ok) throw new Error("No se pudo asignar la preparación.");
+      setPreview((current: any) => current ? { ...current, ...changes } : current);
+      setRows((current) => current.map((item) => item.id === preview.id ? { ...item, ...changes } : item));
+    } catch {
+      setError("No se pudo asignar la preparación. Revisa la conexión e inténtalo de nuevo.");
+    } finally {
+      setPreparationAssigneeSaving(false);
+    }
   }
   async function openPreparationRow(row: any) {
     if (!row?._virtual_order) return openPreview(row);
@@ -4562,6 +4580,17 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const timeFields = new Set(["opening_time", "closing_time", "delivery_window_start", "delivery_window_end"]);
   const isDateField = (field: string) => dateFields.has(field) || field.endsWith("_date") || field.endsWith("_at");
   const isLoadPreparation = active === "Preparación de pedidos";
+  const preparationAssigneeOptions = (lookups.users || [])
+    .filter((candidate: any) => {
+      if (Number(candidate.deleted || 0) === 1) return false;
+      if (["admin", "almacen"].includes(String(candidate.role || ""))) return true;
+      try {
+        return JSON.parse(candidate.permissions || "[]").includes("Preparación de pedidos");
+      } catch { return false; }
+    })
+    .sort((a: any, b: any) => String(a.username || "").localeCompare(String(b.username || ""), "es"));
+  const currentUsername = String(user?.username || "Usuario local");
+  const preparationAssigneeNames = new Set(preparationAssigneeOptions.map((candidate: any) => String(candidate.username || "")));
   const usesRecordModal = ["Clientes", "Proveedores", "Almacenes", "Lugares de recogida", "Productos"].includes(active);
   const previewLocation = preview ? (lookups.collection_points || []).find((item: any) => Number(item.id) === Number(preview.collection_point_id)) : null;
   const previewLatValue = Number(previewLocation?.latitude ?? previewClient?.latitude);
@@ -5700,10 +5729,18 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
               {preparationAddressMessage && <p className="preparation-address-success" role="status">{preparationAddressMessage}</p>}
               <div className="preparation-delivery-actions"><button type="button" className="button primary" onClick={() => void savePreparationDeliveryAddress()} disabled={preparationAddressSaving}>{preparationAddressSaving ? "Guardando…" : "Guardar dirección"}</button></div>
             </section>}
-            {isLoadPreparation && (!["Preparado", "Preparado con incidencia"].includes(String(preview.status || "")) && (!String(preview.prepared_by || "").trim() || String(preview.status || "") !== "Preparando")) && (
+            {isLoadPreparation && !["Preparado", "Preparado con incidencia"].includes(String(preview.status || "")) && (
               <div className="preparation-start-banner">
-                <div><b>{String(preview.status || "") === "Preparando" ? "Preparación sin responsable asignado" : "Pedido pendiente de preparar"}</b><small>Al iniciar quedará asignado a {user?.username || "tu usuario"} con fecha y hora.</small></div>
-                <button type="button" className="button primary" onClick={() => void startPreparation()}>{String(preview.status || "") === "Preparando" ? "Asignarme la preparación" : "Empezar preparación"}</button>
+                <div><b>{preview.prepared_by ? "Responsable de preparación" : "Pedido pendiente de preparar"}</b><small>{preview.prepared_by ? `Asignado actualmente a ${preview.prepared_by}. Puedes cambiarlo antes de continuar.` : "Elige quién preparará este pedido. Se registrarán la persona y la hora de inicio."}</small></div>
+                <div className="preparation-assignment-controls">
+                  <label>Preparará<select aria-label="Responsable de preparación" value={preparationAssignee} onChange={(event) => setPreparationAssignee(event.target.value)} disabled={preparationAssigneeSaving}>
+                    {!preparationAssignee && <option value="">Selecciona una persona…</option>}
+                    {preparationAssignee && !preparationAssigneeNames.has(preparationAssignee) && <option value={preparationAssignee}>{preparationAssignee} · responsable actual</option>}
+                    {!preparationAssigneeNames.has(currentUsername) && <option value={currentUsername}>{currentUsername} · usuario actual</option>}
+                    {preparationAssigneeOptions.map((candidate: any) => <option key={candidate.id || candidate.username} value={candidate.username}>{candidate.username}{candidate.role === "admin" ? " · administrador" : candidate.role === "almacen" ? " · almacén" : ""}</option>)}
+                  </select></label>
+                  <button type="button" className="button primary" disabled={preparationAssigneeSaving || !preparationAssignee || (String(preview.status || "") === "Preparando" && String(preview.prepared_by || "") === preparationAssignee)} onClick={() => void startPreparation()}>{preparationAssigneeSaving ? "Guardando…" : preview.prepared_by ? "Guardar responsable" : preparationAssignee === currentUsername ? "Empezar preparación" : "Asignar y empezar"}</button>
+                </div>
               </div>
             )}
             {isLoadPreparation && (
