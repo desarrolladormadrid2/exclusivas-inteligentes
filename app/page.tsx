@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.69";
+const APP_VERSION = "2.0.70";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const initialModules = [
@@ -2682,6 +2682,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const [lookups, setLookups] = useState<any>({
     clients: [],
     products: [],
+    product_lots: [],
     warehouses: [],
     suppliers: [],
     collection_points: [],
@@ -2816,8 +2817,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   }, [active, showDeleted, showInactive]);
   useEffect(() => {
     const lookupResourcesByActive: Record<string, string[]> = {
-      Productos: ["suppliers", "warehouses"],
-      Stock: ["products", "warehouses", "inventory_movements"],
+      Productos: ["suppliers", "warehouses", "product_lots"],
+      Stock: ["products", "warehouses", "inventory_movements", "product_lots"],
       Envíos: ["clients", "orders", "collection_points", "shipments"],
       Clientes: ["clients", "collection_points", "invoices", "payments"],
       Contactos: ["clients", "suppliers"],
@@ -4752,6 +4753,49 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     if (minimum > 0 && available <= minimum * 1.25) return "stock-cell-caution";
     return "stock-cell-ok";
   };
+  const productLotsForRow = (row: any) => (lookups.product_lots || [])
+    .filter((lot: any) => Number(lot.product_id) === Number(row.product_id ?? row.id))
+    .sort((a: any, b: any) => String(a.expiry_date || "9999-12-31").localeCompare(String(b.expiry_date || "9999-12-31")) || String(a.lot_code || "").localeCompare(String(b.lot_code || ""), "es", { numeric: true }));
+  const lotExpiryInfo = (value: any) => {
+    const expiry = String(value || "").slice(0, 10);
+    if (!expiry) return { label: "Sin fecha", tone: "neutral" };
+    const today = new Date(`${tabletTodayInput()}T00:00:00`);
+    const date = new Date(`${expiry}T00:00:00`);
+    const days = Math.ceil((date.getTime() - today.getTime()) / 86400000);
+    if (days < 0) return { label: "Caducado", tone: "expired" };
+    if (days <= 30) return { label: days === 0 ? "Caduca hoy" : `Caduca en ${days} días`, tone: "soon" };
+    return { label: `Caduca ${formatSpanishDateValue(expiry, false)}`, tone: "ok" };
+  };
+  const renderProductLots = (row: any) => {
+    const lotRows = productLotsForRow(row);
+    const availableTotal = lotRows.reduce((sum: number, lot: any) => sum + Number(lot.quantity || 0), 0);
+    const attentionLots = lotRows.filter((lot: any) => ["expired", "soon"].includes(lotExpiryInfo(lot.expiry_date).tone));
+    return (
+      <td className="product-lots-cell" data-label="Lotes">
+        <details className="stock-lots-accordion">
+          <summary>
+            <span>{lotRows.length ? `${lotRows.length} ${lotRows.length === 1 ? "lote" : "lotes"}` : "Sin lotes"}</span>
+            <b>{availableTotal.toLocaleString("es-ES")} uds.</b>
+            {attentionLots.length > 0 && <em className="lot-expiry-warning">{attentionLots.length} con caducidad próxima</em>}
+          </summary>
+          {lotRows.length > 0 ? (
+            <div className="stock-lots-detail">
+              {lotRows.map((lot: any) => {
+                const expiry = lotExpiryInfo(lot.expiry_date);
+                return <div className="stock-lot-row" key={lot.id}>
+                  <strong>{lot.lot_code || `Lote #${lot.id}`}</strong>
+                  <span>{Number(lot.quantity || 0).toLocaleString("es-ES")} uds. disponibles</span>
+                  <span className={`lot-expiry-${expiry.tone}`}>{expiry.label}</span>
+                  {(Number(lot.quarantine_quantity || 0) > 0 || Number(lot.waste_quantity || 0) > 0) && <small>Cuaren. {Number(lot.quarantine_quantity || 0).toLocaleString("es-ES")} · Merma {Number(lot.waste_quantity || 0).toLocaleString("es-ES")}</small>}
+                </div>;
+              })}
+              <small className="stock-lots-total">Total lotes disponibles: <b>{availableTotal.toLocaleString("es-ES")}</b> · Stock del producto: <b>{Number(row.stock || 0).toLocaleString("es-ES")}</b></small>
+            </div>
+          ) : <p className="stock-lots-empty">No hay lotes registrados para este producto. El stock histórico se conserva, pero necesita una recepción o regularización con lote para completar la trazabilidad.</p>}
+        </details>
+      </td>
+    );
+  };
   const renderFormField = (f: string, i: number) => (
     <label key={f}>
       <span className={(active === "Pedidos" && ["client_id", "collection_point_id"].includes(f)) || (active === "Productos" && ["name", "sku", "description", "category", "unit", "created_at", "warehouse_id", "warehouse_location", "inventory_valuation_method", "cost_price", "last_direct_cost", "markup_percent", "unit_price", "accounting_product_group", "accounting_vat_group", "inventory_register_group", "product_tracking_code", "supplier_id"].includes(f)) ? "field-label-required" : undefined}>{active === "Pedidos" && f === "collection_point_id" ? "Lugar de envío" : active === "Productos" && f === "unit" ? "Unidad de medida base" : c.labels[i]}</span>
@@ -5310,12 +5354,13 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                     <button type="button" className="table-sort-button" onClick={() => { setStockSort("none"); setDateSort(null); setTableSort((current) => current?.field === f ? { field: f, direction: current.direction === "asc" ? "desc" : "asc" } : { field: f, direction: "asc" }); }} aria-label={`Ordenar ${c.labels[c.fields.indexOf(f)] || f}`} title="Ordenar columna">{c.labels[c.fields.indexOf(f)] || f}<span aria-hidden="true">{tableSort?.field === f ? (tableSort.direction === "asc" ? " ↑" : " ↓") : " ↕"}</span></button>
                   </th>
                 ))}
+                {(active === "Stock" || active === "Productos") && <th className="product-lots-column">LOTES</th>}
                 <th>ACCIONES</th>
               </tr>
             </thead>
             <tbody>
               {pagedRows.map((r) => (
-                  <tr key={r.id ?? r.product_id} data-inline-row={r.id ?? r.product_id} data-row-modal={active === "Presupuestos" || active === "Pedidos" || active === "Envíos" || usesRecordModal || active === "Entradas" ? "true" : undefined} className={`${isProducts && Number(r.stock || 0) - Number(r.stock_reserved || 0) <= Number(r.min_stock || 0) ? "product-row-critical" : ""}${isLoadPreparation && Number(r.urgent) === 1 ? " prep-row-urgent" : ""}${isLoadPreparation && r.status === "Preparado con incidencia" ? " prep-row-incident" : ""}${Number(r.deleted) === 1 ? " deleted-row" : ""}${active === "Pedidos" ? " order-list-row" : ""}`} onClick={(event) => { if (inlineEditing === (r.id ?? r.product_id) || (event.target as HTMLElement).closest("button, input, select, textarea, a")) return; if (active === "Entradas") { void openEntryDetail(r); return; } if (active === "Envíos") { void openPreview(r); return; } if (active === "Presupuestos" || active === "Pedidos") { if (active === "Pedidos" && isOrderSent(r)) void openPreview(r); else void openRecordModal(r); return; } if (isLoadPreparation) { void openPreparationRow(r); return; } if (usesRecordModal) { void openRecordModal(r); return; } beginInline(r); }}>
+                  <tr key={r.id ?? r.product_id} data-inline-row={r.id ?? r.product_id} data-row-modal={active === "Presupuestos" || active === "Pedidos" || active === "Envíos" || usesRecordModal || active === "Entradas" ? "true" : undefined} className={`${isProducts && Number(r.stock || 0) - Number(r.stock_reserved || 0) <= Number(r.min_stock || 0) ? "product-row-critical" : ""}${isLoadPreparation && Number(r.urgent) === 1 ? " prep-row-urgent" : ""}${isLoadPreparation && r.status === "Preparado con incidencia" ? " prep-row-incident" : ""}${Number(r.deleted) === 1 ? " deleted-row" : ""}${active === "Pedidos" ? " order-list-row" : ""}`} onClick={(event) => { if (inlineEditing === (r.id ?? r.product_id) || (event.target as HTMLElement).closest("button, input, select, textarea, a, details, summary")) return; if (active === "Entradas") { void openEntryDetail(r); return; } if (active === "Envíos") { void openPreview(r); return; } if (active === "Presupuestos" || active === "Pedidos") { if (active === "Pedidos" && isOrderSent(r)) void openPreview(r); else void openRecordModal(r); return; } if (isLoadPreparation) { void openPreparationRow(r); return; } if (usesRecordModal) { void openRecordModal(r); return; } beginInline(r); }}>
                     {isProducts && <td className="product-check-column" data-label="Seleccionar"><input type="checkbox" checked={selectedProductIds.includes(Number(r.id))} onChange={() => toggleProductSelection(Number(r.id))} aria-label={`Seleccionar ${r.name}`} /></td>}
                     {isProducts && <td className="product-image-column" data-label="Imagen"><button type="button" className={`product-thumbnail-button${productImageSource(r) ? "" : " product-reference-thumbnail"}`} onClick={() => setProductDetail(r)} aria-label={`Abrir imagen de ${r.name}`}>{<img src={productDisplayImageSource(r)} alt={productImageSource(r) ? "" : `Imagen de referencia para ${r.name}`} loading="lazy" />}</button></td>}
                     {visibleFields.map((f: string) => (
@@ -5341,6 +5386,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                         )}
                       </td>
                     ))}
+                    {(active === "Stock" || active === "Productos") && renderProductLots(r)}
                     <td data-label="Acciones">
                       <div className="row-actions">
                         {isLoadPreparation && (
