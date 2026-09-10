@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.91";
+const APP_VERSION = "2.0.92";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const initialModules = [
@@ -915,13 +915,13 @@ const sidebarGroups = [
       "Albaranes",
       "Facturas",
       "Cobros",
-      "Envíos",
     ],
   },
   {
     name: "Logística y almacén",
     items: [
       "Preparación de pedidos",
+      "Envíos",
       "Productos",
       "Stock",
       "Almacenes",
