@@ -2,7 +2,10 @@
 
 ## Regla obligatoria de despliegue
 
-- En este proyecto, cuando el usuario diga "desplegar", "publicar" o "subir a producción", significa siempre desplegar en Vercel mediante el proyecto habitual `exclusivas-inteligentes`.
+- Para esta instalación prevalece el servidor propio del miniPC y el repositorio `desarrolladormadrid2/exclusivas-inteligentes`. El workflow `.github/workflows/deploy-main.yml` despliega automáticamente después de un `push` autorizado a `main`; no usar Vercel ni Netlify.
+- El runner self-hosted debe ejecutar `npm ci`, `npm test`, `npm run build`, validar la versión, copiar sin tocar datos persistentes, reiniciar solo la aplicación y comprobar `/`, `/api/clients` y `/api/products`.
+
+- La regla histórica de Vercel solo se conserva como referencia antigua y queda anulada para esta instalación del servidor propio.
 - La URL de producción de referencia es `https://exclusivas-inteligentes.vercel.app`.
 - No utilizar Sites de Codex ni generar una URL alternativa de Sites para un despliegue de este proyecto, salvo que el usuario lo solicite expresamente.
 - Cada nuevo despliegue de producción debe incrementar la versión del proyecto. El incremento debe reflejarse de forma coherente en `package.json`, en la versión visible de la aplicación y en cualquier otra referencia equivalente. Los despliegues de prueba que no se publiquen en producción no requieren un incremento.

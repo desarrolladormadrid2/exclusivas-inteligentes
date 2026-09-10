@@ -8,13 +8,13 @@ Pega este bloque como primer mensaje de contexto:
 
 > Estás trabajando en el repositorio existente de Exclusivas Inteligentes. No crees un proyecto vacío ni reconstruyas la aplicación desde cero.
 >
-> Repositorio GitHub: `https://github.com/desarrolladormadrid/exclusivas-inteligentes.git`
+> Repositorio GitHub: `https://github.com/desarrolladormadrid2/exclusivas-inteligentes.git`
 >
 > Ruta habitual en Windows: `C:\codex_desarrollos\Excluvas Inteligentes`.
 >
 > Si esa ruta no existe en este ordenador, usa la carpeta en la que hayas clonado este repositorio. Si el repositorio no está accesible, detente y solicita que se clone o se haga accesible; no crees una copia vacía con el mismo nombre.
 >
-> El objetivo de este ordenador es ejecutar y desplegar la aplicación en un servidor propio. La instrucción de usar Vercel que aparece en algunas directrices antiguas queda anulada para este escenario: no despliegues en Vercel ni Netlify salvo que el usuario lo pida expresamente. No hagas despliegues de producción automáticamente.
+> El objetivo de este ordenador es ejecutar y desplegar la aplicación en un servidor propio. La instrucción de usar Vercel que aparece en algunas directrices antiguas queda anulada para este escenario: no despliegues en Vercel ni Netlify salvo que el usuario lo pida expresamente. La producción se despliega mediante `.github/workflows/deploy-main.yml` después de un `push` autorizado a `main`; OpenCode debe trabajar y probar en local, no iniciar despliegues manuales paralelos.
 >
 > Lee completamente `AGENTS.md` y `OPENCODE-HANDOFF.md` antes de modificar nada. Respeta los cambios locales existentes. Usa `apply_patch` para editar archivos y no subas secretos.
 >

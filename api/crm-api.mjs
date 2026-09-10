@@ -411,8 +411,8 @@ for (const column of ["status TEXT DEFAULT 'Pendiente'", "resolution TEXT", "res
 }
 db.exec(`CREATE TABLE IF NOT EXISTS document_templates(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,title TEXT NOT NULL,type TEXT NOT NULL,format TEXT DEFAULT 'HTML',description TEXT,subject TEXT,content TEXT NOT NULL,status TEXT DEFAULT 'Activa',created_by TEXT DEFAULT 'Usuario local',created_at TEXT,updated_at TEXT);`);
 try { db.exec("ALTER TABLE document_templates ADD COLUMN format TEXT DEFAULT 'HTML'"); } catch {}
-db.exec(`CREATE TABLE IF NOT EXISTS returns(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,client_id INTEGER,invoice_id INTEGER,product_id INTEGER,quantity REAL DEFAULT 0,reason TEXT,status TEXT DEFAULT 'Pendiente',amount REAL DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);`);
-for (const column of ["stock_applied_at TEXT", "stock_applied_by TEXT", "warehouse_id INTEGER", "order_id INTEGER", "shipment_id INTEGER", "order_line_id INTEGER"]) {
+db.exec(`CREATE TABLE IF NOT EXISTS returns(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,client_id INTEGER,invoice_id INTEGER,product_id INTEGER,quantity REAL DEFAULT 0,reason TEXT,status TEXT DEFAULT 'Pendiente',amount REAL DEFAULT 0,return_condition TEXT DEFAULT 'Apta para stock',stock_destination TEXT DEFAULT 'Stock disponible',stock_applied_quantity REAL DEFAULT 0,quarantine_reason TEXT,lot_id INTEGER,lot_code_snapshot TEXT,expiry_date_snapshot TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);`);
+for (const column of ["stock_applied_at TEXT", "stock_applied_by TEXT", "stock_applied_quantity REAL DEFAULT 0", "warehouse_id INTEGER", "order_id INTEGER", "shipment_id INTEGER", "order_line_id INTEGER", "return_date TEXT", "reviewed_by TEXT", "reviewed_at TEXT", "authorized_by TEXT", "authorized_at TEXT", "return_condition TEXT DEFAULT 'Apta para stock'", "stock_destination TEXT DEFAULT 'Stock disponible'", "quarantine_reason TEXT", "lot_id INTEGER", "lot_code_snapshot TEXT", "expiry_date_snapshot TEXT"]) {
   try { db.prepare(`ALTER TABLE returns ADD COLUMN ${column}`).run(); } catch {}
 }
 db.exec(`CREATE TABLE IF NOT EXISTS collection_points(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE,name TEXT NOT NULL,client_id INTEGER,address TEXT,city TEXT,contact TEXT,phone TEXT,email TEXT,opening_hours TEXT,opening_time TEXT,closing_time TEXT,notes TEXT);`);
@@ -447,7 +447,19 @@ db.exec(`CREATE TABLE IF NOT EXISTS product_price_history(id INTEGER PRIMARY KEY
 db.exec(`CREATE TABLE IF NOT EXISTS product_suppliers(id INTEGER PRIMARY KEY AUTOINCREMENT,product_id INTEGER NOT NULL,supplier_id INTEGER NOT NULL,supplier_ref TEXT,unit_cost REAL DEFAULT 0,minimum_order REAL DEFAULT 0,order_unit TEXT DEFAULT 'caja',transport_cost REAL DEFAULT 0,lead_time_days INTEGER DEFAULT 0,promotion TEXT,rappel_percent REAL DEFAULT 0,reliability_percent REAL DEFAULT 0,is_primary INTEGER DEFAULT 0,is_fixed INTEGER DEFAULT 0,active INTEGER DEFAULT 1,created_at TEXT,updated_at TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS import_batches(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,source_system TEXT NOT NULL,source_file TEXT NOT NULL,entity TEXT NOT NULL,status TEXT DEFAULT 'Pendiente',rows_read INTEGER DEFAULT 0,rows_inserted INTEGER DEFAULT 0,rows_updated INTEGER DEFAULT 0,rows_skipped INTEGER DEFAULT 0,started_at TEXT,completed_at TEXT,notes TEXT,created_by TEXT DEFAULT 'Sistema',created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS import_records(id INTEGER PRIMARY KEY AUTOINCREMENT,batch_id INTEGER NOT NULL,entity TEXT NOT NULL,source_code TEXT,local_id INTEGER,action TEXT NOT NULL,payload_hash TEXT,source_file TEXT,notes TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
-db.exec(`CREATE TABLE IF NOT EXISTS product_lots(id INTEGER PRIMARY KEY AUTOINCREMENT,product_id INTEGER NOT NULL,lot_code TEXT NOT NULL,quantity REAL DEFAULT 0,expiry_date TEXT,received_date TEXT,warehouse_id INTEGER,created_at TEXT,updated_at TEXT);`);
+db.exec(`CREATE TABLE IF NOT EXISTS product_lots(id INTEGER PRIMARY KEY AUTOINCREMENT,product_id INTEGER NOT NULL,lot_code TEXT NOT NULL,quantity REAL DEFAULT 0,quarantine_quantity REAL DEFAULT 0,waste_quantity REAL DEFAULT 0,expiry_date TEXT,received_date TEXT,warehouse_id INTEGER,created_at TEXT,updated_at TEXT);`);
+for (const column of ["quarantine_quantity REAL DEFAULT 0", "waste_quantity REAL DEFAULT 0", "barcode TEXT"]) {
+  try { db.prepare(`ALTER TABLE product_lots ADD COLUMN ${column}`).run(); } catch {}
+}
+if (remoteMode && process.env.RUN_REMOTE_MIGRATIONS === "1") {
+  for (const [table, columns] of [
+    ["returns", ["stock_applied_quantity REAL DEFAULT 0", "return_condition TEXT DEFAULT 'Apta para stock'", "stock_destination TEXT DEFAULT 'Stock disponible'", "quarantine_reason TEXT", "lot_id INTEGER", "lot_code_snapshot TEXT", "expiry_date_snapshot TEXT"]],
+    ["product_lots", ["quarantine_quantity REAL DEFAULT 0", "waste_quantity REAL DEFAULT 0", "barcode TEXT"]],
+    ["inventory_movements", ["stock_effect REAL"]],
+  ]) {
+    for (const column of columns) { try { db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column}`).run(); } catch {} }
+  }
+}
 db.exec(`CREATE TABLE IF NOT EXISTS product_equivalents(id INTEGER PRIMARY KEY AUTOINCREMENT,product_id INTEGER NOT NULL,equivalent_product_id INTEGER NOT NULL,priority INTEGER DEFAULT 1,notes TEXT,active INTEGER DEFAULT 1,created_at TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS purchase_suggestions(id INTEGER PRIMARY KEY AUTOINCREMENT,product_id INTEGER NOT NULL,suggested_quantity REAL DEFAULT 0,reason TEXT,status TEXT DEFAULT 'Pendiente de validar',recommended_supplier_id INTEGER,comparison TEXT,created_at TEXT,updated_at TEXT,validated_by TEXT,validated_at TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS purchase_requests(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,request_type TEXT DEFAULT 'Solicitud de oferta',status TEXT DEFAULT 'Borrador',product_ids TEXT,supplier_ids TEXT,notes TEXT,created_by TEXT,validated_by TEXT,created_at TEXT,updated_at TEXT,public_token TEXT,channels TEXT,sent_at TEXT);`);
@@ -515,6 +527,7 @@ db.exec(
   `CREATE TABLE IF NOT EXISTS inventory_movements(id INTEGER PRIMARY KEY AUTOINCREMENT,product_id INTEGER NOT NULL,warehouse_id INTEGER, movement_type TEXT NOT NULL, quantity REAL DEFAULT 0, reference TEXT, movement_date TEXT DEFAULT CURRENT_DATE, notes TEXT);`,
 );
 try { db.exec("ALTER TABLE inventory_movements ADD COLUMN receipt_id INTEGER"); } catch {}
+try { db.exec("ALTER TABLE inventory_movements ADD COLUMN stock_effect REAL"); } catch {}
 for (const [table, columns] of [
   ["products", ["photo_name TEXT", "photo_mime TEXT", "photo_data TEXT", "photo_url TEXT", "photo_public_id TEXT", "photo_thumbnail_url TEXT", "photo_web_url TEXT", "photo_bytes INTEGER DEFAULT 0", "photo_width INTEGER DEFAULT 0", "photo_height INTEGER DEFAULT 0", "photo_format TEXT", "description TEXT", "category_code TEXT", "warehouse_id INTEGER", "preorder INTEGER DEFAULT 1", "product_tracking_code TEXT DEFAULT 'Sin seguimiento'", "inventory_valuation_method TEXT DEFAULT 'FIFO'", "last_direct_cost REAL DEFAULT 0", "accounting_product_group TEXT DEFAULT 'Mercaderías'", "accounting_vat_group TEXT DEFAULT '21%'", "inventory_register_group TEXT DEFAULT 'Mercaderías'", "created_at TEXT", "created_by TEXT", "family TEXT", "subfamily TEXT", "purchase_format TEXT", "sale_format TEXT", "cases_per_pallet REAL DEFAULT 0", "units_per_pallet REAL DEFAULT 0", "weight_kg REAL DEFAULT 0", "volume_m3 REAL DEFAULT 0", "warehouse_location TEXT", "picking_order INTEGER DEFAULT 0", "product_status TEXT DEFAULT 'Activo'", "primary_supplier_id INTEGER", "fixed_supplier INTEGER DEFAULT 0", "target_margin_percent REAL DEFAULT 0", "min_margin_percent REAL DEFAULT 0", "stock_min REAL DEFAULT 0", "stock_target REAL DEFAULT 0", "stock_safety REAL DEFAULT 0", "lot_tracking INTEGER DEFAULT 0", "expiry_tracking INTEGER DEFAULT 0", "returnable_packaging INTEGER DEFAULT 0", "tax_surcharge_percent REAL DEFAULT 0", "extra_tax_name TEXT", "extra_tax_percent REAL DEFAULT 0", "freight_cost REAL DEFAULT 0", "handling_cost REAL DEFAULT 0", "real_cost REAL DEFAULT 0"]],
   ["suppliers", ["tax_id TEXT", "contact TEXT", "payment_terms TEXT", "city TEXT", "latitude REAL", "longitude REAL", "geocoding_status TEXT DEFAULT 'Pendiente'", "minimum_order REAL DEFAULT 0", "transport_cost REAL DEFAULT 0", "lead_time_days INTEGER DEFAULT 0", "reliability_percent REAL DEFAULT 0", "promotions TEXT", "rappel_percent REAL DEFAULT 0", "active INTEGER DEFAULT 1", "external_code TEXT", "source_system TEXT", "source_warehouse_code TEXT", "source_created_at TEXT", "source_closed_at TEXT", "source_balance REAL DEFAULT 0", "source_overdue_balance REAL DEFAULT 0", "source_payments REAL DEFAULT 0"]],
@@ -1011,6 +1024,32 @@ function hasColumn(resource, column) {
   }
   return schemaColumnsCache.get(key);
 }
+function normalizeReturnDisposition(input = {}) {
+  const destination = String(input.stock_destination || "Stock disponible").trim();
+  const condition = String(input.return_condition || "Apta para stock").trim();
+  const allowedDestinations = ["Stock disponible", "Cuarentena", "Merma", "Devolución a proveedor"];
+  if (!allowedDestinations.includes(destination)) return { error: "El destino de la devolución no es válido" };
+  if (destination !== "Stock disponible" && !String(input.quarantine_reason || input.reason || "").trim()) {
+    return { error: "Indica el motivo para enviar la devolución a cuarentena, merma o proveedor" };
+  }
+  const productId = Number(input.product_id || 0);
+  const lotId = Number(input.lot_id || 0) || null;
+  let lot = null;
+  if (lotId) {
+    lot = db.prepare("SELECT * FROM product_lots WHERE id=? AND product_id=?").get(lotId, productId);
+    if (!lot) return { error: "El lote seleccionado no existe para ese producto" };
+  }
+  return {
+    values: {
+      return_condition: condition,
+      stock_destination: destination,
+      quarantine_reason: String(input.quarantine_reason || input.reason || "").trim() || null,
+      lot_id: lotId,
+      lot_code_snapshot: String(input.lot_code_snapshot || lot?.lot_code || "").trim() || null,
+      expiry_date_snapshot: String(input.expiry_date_snapshot || lot?.expiry_date || "").trim() || null,
+    },
+  };
+}
 const lookupFields = {
   clients: ["id", "name", "city", "address", "billing_address", "billing_city", "opening_time", "closing_time", "latitude", "longitude", "geocoding_status", "phone", "email", "active", "external_code"],
   suppliers: ["id", "name", "tax_id", "contact", "phone", "email", "address", "city", "latitude", "longitude", "geocoding_status", "active", "minimum_order", "transport_cost", "lead_time_days", "reliability_percent", "rappel_percent", "external_code"],
@@ -1025,7 +1064,8 @@ const lookupFields = {
   goods_receipt_lines: ["id", "receipt_id", "product_id", "product_name_snapshot", "expected_quantity", "received_quantity", "damaged_quantity", "substituted_quantity", "substitute_product_id", "unit_cost", "expected_value", "received_value", "economic_difference", "status", "notes", "location_verified_status", "location_verified_code", "location_verified_reason", "location_verified_by", "location_verified_at"],
   goods_receipt_incidents: ["id", "receipt_id", "receipt_line_id", "supplier_id", "type", "description", "expected_quantity", "received_quantity", "damaged_quantity", "substituted_quantity", "substitute_product_id", "economic_difference", "status", "claim_status", "attachment_name", "attachment_mime", "created_by", "created_at"],
   payments: ["id", "invoice_id", "amount", "payment_date", "method"],
-  inventory_movements: ["id", "product_id", "warehouse_id", "movement_type", "quantity", "reference", "movement_date", "notes"],
+  inventory_movements: ["id", "product_id", "warehouse_id", "movement_type", "quantity", "stock_effect", "reference", "movement_date", "notes"],
+  product_lots: ["id", "product_id", "lot_code", "quantity", "quarantine_quantity", "waste_quantity", "expiry_date", "received_date", "warehouse_id", "barcode"],
   expenses: ["id", "code", "client_id", "expense_date", "category", "vendor", "amount", "vat", "payment_method", "notes", "attachment_name", "status", "created_by", "created_at"],
 };
 function listSelectFor(resource) {
@@ -1069,9 +1109,10 @@ function invalidateReadCache(resource) {
 }
 function invalidateRelatedReadCaches(resource) {
   invalidateReadCache(resource);
-  if (["orders", "order_lines", "inventory_movements", "purchase_orders", "purchase_order_lines", "returns", "shipments"].includes(resource)) {
+  if (["orders", "order_lines", "inventory_movements", "purchase_orders", "purchase_order_lines", "returns", "shipments", "product_lots"].includes(resource)) {
     invalidateReadCache("products");
     invalidateReadCache("stock");
+    invalidateReadCache("product_lots");
   }
   if (["payments", "billing", "invoices", "delivery_notes"].includes(resource)) {
     invalidateReadCache("invoices");
@@ -2629,6 +2670,9 @@ export async function crmApiHandler(req, res) {
           if (!productId || !Number.isFinite(quantity) || quantity <= 0) return send(res, 400, { error: "La devolución debe indicar un producto y una cantidad mayor que cero" });
           const product = db.prepare("SELECT id FROM products WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(productId);
           if (!product) return send(res, 400, { error: "Producto no encontrado" });
+          const disposition = normalizeReturnDisposition(d);
+          if (disposition.error) return send(res, 400, { error: disposition.error });
+          Object.assign(d, disposition.values);
           const orderId = Number(d.order_id || 0);
           const shipmentId = Number(d.shipment_id || 0);
           const orderLineId = Number(d.order_line_id || 0);
@@ -2876,6 +2920,13 @@ export async function crmApiHandler(req, res) {
         for (const key of ["stock_alerts", "client_name", "client_city", "billed", "billing_status", "available_stock", "stock_status", "product_name", "warehouse_name"]) delete d[key];
         if (t === "returns") {
           const currentReturn = db.prepare("SELECT * FROM returns WHERE id=?").get(Number(p[2]));
+          if (!currentReturn) return send(res, 404, { error: "Devolución no encontrada" });
+          if (currentReturn.stock_applied_at && ["quantity", "product_id", "lot_id", "lot_code_snapshot", "expiry_date_snapshot", "stock_destination"].some((field) => d[field] !== undefined)) {
+            return send(res, 409, { error: "Una devolución ya aplicada no puede cambiar de cantidad, producto ni destino" });
+          }
+          const disposition = normalizeReturnDisposition({ ...currentReturn, ...d });
+          if (disposition.error) return send(res, 400, { error: disposition.error });
+          Object.assign(d, disposition.values);
           const nextStatus = String(d.status || currentReturn?.status || "Pendiente");
           const acceptedStatuses = ["Recibida", "Aprobada", "Aceptada"];
           if (acceptedStatuses.includes(nextStatus) && !currentReturn?.stock_applied_at) {
@@ -2885,13 +2936,30 @@ export async function crmApiHandler(req, res) {
             const product = db.prepare("SELECT id FROM products WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(productId);
             if (!product) return send(res, 400, { error: "Producto no encontrado" });
             const appliedAt = new Date().toISOString();
-            db.prepare("UPDATE products SET stock=COALESCE(stock,0)+? WHERE id=?").run(quantity, productId);
-            db.prepare("INSERT INTO inventory_movements(product_id,warehouse_id,movement_type,quantity,reference,notes,movement_date,created_by) VALUES(?,?,?,?,?,?,?,?)").run(productId, d.warehouse_id ?? currentReturn?.warehouse_id ?? null, "Devolución", quantity, d.code || currentReturn?.code || `DEV-${p[2]}`, d.reason || currentReturn?.reason || "Devolución de cliente aceptada", appliedAt, actor);
+            const stockDestination = String(d.stock_destination || currentReturn?.stock_destination || "Stock disponible").trim();
+            const stockEffect = stockDestination === "Stock disponible" ? quantity : 0;
+            const quarantineQuantity = stockDestination === "Cuarentena" ? quantity : 0;
+            const wasteQuantity = stockDestination === "Merma" ? quantity : 0;
+            const lotId = Number(d.lot_id ?? currentReturn?.lot_id ?? 0) || null;
+            const lot = lotId ? db.prepare("SELECT * FROM product_lots WHERE id=? AND product_id=?").get(lotId, productId) : null;
+            if (lot) {
+              db.prepare("UPDATE product_lots SET quantity=COALESCE(quantity,0)+?,quarantine_quantity=COALESCE(quarantine_quantity,0)+?,waste_quantity=COALESCE(waste_quantity,0)+?,updated_at=? WHERE id=?").run(stockEffect, quarantineQuantity, wasteQuantity, appliedAt, lot.id);
+              d.lot_id = Number(lot.id);
+            } else if (stockEffect || quarantineQuantity || wasteQuantity) {
+              const lotCode = String(d.lot_code_snapshot || currentReturn?.lot_code_snapshot || `DEV-${d.code || currentReturn?.code || p[2]}`).trim();
+              const createdLot = db.prepare("INSERT INTO product_lots(product_id,lot_code,quantity,quarantine_quantity,waste_quantity,expiry_date,received_date,warehouse_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)").run(productId, lotCode, stockEffect, quarantineQuantity, wasteQuantity, d.expiry_date_snapshot ?? currentReturn?.expiry_date_snapshot ?? null, appliedAt.slice(0, 10), d.warehouse_id ?? currentReturn?.warehouse_id ?? null, appliedAt, appliedAt);
+              d.lot_id = Number(createdLot.lastInsertRowid);
+              d.lot_code_snapshot = lotCode;
+            }
+            db.prepare("UPDATE products SET stock=COALESCE(stock,0)+? WHERE id=?").run(stockEffect, productId);
+            const movementNotes = `${d.reason || currentReturn?.reason || "Devolución de cliente aceptada"} · Destino: ${stockDestination}${d.quarantine_reason ? ` · Motivo: ${d.quarantine_reason}` : ""}`;
+            db.prepare("INSERT INTO inventory_movements(product_id,warehouse_id,movement_type,quantity,stock_effect,reference,notes,movement_date,created_by) VALUES(?,?,?,?,?,?,?,?,?)").run(productId, d.warehouse_id ?? currentReturn?.warehouse_id ?? null, stockDestination === "Stock disponible" ? "Devolución" : stockDestination, quantity, stockEffect, d.code || currentReturn?.code || `DEV-${p[2]}`, movementNotes, appliedAt, actor);
             d.stock_applied_at = appliedAt;
             d.stock_applied_by = actor;
+            d.stock_applied_quantity = stockEffect;
             d.authorized_by = d.authorized_by || actor;
             d.authorized_at = d.authorized_at || appliedAt;
-            recordAudit(actor, "PUT", `returns/${Number(p[2])}`, "Aplicar devolución a stock", JSON.stringify({ product_id: productId, quantity, status: nextStatus }));
+            recordAudit(actor, "PUT", `returns/${Number(p[2])}`, "Aplicar devolución", JSON.stringify({ product_id: productId, quantity, stock_destination: stockDestination, stock_effect: stockEffect, status: nextStatus }));
           }
         }
         if (t === "order_lines" && d.quantity !== undefined) {

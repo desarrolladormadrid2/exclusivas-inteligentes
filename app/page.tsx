@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.67";
+const APP_VERSION = "2.0.69";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const initialModules = [
@@ -502,7 +502,13 @@ const cfg: any = {
       "order_id",
       "shipment_id",
       "order_line_id",
+      "lot_id",
+      "lot_code_snapshot",
+      "expiry_date_snapshot",
       "quantity",
+      "return_condition",
+      "stock_destination",
+      "quarantine_reason",
       "return_date",
       "reason",
       "status",
@@ -521,7 +527,13 @@ const cfg: any = {
       "Pedido",
       "Envío",
       "Línea de pedido",
+      "Lote",
+      "Lote registrado",
+      "Caducidad registrada",
       "Cantidad",
+      "Estado del producto",
+      "Destino de la devolución",
+      "Motivo de no disponibilidad",
       "Fecha y hora",
       "Motivo",
       "Estado",
@@ -2825,7 +2837,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       "Gastos y tickets": ["clients", "suppliers", "payments"],
       Balance: ["invoices", "purchase_orders", "payments", "expenses"],
       Informes: ["orders", "clients", "products", "invoices", "payments", "inventory_movements", "shipments", "purchase_orders", "expenses"],
-      Devoluciones: ["clients", "invoices", "products", "orders", "shipments"],
+      Devoluciones: ["clients", "invoices", "products", "orders", "shipments", "product_lots"],
     };
     const lookupResources = lookupResourcesByActive[active] || [];
     if (!lookupResources.length) return;
@@ -4770,6 +4782,19 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           {supplierSearch && !form.supplier_id && <div className="supplier-suggestions">{(lookups.suppliers || []).filter((item: any) => `${item.name || ""} ${item.tax_id || ""} ${item.phone || ""} ${item.email || ""}`.toLowerCase().includes(supplierSearch.toLowerCase())).slice(0, 8).map((item: any) => <button type="button" key={item.id} onClick={() => { setSupplierSearch(item.name || ""); handleFormChange(f, String(item.id)); }}><b>{item.name}</b><small>{[item.tax_id, item.phone, item.email].filter(Boolean).join(" · ") || "Sin datos adicionales"}</small></button>)}{!(lookups.suppliers || []).some((item: any) => `${item.name || ""} ${item.tax_id || ""} ${item.phone || ""} ${item.email || ""}`.toLowerCase().includes(supplierSearch.toLowerCase())) && <span>No hay proveedores que coincidan.</span>}</div>}
           <button type="button" className="button secondary supplier-new-button" onClick={() => setNewSupplierOpen(true)}>＋ Crear proveedor</button>
         </div>
+      ) : active === "Devoluciones" && f === "lot_id" ? (
+        <select aria-label="Lote de la devolución" value={form[f] ?? ""} disabled={!form.product_id} onChange={(event) => { const value = event.target.value; const lot = (lookups.product_lots || []).find((item: any) => Number(item.id) === Number(value)); setForm((current: any) => ({ ...current, lot_id: value, lot_code_snapshot: lot?.lot_code || "", expiry_date_snapshot: lot?.expiry_date || "" })); }}>
+          <option value="">Seleccionar lote…</option>
+          {(lookups.product_lots || []).filter((item: any) => Number(item.product_id) === Number(form.product_id)).map((item: any) => <option key={item.id} value={item.id}>{item.lot_code} · {item.expiry_date || "sin caducidad"} · {item.quantity || 0} uds.</option>)}
+        </select>
+      ) : active === "Devoluciones" && ["lot_code_snapshot", "expiry_date_snapshot"].includes(f) ? (
+        <input aria-label={c.labels[i]} type={f === "expiry_date_snapshot" ? "date" : "text"} value={form[f] ?? ""} readOnly placeholder="Se completa al elegir el lote" />
+      ) : active === "Devoluciones" && f === "return_condition" ? (
+        <select aria-label="Estado del producto devuelto" value={form[f] ?? "Apta para stock"} onChange={(event) => handleFormChange(f, event.target.value)}>{["Apta para stock", "Dañada", "Caducada", "Contaminada", "Envase roto", "Otro"].map((value) => <option key={value}>{value}</option>)}</select>
+      ) : active === "Devoluciones" && f === "stock_destination" ? (
+        <select aria-label="Destino de la devolución" value={form[f] ?? "Stock disponible"} onChange={(event) => handleFormChange(f, event.target.value)}>{["Stock disponible", "Cuarentena", "Merma", "Devolución a proveedor"].map((value) => <option key={value}>{value}</option>)}</select>
+      ) : active === "Devoluciones" && f === "quarantine_reason" ? (
+        <textarea aria-label="Motivo de no disponibilidad" required={form.stock_destination && form.stock_destination !== "Stock disponible"} value={form[f] ?? ""} onChange={(event) => handleFormChange(f, event.target.value)} placeholder="Obligatorio si no vuelve al stock disponible" />
       ) : f === "client_id" || f === "product_id" || f === "warehouse_id" || f === "supplier_id" || f === "primary_supplier_id" || f === "collection_point_id" || f === "order_id" || f === "shipment_id" ? (
         <select
           aria-label={c.labels[i]}
@@ -4907,7 +4932,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                   (c.movementFilter && active !== "Entradas")
                   ? { movement_type: c.movementFilter || "Entrada", movement_date: tabletTodayInput(), created_by: user?.username || "Usuario local" }
                   : active === "Devoluciones"
-                    ? { return_date: tabletTodayInput(), status: "Pendiente", reviewed_by: "", authorized_by: "" }
+                    ? { return_date: tabletTodayInput(), status: "Pendiente", reviewed_by: "", authorized_by: "", lot_id: "", lot_code_snapshot: "", expiry_date_snapshot: "", return_condition: "Apta para stock", stock_destination: "Stock disponible", quarantine_reason: "" }
                   : c.statusFilter
                     ? { status: "Preparando", packages: 1 }
                   : active === "Productos"

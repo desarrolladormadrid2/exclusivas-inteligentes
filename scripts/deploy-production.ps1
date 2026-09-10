@@ -9,7 +9,7 @@ if ((Resolve-Path $source).Path -eq (Resolve-Path $productionRoot).Path) {
 }
 
 $robocopyArgs = @(
-  $source, $productionRoot, '/MIR', '/R:2', '/W:2', '/NFL', '/NDL', '/NP',
+  $source, $productionRoot, '/E', '/R:2', '/W:2', '/NFL', '/NDL', '/NP',
   '/XD', '.git', 'node_modules', '.next', '.vinext', 'dist', 'data', 'logs',
   'whatsapp-gateway\node_modules', 'whatsapp-gateway\sessions', 'whatsapp-gateway\logs',
   'whatsapp-gateway\_IGNORE_exclusivas-inteligentes',
