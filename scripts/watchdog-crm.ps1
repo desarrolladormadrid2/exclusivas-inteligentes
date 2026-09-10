@@ -9,37 +9,29 @@ function Write-Log {
   "$ts $Message" | Out-File -FilePath $logPath -Append -Encoding utf8
 }
 
-$crmRunning = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
+$crmProcess = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
   Where-Object { $_.CommandLine -like '*server-selfhost.mjs*' }
 
-if ($crmRunning) {
+if ($crmProcess) {
   try {
     $resp = Invoke-WebRequest -Uri 'http://127.0.0.1:3000/' -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
     if ($resp.StatusCode -eq 200) { exit 0 }
   } catch {
-    Write-Log "CRM process alive but HTTP check failed: $_"
+    Write-Log "CRM process alive (PID $($crmProcess.ProcessId)) but HTTP check failed. Restarting..."
+    Stop-Process -Id $crmProcess.ProcessId -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
   }
+} else {
+  Write-Log "CRM process not found. Starting..."
 }
 
-Write-Log "CRM not responding. Restarting..."
-
-Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
-  Where-Object { $_.CommandLine -like '*server-selfhost.mjs*' } |
-  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-
-Start-Sleep -Seconds 2
-
-$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$projectRoot\scripts\start-selfhost.ps1`""
-$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(5)
-$settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew
-$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-Register-ScheduledTask -TaskName 'ExclusivasInteligentes\CRM watchdog-launch' -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
-Start-Sleep -Seconds 8
+Start-Process -FilePath 'node' -ArgumentList '--env-file=.env.local','server-selfhost.mjs' -WorkingDirectory $projectRoot -WindowStyle Hidden
+Start-Sleep -Seconds 5
 
 $check = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
   Where-Object { $_.CommandLine -like '*server-selfhost.mjs*' }
 if ($check) {
-  Write-Log "CRM restarted successfully."
+  Write-Log "CRM started successfully (PID $($check.ProcessId))."
 } else {
-  Write-Log "CRM restart failed!"
+  Write-Log "CRM start failed!"
 }
