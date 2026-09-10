@@ -730,6 +730,7 @@ try { db.exec("ALTER TABLE order_lines ADD COLUMN prepared INTEGER DEFAULT 0"); 
 try { db.exec("ALTER TABLE order_lines ADD COLUMN prepared_quantity REAL DEFAULT 0"); } catch {}
 try { db.exec("ALTER TABLE order_lines ADD COLUMN preparation_status TEXT DEFAULT 'Pendiente'"); } catch {}
 for (const column of ["incident_resolution", "incident_resolved_at", "incident_resolved_by"]) { try { db.exec(`ALTER TABLE order_lines ADD COLUMN ${column} TEXT`); } catch {} }
+db.exec(`CREATE TABLE IF NOT EXISTS order_line_lots(id INTEGER PRIMARY KEY AUTOINCREMENT,order_line_id INTEGER NOT NULL,lot_id INTEGER,lot_code TEXT,expiry_date TEXT,quantity REAL DEFAULT 0,created_at TEXT,updated_at TEXT);`);
 // Recupera las indicaciones de pedidos antiguos en sus notas de carga cuando
 // estas se crearon con el texto genérico anterior. La condición evita tocar
 // anotaciones que el almacén ya haya escrito manualmente.
@@ -777,6 +778,7 @@ const tables = new Set([
   "quotes",
   "invoices",
   "order_lines",
+  "order_line_lots",
   "quote_lines",
   "delivery_note_lines",
   "invoice_lines",
@@ -915,6 +917,7 @@ for (const [name, table, columns] of [
   ["idx_orders_delivery_date", "orders", "delivery_date"],
   ["idx_order_lines_order", "order_lines", "order_id"],
   ["idx_order_lines_product", "order_lines", "product_id"],
+  ["idx_order_line_lots_line", "order_line_lots", "order_line_id"],
   ["idx_quotes_status_created", "quotes", "status, created_at"],
   ["idx_quotes_client", "quotes", "client_id"],
   ["idx_invoices_status_date", "invoices", "status, created_at"],
@@ -1131,7 +1134,7 @@ function invalidateReadCache(resource) {
 }
 function invalidateRelatedReadCaches(resource) {
   invalidateReadCache(resource);
-  if (["orders", "order_lines", "inventory_movements", "purchase_orders", "purchase_order_lines", "returns", "shipments", "product_lots"].includes(resource)) {
+  if (["orders", "order_lines", "order_line_lots", "inventory_movements", "purchase_orders", "purchase_order_lines", "returns", "shipments", "product_lots"].includes(resource)) {
     invalidateReadCache("products");
     invalidateReadCache("stock");
     invalidateReadCache("product_lots");
@@ -1291,6 +1294,13 @@ function attachShipmentTrackingToken(row) {
   const existing = String(row?.public_tracking_token || "").trim();
   return existing ? { ...row, public_tracking_token: existing } : { ...row, public_tracking_token: ensureShipmentTrackingToken(row?.id) };
 }
+function attachOrderLineLots(row) {
+  const lineId = Number(row?.id || 0);
+  const lotAllocations = lineId > 0
+    ? db.prepare("SELECT id,lot_id,lot_code,expiry_date,quantity FROM order_line_lots WHERE order_line_id=? ORDER BY id").all(lineId)
+    : [];
+  return { ...row, lot_allocations: lotAllocations };
+}
 function portalSessionSecret() {
   return String(process.env.PORTAL_SESSION_SECRET || process.env.TURSO_AUTH_TOKEN || "exclusivas-inteligentes-portal-session");
 }
@@ -1351,10 +1361,10 @@ export async function crmApiHandler(req, res) {
         if (!shipment) return send(res, 404, { error: "Enlace de seguimiento no válido o caducado" });
         const lines = db.prepare(`
           SELECT ol.product_id,ol.quantity,ol.quantity_requested,ol.quantity_unit,
-                 ol.prepared_quantity,ol.preparation_status,p.name AS product_name
+                 ol.id,ol.prepared_quantity,ol.preparation_status,p.name AS product_name
           FROM order_lines ol
           LEFT JOIN products p ON p.id=ol.product_id
-          WHERE ol.order_id=? ORDER BY ol.id`).all(Number(shipment.order_id || 0));
+          WHERE ol.order_id=? ORDER BY ol.id`).all(Number(shipment.order_id || 0)).map(attachOrderLineLots);
         return send(res, 200, {
           shipment: {
             code: shipment.code,
@@ -2565,12 +2575,12 @@ export async function crmApiHandler(req, res) {
           const deletedClause = includeDeleted || !hasColumn(tableReference, "deleted") ? "" : ` AND CAST(COALESCE(${tableReference}.deleted,0) AS INTEGER)=0`;
           const row = db.prepare(`SELECT ${selection} FROM ${source} WHERE ${tableReference}.id=?${deletedClause}`).get(Number(p[2]));
           if (!row) return send(res, 404, { error: "Registro no encontrado" });
-          return send(res, 200, t === "shipments" ? attachShipmentTrackingToken(row) : row);
+          return send(res, 200, t === "shipments" ? attachShipmentTrackingToken(row) : t === "order_lines" ? attachOrderLineLots(row) : row);
         }
         const cached = !isLookup && limitValue === null && offsetValue === 0
           ? cachedRows(t, includeDeleted, includeInactive)
           : null;
-        if (cached) return send(res, 200, t === "shipments" ? cached.map(attachShipmentTrackingToken) : cached);
+        if (cached) return send(res, 200, t === "shipments" ? cached.map(attachShipmentTrackingToken) : t === "order_lines" ? cached.map(attachOrderLineLots) : cached);
         const source = t === "orders"
           ? `orders LEFT JOIN clients AS order_client ON order_client.id=orders.client_id`
           : t === "shipments"
@@ -2602,7 +2612,9 @@ export async function crmApiHandler(req, res) {
         const rows = db.prepare(`SELECT ${selection} FROM ${source} ${where} ORDER BY ${orderBy}${pagination}`).all();
         const responseRows = t === "shipments"
           ? rows.map(attachShipmentTrackingToken)
-          : rows;
+          : t === "order_lines"
+            ? rows.map(attachOrderLineLots)
+            : rows;
         return send(
           res,
           200,
@@ -2612,6 +2624,8 @@ export async function crmApiHandler(req, res) {
         );
       }
       const d = await read(req);
+      const incomingLotAllocations = Array.isArray(d.lot_allocations) ? d.lot_allocations : null;
+      delete d.lot_allocations;
       let pendingProductPhoto = null;
       if (t === "products" && cloudinaryReady() && String(d.photo_data || "").startsWith("data:image/")) {
         pendingProductPhoto = String(d.photo_data);
@@ -2945,6 +2959,28 @@ export async function crmApiHandler(req, res) {
         invalidateRelatedReadCaches(t);
         const currentRecord = db.prepare(`SELECT id FROM ${t} WHERE id=?`).get(Number(p[2]));
         if (!currentRecord) return send(res, 404, { error: "Registro no encontrado" });
+        let normalizedLotAllocations = null;
+        if (t === "order_lines" && incomingLotAllocations) {
+          const currentLine = db.prepare("SELECT quantity,lot_code,expiry_date,prepared_quantity FROM order_lines WHERE id=?").get(Number(p[2]));
+          const requestedQuantity = Number(currentLine?.quantity || 0);
+          normalizedLotAllocations = incomingLotAllocations.map((allocation) => {
+            const quantity = Number(allocation?.quantity || 0);
+            if (!Number.isFinite(quantity) || quantity < 0) throw new Error("La cantidad de cada lote debe ser un número igual o mayor que cero");
+            return {
+              lot_id: Number(allocation?.lot_id || 0) || null,
+              lot_code: String(allocation?.lot_code || "").trim() || null,
+              expiry_date: String(allocation?.expiry_date || "").trim() || null,
+              quantity,
+            };
+          }).filter((allocation) => allocation.lot_code || allocation.expiry_date || allocation.quantity > 0);
+          const preparedQuantity = normalizedLotAllocations.reduce((total, allocation) => total + allocation.quantity, 0);
+          if (preparedQuantity > requestedQuantity + 0.0001) return send(res, 400, { error: `La suma de los lotes (${preparedQuantity}) supera la cantidad pedida (${requestedQuantity})` });
+          d.prepared_quantity = preparedQuantity;
+          d.lot_code = normalizedLotAllocations[0]?.lot_code || null;
+          d.expiry_date = normalizedLotAllocations[0]?.expiry_date || null;
+          if (d.prepared === undefined) d.prepared = 0;
+          if (d.preparation_status === undefined) d.preparation_status = preparedQuantity > 0 ? "Pendiente" : "Pendiente";
+        }
         if (t === "orders") {
           const currentOrder = db.prepare("SELECT status FROM orders WHERE id=?").get(Number(p[2]));
           const terminal = ["Enviado", "En reparto", "Entregado", "Cancelado"].includes(String(currentOrder?.status || ""));
@@ -3185,6 +3221,13 @@ export async function crmApiHandler(req, res) {
         db.prepare(
           `UPDATE ${t} SET ${keys.map((k) => k + "=?").join(",")} WHERE id=?`,
         ).run(...keys.map((k) => d[k]), p[2]);
+        if (t === "order_lines" && normalizedLotAllocations) {
+          db.prepare("DELETE FROM order_line_lots WHERE order_line_id=?").run(Number(p[2]));
+          const insertLotAllocation = db.prepare("INSERT INTO order_line_lots(order_line_id,lot_id,lot_code,expiry_date,quantity,created_at,updated_at) VALUES(?,?,?,?,?,?,?)");
+          const now = new Date().toISOString();
+          for (const allocation of normalizedLotAllocations) insertLotAllocation.run(Number(p[2]), allocation.lot_id, allocation.lot_code, allocation.expiry_date, allocation.quantity, now, now);
+          invalidateReadCache("order_lines");
+        }
         if (t === "shipments" && String(d.prepared_by || "").trim()) {
           const shipment = db.prepare("SELECT order_id FROM shipments WHERE id=?").get(Number(p[2]));
           if (shipment?.order_id) db.prepare("UPDATE orders SET prepared_by=?,updated_at=? WHERE id=?").run(String(d.prepared_by).trim(), d.updated_at, Number(shipment.order_id));

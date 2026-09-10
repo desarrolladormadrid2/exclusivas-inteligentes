@@ -6,8 +6,29 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.94";
+const APP_VERSION = "2.0.95";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
+
+function preparationLotAllocations(line: any) {
+  if (Array.isArray(line?.lot_allocations) && line.lot_allocations.length) {
+    return line.lot_allocations.map((allocation: any) => ({
+      lot_id: allocation.lot_id || null,
+      lot_code: allocation.lot_code || "",
+      expiry_date: allocation.expiry_date || "",
+      quantity: allocation.quantity ?? "",
+    }));
+  }
+  return [{
+    lot_id: line?.lot_id || null,
+    lot_code: line?.lot_code || "",
+    expiry_date: line?.expiry_date || "",
+    quantity: Number(line?.prepared_quantity || 0) > 0 ? line.prepared_quantity : "",
+  }];
+}
+
+function preparationLotTotal(line: any) {
+  return preparationLotAllocations(line).reduce((total: number, allocation: any) => total + Math.max(0, Number(allocation.quantity) || 0), 0);
+}
 
 const initialModules = [
   "Inicio",
@@ -1849,7 +1870,8 @@ function ShipmentLabelModal({ shipment, client, lines, products, address, city, 
     const requested = Number(line.quantity_requested || line.quantity || 0);
     const prepared = Number(line.prepared_quantity);
     const quantity = Number.isFinite(prepared) && prepared > 0 && prepared < requested ? `${prepared}/${requested}` : String(requested);
-    return { name: product?.name || `Producto #${line.product_id}`, quantity, unit: quantityUnitLabel(line.quantity_unit) };
+    const lots = preparationLotAllocations(line).filter((allocation: any) => allocation.lot_code || allocation.expiry_date || Number(allocation.quantity) > 0).map((allocation: any) => `${allocation.lot_code || "Lote sin indicar"}${allocation.expiry_date ? ` · cad. ${allocation.expiry_date}` : ""} · ${Number(allocation.quantity || 0)} uds.`).join(" · ");
+    return { name: product?.name || `Producto #${line.product_id}`, quantity, unit: quantityUnitLabel(line.quantity_unit), lots };
   });
   const qrPayload = trackingUrl || [
     "EXCLUSIVAS INTELIGENTES",
@@ -1858,7 +1880,7 @@ function ShipmentLabelModal({ shipment, client, lines, products, address, city, 
     `CLIENTE: ${client?.name || shipment?.client_name || "—"}`,
     `BULTOS: ${packages}`,
     "CONTENIDO:",
-    ...lineRows.map((line) => `- ${line.quantity} ${line.unit}: ${line.name}`),
+    ...lineRows.map((line) => `- ${line.quantity} ${line.unit}: ${line.name}${line.lots ? ` · ${line.lots}` : ""}`),
   ].join("\n");
   useEffect(() => {
     if (barcodeRef.current) {
@@ -1874,7 +1896,7 @@ function ShipmentLabelModal({ shipment, client, lines, products, address, city, 
           <header className="shipment-label-brand"><div><b>EXCLUSIVAS</b><strong>INTELIGENTES</strong></div><div className="shipment-label-code-meta"><span>NOTA DE CARGA</span><b>{code}</b><small className="shipment-label-sticker-note">IDENTIFICACIÓN DE ENVÍO · CONSERVAR HASTA LA ENTREGA</small></div></header>
           <div className="shipment-label-rule" />
           <section className="shipment-label-recipient"><div><span>ENTREGA A</span><strong>{client?.name || shipment?.client_name || "Cliente sin asignar"}</strong><p>{address || "Dirección no indicada"}{city ? ` · ${city}` : ""}</p>{shipment?.delivery_window_start && shipment?.delivery_window_end && <small>Horario: {String(shipment.delivery_window_start).slice(0, 5)}–{String(shipment.delivery_window_end).slice(0, 5)}</small>}</div><div className="shipment-label-packages"><span>BULTOS</span><strong>{packages}</strong></div></section>
-          <section className="shipment-label-content"><div className="shipment-label-section-title"><span>CONTENIDO DEL ENVÍO</span><small>{lineRows.length} referencias</small></div>{lineRows.length ? <ul>{lineRows.map((line, index) => <li key={`${line.name}-${index}`}><b>{line.quantity} {line.unit}</b><span>{line.name}</span></li>)}</ul> : <p>Contenido pendiente de cargar.</p>}</section>
+          <section className="shipment-label-content"><div className="shipment-label-section-title"><span>CONTENIDO DEL ENVÍO</span><small>{lineRows.length} referencias</small></div>{lineRows.length ? <ul>{lineRows.map((line, index) => <li key={`${line.name}-${index}`}><b>{line.quantity} {line.unit}</b><span>{line.name}{line.lots && <small className="shipment-label-lots">{line.lots}</small>}</span></li>)}</ul> : <p>Contenido pendiente de cargar.</p>}</section>
           <section className="shipment-label-codes"><div className="shipment-label-barcode"><svg ref={barcodeRef} aria-label={`Código de barras ${code}`} /><small>{code}</small></div><div className="shipment-label-qr">{qrImage ? <img src={qrImage} alt={`Código QR del envío ${code}`} /> : <span>Generando QR…</span>}<small>{trackingUrl ? "Escanea para abrir el seguimiento" : "Escanea para consultar el contenido"}</small>{trackingUrl && <a href={trackingUrl} target="_blank" rel="noreferrer">Abrir seguimiento</a>}</div></section>
         </article>
         <div className="product-label-print-controls shipment-label-print-controls"><label>Qué imprimir<select value={printMode} onChange={(event) => setPrintMode(event.target.value as typeof printMode)}><option value="all">Etiqueta completa</option><option value="barcode">Solo código de barras</option><option value="qr">Solo código QR</option><option value="both">QR + código de barras</option></select></label><small>El modo se aplica al imprimir o guardar como PDF.</small></div>
@@ -4302,18 +4324,61 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       setPreparationAssigneeSaving(false);
     }
   }
-  async function updatePreparationTraceability(line: any, changes: any) {
-    const next = { ...line, ...changes };
+  async function updatePreparationLots(line: any, allocations: any[]) {
+    const cleanAllocations = allocations.map((allocation) => ({
+      lot_id: Number(allocation?.lot_id || 0) || null,
+      lot_code: String(allocation?.lot_code || "").trim() || null,
+      expiry_date: String(allocation?.expiry_date || "").trim() || null,
+      quantity: Math.max(0, Number(allocation?.quantity) || 0),
+    })).filter((allocation) => allocation.lot_code || allocation.expiry_date || allocation.quantity > 0);
+    const preparedQuantity = cleanAllocations.reduce((total, allocation) => total + allocation.quantity, 0);
+    const requestedQuantity = Number(line.quantity || 0);
+    if (preparedQuantity > requestedQuantity + 0.0001) {
+      setError(`La suma de los lotes (${preparedQuantity}) no puede superar las ${requestedQuantity} unidades pedidas.`);
+      return false;
+    }
+    const next = {
+      ...line,
+      lot_allocations: cleanAllocations,
+      lot_id: cleanAllocations[0]?.lot_id || null,
+      lot_code: cleanAllocations[0]?.lot_code || null,
+      expiry_date: cleanAllocations[0]?.expiry_date || null,
+      prepared_quantity: preparedQuantity,
+      prepared: 0,
+      preparation_status: "Pendiente",
+    };
     setPreviewLines((current) => current.map((item) => item.id === line.id ? next : item));
     setPreparationTraceabilitySavingId(Number(line.id));
+    setError("");
     try {
       const response = await fetch(`/api/order_lines/${line.id}`, { method: "PUT", headers: actorHeaders, body: JSON.stringify(next) });
-      if (!response.ok) throw new Error("No se pudo guardar el lote y la caducidad.");
-    } catch {
-      setError("No se pudo guardar el lote y la caducidad. Revisa la conexión e inténtalo de nuevo.");
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error || "No se pudo guardar la distribución por lotes.");
+      }
+      return true;
+    } catch (error: any) {
+      setError(error?.message || "No se pudo guardar la distribución por lotes. Revisa la conexión e inténtalo de nuevo.");
+      return false;
     } finally {
       setPreparationTraceabilitySavingId(null);
     }
+  }
+  function updatePreparationLotDraft(line: any, index: number, field: string, value: string) {
+    setPreviewLines((current) => current.map((item) => {
+      if (item.id !== line.id) return item;
+      const allocations = preparationLotAllocations(item).map((allocation, allocationIndex) => allocationIndex === index ? { ...allocation, [field]: value } : allocation);
+      return { ...item, lot_allocations: allocations, prepared_quantity: preparationLotTotal({ ...item, lot_allocations: allocations }) };
+    }));
+  }
+  function addPreparationLot(line: any) {
+    setPreviewLines((current) => current.map((item) => item.id === line.id
+      ? { ...item, lot_allocations: [...preparationLotAllocations(item), { lot_id: null, lot_code: "", expiry_date: "", quantity: "" }] }
+      : item));
+  }
+  async function removePreparationLot(line: any, index: number) {
+    const allocations = preparationLotAllocations(line).filter((_, allocationIndex) => allocationIndex !== index);
+    await updatePreparationLots(line, allocations.length ? allocations : [{ lot_id: null, lot_code: "", expiry_date: "", quantity: "" }]);
   }
   async function openPreparationRow(row: any) {
     if (!row?._virtual_order) return openPreview(row);
@@ -4703,7 +4768,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     });
     return () => { cancelled = true; };
   }, [preview?.id, previewLat, previewLon, previewWarehouse?.id, previewWarehouse?.address, previewWarehouse?.latitude, previewWarehouse?.longitude]);
-  const incompletePreparationLines = previewLines.filter((line: any) => Number(line.prepared_quantity || 0) < Number(line.quantity || 0));
+  const incompletePreparationLines = previewLines.filter((line: any) => preparationLotTotal(line) < Number(line.quantity || 0));
   const actionableIncompletePreparationLines = incompletePreparationLines.filter((line: any) => line.preparation_status !== "Incidencia" && !String(line.incident_resolution || "").trim());
   const isProducts = active === "Productos";
   const preparationRows = isLoadPreparation
@@ -5833,7 +5898,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
               {/** En pedidos y documentos con líneas mostramos el formato además de las unidades físicas. */}
               <thead>
                 <tr>
-                  {isLoadPreparation ? <><th>Ubicación</th><th>Producto</th><th>Lote / caducidad</th></> : <th>Producto</th>}
+                  {isLoadPreparation ? <><th>Ubicación</th><th>Producto</th><th>Lotes, caducidad y cantidad</th></> : <th>Producto</th>}
                   <th>{isLoadPreparation ? "Cantidad pedida" : ["Pedidos", "Presupuestos", "Facturas", "Albaranes"].includes(active) ? "Cantidad y formato" : "Cantidad"}</th>
                   {isLoadPreparation && <th>Cantidad preparada</th>}
                   {isLoadPreparation && <th>Estado</th>}
@@ -5848,7 +5913,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                   const unitPrice = Number(line.unit_price ?? line.unit_cost ?? product?.unit_price ?? 0);
                   const amount = Number(line.amount ?? (Number(line.quantity || 0) * unitPrice));
                   const requestedQuantity = Number(line.quantity || 0);
-                  const preparedQuantity = Number(line.prepared_quantity || 0);
+                  const lotAllocations = preparationLotAllocations(line);
+                  const preparedQuantity = preparationLotTotal(line);
                   // La cantidad real manda sobre el estado histórico: si se
                   // corrige una incidencia y ya coincide con lo pedido, la
                   // línea debe volver a mostrarse como completa antes de
@@ -5866,9 +5932,9 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                   return (
                   <Fragment key={line.id}>
                   <tr key={line.id} className={`prep-line-row prep-line-row-${displayLineStatusClass}`}>
-                    {isLoadPreparation ? <><td><div className="prep-location-field"><input aria-label={`Ubicación de ${product?.name || "producto"}`} value={locationDrafts[String(product?.id)] ?? product?.warehouse_location ?? ""} placeholder="Ej. B-126" onChange={(event) => setLocationDrafts((current) => ({ ...current, [String(product?.id)]: event.target.value }))} disabled={locationSavingId === -1} /><BarcodeScanner label="Escanear ubicación" disabled={locationSavingId === -1} onDetected={(value) => setLocationDrafts((current) => ({ ...current, [String(product?.id)]: value }))} /></div></td><td><div className="prep-product-cell"><b>{product?.name || `Producto #${line.product_id}`}</b><BarcodeScanner label="Escanear producto" onDetected={(value) => { const normalized = value.trim().toLowerCase(); const matched = productOptions.find((option: any) => [option.barcode, option.sku, option.code].some((candidate: any) => String(candidate || "").trim().toLowerCase() === normalized)); if (!matched) return setPreparationScanMessage({ text: "Código no reconocido. Revisa el producto o usa el campo manual.", kind: "error" }); if (Number(matched.id) !== Number(line.product_id)) return setPreparationScanMessage({ text: "El código corresponde a otro producto. Revisa la línea.", kind: "warning" }); setPreparationScanMessage({ text: `Producto correcto: ${matched.name || product?.name || "producto"}.`, kind: "success" }); }} /></div></td><td><div className="prep-traceability-fields"><label>Lote<input aria-label={`Lote de ${product?.name || "producto"}`} value={line.lot_code || ""} placeholder="Ej. L-2026-001" disabled={preparationTraceabilitySavingId === Number(line.id)} onChange={(event) => setPreviewLines((current) => current.map((item) => item.id === line.id ? { ...item, lot_code: event.target.value } : item))} onBlur={(event) => void updatePreparationTraceability(line, { lot_code: event.currentTarget.value.trim() || null })} /></label><label>Caducidad<input aria-label={`Fecha de caducidad de ${product?.name || "producto"}`} type="date" value={line.expiry_date || ""} disabled={preparationTraceabilitySavingId === Number(line.id)} onChange={(event) => setPreviewLines((current) => current.map((item) => item.id === line.id ? { ...item, expiry_date: event.target.value } : item))} onBlur={(event) => void updatePreparationTraceability(line, { expiry_date: event.currentTarget.value || null })} /></label></div></td></> : <td>{product?.name || `Producto #${line.product_id}`}</td>}
+                    {isLoadPreparation ? <><td><div className="prep-location-field"><input aria-label={`Ubicación de ${product?.name || "producto"}`} value={locationDrafts[String(product?.id)] ?? product?.warehouse_location ?? ""} placeholder="Ej. B-126" onChange={(event) => setLocationDrafts((current) => ({ ...current, [String(product?.id)]: event.target.value }))} disabled={locationSavingId === -1} /><BarcodeScanner label="Escanear ubicación" disabled={locationSavingId === -1} onDetected={(value) => setLocationDrafts((current) => ({ ...current, [String(product?.id)]: value }))} /></div></td><td><div className="prep-product-cell"><b>{product?.name || `Producto #${line.product_id}`}</b><BarcodeScanner label="Escanear producto" onDetected={(value) => { const normalized = value.trim().toLowerCase(); const matched = productOptions.find((option: any) => [option.barcode, option.sku, option.code].some((candidate: any) => String(candidate || "").trim().toLowerCase() === normalized)); if (!matched) return setPreparationScanMessage({ text: "Código no reconocido. Revisa el producto o usa el campo manual.", kind: "error" }); if (Number(matched.id) !== Number(line.product_id)) return setPreparationScanMessage({ text: "El código corresponde a otro producto. Revisa la línea.", kind: "warning" }); setPreparationScanMessage({ text: `Producto correcto: ${matched.name || product?.name || "producto"}.`, kind: "success" }); }} /></div></td><td><div className="prep-lot-allocation-list">{lotAllocations.map((allocation: any, allocationIndex: number) => <div className="prep-lot-allocation-row" key={`${line.id}-lot-${allocationIndex}`}><label>Lote<input aria-label={`Lote ${allocationIndex + 1} de ${product?.name || "producto"}`} value={allocation.lot_code || ""} placeholder="Ej. L-2026-001" disabled={preparationTraceabilitySavingId === Number(line.id)} onChange={(event) => updatePreparationLotDraft(line, allocationIndex, "lot_code", event.target.value)} onBlur={() => void updatePreparationLots(line, preparationLotAllocations({ ...line, lot_allocations: preparationLotAllocations(line) }))} /></label><label>Caducidad<input aria-label={`Caducidad del lote ${allocationIndex + 1} de ${product?.name || "producto"}`} type="date" value={allocation.expiry_date || ""} disabled={preparationTraceabilitySavingId === Number(line.id)} onChange={(event) => updatePreparationLotDraft(line, allocationIndex, "expiry_date", event.target.value)} onBlur={() => void updatePreparationLots(line, preparationLotAllocations({ ...line, lot_allocations: preparationLotAllocations(line) }))} /></label><label>Cantidad<input aria-label={`Cantidad del lote ${allocationIndex + 1} de ${product?.name || "producto"}`} className="prep-lot-quantity" type="number" min="0" max={requestedQuantity} step="any" value={allocation.quantity ?? ""} disabled={preparationTraceabilitySavingId === Number(line.id)} onChange={(event) => updatePreparationLotDraft(line, allocationIndex, "quantity", event.target.value)} onBlur={() => void updatePreparationLots(line, preparationLotAllocations({ ...line, lot_allocations: preparationLotAllocations(line) }))} /></label>{lotAllocations.length > 1 && <button type="button" className="prep-remove-lot" aria-label={`Quitar lote ${allocationIndex + 1}`} onClick={() => void removePreparationLot(line, allocationIndex)}>×</button>}</div>)}<button type="button" className="prep-add-lot" onClick={() => addPreparationLot(line)} disabled={preparationTraceabilitySavingId === Number(line.id)}>+ Añadir lote</button></div></td></> : <td>{product?.name || `Producto #${line.product_id}`}</td>}
                     <td>{isLoadPreparation || (["Pedidos", "Presupuestos", "Facturas", "Albaranes"].includes(active) && (line.quantity_unit || line.quantity_requested)) ? <div className="prep-quantity-summary"><b>{line.quantity_requested || line.quantity} {quantityUnitLabel(line.quantity_unit)}{(line.quantity_requested || line.quantity) !== 1 && !String(line.quantity_unit || "unidad").startsWith("pack_") ? "s" : ""}</b><small>· {line.quantity} unidades totales</small></div> : line.quantity}</td>
-                    {isLoadPreparation && <td><div className="prep-line-controls"><input className="prep-real-quantity" aria-label={`Cantidad preparada de ${product?.name || "producto"}`} type="number" min="0" max={requestedQuantity} step="any" value={line.prepared_quantity ?? 0} onFocus={(event) => event.currentTarget.select()} onChange={(event) => { const raw = event.target.value; setPreviewLines((current) => current.map((item) => { if (item.id !== line.id) return item; if (raw === "") return { ...item, prepared_quantity: "" }; const requested = Number(item.quantity || 0); return { ...item, prepared_quantity: Math.min(requested, Math.max(0, Number(raw) || 0)) }; })) }} onBlur={() => { if (line.prepared_quantity === "") setPreviewLines((current) => current.map((item) => item.id === line.id ? { ...item, prepared_quantity: 0 } : item)); }} /><span className="prep-unit-caption">uds.</span></div></td>}
+                    {isLoadPreparation && <td><div className="prep-total-quantity"><b>{preparedQuantity}</b><span>uds. en {lotAllocations.length} {lotAllocations.length === 1 ? "lote" : "lotes"}</span><small>de {requestedQuantity} pedidas</small></div></td>}
                     {isLoadPreparation && <td><span className={`prep-line-status prep-line-status-${displayLineStatusClass}`}>{displayLineStatus}</span></td>}
                     {isLoadPreparation && <td><div className="prep-line-actions">{line.preparation_status === "Incidencia" && !lineIsComplete ? <span className="prep-incident-open">Incidencia registrada</span> : <button type="button" className={`row-action ${lineIsValidated ? "validated" : "save"}`} disabled={lineIsValidated || preparationLineSavingId !== null} onClick={() => void markPreparationLine(line, true)}>{preparationLineSavingId === Number(line.id) ? "Validando…" : lineIsValidated ? "Validado ✓" : "Validar"}</button>}</div></td>}
                     {!isLoadPreparation && <td>{unitPrice.toFixed(2)} €</td>}

@@ -5425,6 +5425,37 @@ body:has(.reparto-page) .assistant-global{display:none !important}
 .load-preparation-manager .preview-lines tbody > tr.prep-line-row-pendiente,
 .load-preparation-manager .preview-lines tbody > tr.prep-line-row-incompleto { border-left: 4px solid #d99a2b !important; }
 .load-preparation-manager .preview-lines tbody > tr.prep-line-row-incidencia { border-left: 4px solid #bd2027 !important; }
+.shipment-label-lots { display: block; margin-top: 3px; color: #667781; font-size: 9px; font-weight: 600; line-height: 1.35; }
+
+/* Distribución de una misma línea entre varios lotes: cada lote conserva sus
+   tres datos juntos y el total de unidades se muestra aparte como suma. */
+.load-preparation-manager .prep-lot-allocation-list { display: grid; gap: 6px; min-width: 0; }
+.load-preparation-manager .prep-lot-allocation-row { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(112px, 1fr) minmax(76px, .65fr) 24px; align-items: end; gap: 6px; padding: 6px; border: 1px solid #dbe3e7; border-radius: 5px; background: #fbfcfd; }
+.load-preparation-manager .prep-lot-allocation-row label { display: grid; gap: 3px; min-width: 0; color: #64748b; font-size: 9px; font-weight: 700; }
+.load-preparation-manager .prep-lot-allocation-row input { width: 100%; min-width: 0; box-sizing: border-box; }
+.load-preparation-manager .prep-lot-quantity { text-align: right; font-weight: 700; }
+.load-preparation-manager .prep-remove-lot { width: 24px; height: 32px; border: 1px solid #e4a2a5; border-radius: 4px; background: #fff5f5; color: #bd2027; font-size: 18px; line-height: 1; cursor: pointer; }
+.load-preparation-manager .prep-add-lot { justify-self: start; border: 1px dashed #bd2027; border-radius: 4px; padding: 5px 9px; background: #fff; color: #9f1b21; font-size: 10px; font-weight: 700; cursor: pointer; }
+.load-preparation-manager .prep-add-lot:hover { background: #fff5f5; }
+.load-preparation-manager .prep-total-quantity { display: grid; gap: 2px; align-content: center; min-height: 48px; }
+.load-preparation-manager .prep-total-quantity b { color: #17242b; font-size: 18px; }
+.load-preparation-manager .prep-total-quantity span, .load-preparation-manager .prep-total-quantity small { color: #667781; font-size: 10px; }
+.load-preparation-manager .preview-lines th:nth-child(1), .load-preparation-manager .preview-lines td:nth-child(1) { width: 14%; }
+.load-preparation-manager .preview-lines th:nth-child(2), .load-preparation-manager .preview-lines td:nth-child(2) { width: 18%; }
+.load-preparation-manager .preview-lines th:nth-child(3), .load-preparation-manager .preview-lines td:nth-child(3) { width: 29%; }
+.load-preparation-manager .preview-lines th:nth-child(4), .load-preparation-manager .preview-lines td:nth-child(4) { width: 13%; }
+.load-preparation-manager .preview-lines th:nth-child(5), .load-preparation-manager .preview-lines td:nth-child(5) { width: 10%; }
+.load-preparation-manager .preview-lines th:nth-child(6), .load-preparation-manager .preview-lines td:nth-child(6) { width: 9%; }
+.load-preparation-manager .preview-lines th:nth-child(7), .load-preparation-manager .preview-lines td:nth-child(7) { width: 7%; }
+
+@media (max-width: 700px) {
+  .load-preparation-manager .prep-lot-allocation-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 86px 24px; }
+}
+
+@media (max-width: 760px) {
+  .load-preparation-manager .preview-lines tbody > tr:not(.prep-incident-full-row):not(.prep-incident-resolve-row) > td:nth-child(3)::before { content: "Lotes, caducidad y cantidad"; }
+  .load-preparation-manager .preview-lines tbody > tr:not(.prep-incident-full-row):not(.prep-incident-resolve-row) > td:nth-child(5)::before { content: "Total por lotes"; }
+}
 .prep-packages-panel {
   display: flex;
   align-items: center;
