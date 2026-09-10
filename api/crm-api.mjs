@@ -718,6 +718,7 @@ if (remoteMode && process.env.RUN_REMOTE_MIGRATIONS === "1") {
   }
 }
 for (const column of ["quantity_requested", "quantity_unit", "units_factor"]) { try { db.exec(`ALTER TABLE order_lines ADD COLUMN ${column} TEXT`); } catch {} }
+for (const column of ["lot_id INTEGER", "lot_code TEXT", "expiry_date TEXT"]) { try { db.exec(`ALTER TABLE order_lines ADD COLUMN ${column}`); } catch {} }
 try { db.exec("ALTER TABLE order_lines ADD COLUMN prepared INTEGER DEFAULT 0"); } catch {}
 try { db.exec("ALTER TABLE order_lines ADD COLUMN prepared_quantity REAL DEFAULT 0"); } catch {}
 try { db.exec("ALTER TABLE order_lines ADD COLUMN preparation_status TEXT DEFAULT 'Pendiente'"); } catch {}
