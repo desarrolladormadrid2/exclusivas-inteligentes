@@ -21,6 +21,26 @@ function Test-CrmHealth {
   return $false
 }
 
+$restartFlag = Join-Path $projectRoot 'scripts\restart.flag'
+if (Test-Path -LiteralPath $restartFlag) {
+  Remove-Item -LiteralPath $restartFlag -Force
+  Write-Log 'Restart flag detected. Forcing CRM restart (kill by port 3000)...'
+  $flagListener = Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($flagListener) {
+    taskkill /F /T /PID $flagListener.OwningProcess 2>&1 | Out-Null
+    Start-Sleep -Seconds 3
+  }
+  Start-Process -FilePath 'node' -ArgumentList '--env-file=.env.local','server-selfhost.mjs' -WorkingDirectory $projectRoot -WindowStyle Hidden
+  Start-Sleep -Seconds 10
+  & node -e "const http=require('http');const r=http.get({host:'127.0.0.1',port:3000,path:'/',timeout:15000},res=>process.exit(res.statusCode===200?0:1));r.on('timeout',()=>process.exit(1));r.on('error',()=>process.exit(1))" 2>$null
+  if ($LASTEXITCODE -eq 0) {
+    Write-Log 'Forced restart OK, CRM healthy.'
+  } else {
+    Write-Log 'Forced restart: CRM not healthy yet, watchdog will retry.'
+  }
+  exit 0
+}
+
 $listener = Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue |
   Where-Object { $_.State -eq 'Listen' } |
   Select-Object -First 1
