@@ -1303,6 +1303,21 @@ function attachOrderLineLots(row) {
     : [];
   return { ...row, lot_allocations: lotAllocations };
 }
+function attachOrderLineLotsBatch(rows) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const ids = safeRows.map((row) => Number(row?.id || 0)).filter((id) => id > 0);
+  if (!ids.length) return safeRows.map((row) => ({ ...row, lot_allocations: [] }));
+  const placeholders = ids.map(() => "?").join(",");
+  const allocations = db.prepare(`SELECT id,order_line_id,lot_id,lot_code,expiry_date,quantity FROM order_line_lots WHERE order_line_id IN (${placeholders}) ORDER BY id`).all(...ids);
+  const byLine = new Map();
+  for (const allocation of allocations) {
+    const key = Number(allocation.order_line_id);
+    const current = byLine.get(key) || [];
+    current.push({ id: allocation.id, lot_id: allocation.lot_id, lot_code: allocation.lot_code, expiry_date: allocation.expiry_date, quantity: allocation.quantity });
+    byLine.set(key, current);
+  }
+  return safeRows.map((row) => ({ ...row, lot_allocations: byLine.get(Number(row?.id || 0)) || [] }));
+}
 function portalSessionSecret() {
   return String(process.env.PORTAL_SESSION_SECRET || process.env.TURSO_AUTH_TOKEN || "exclusivas-inteligentes-portal-session");
 }
@@ -1366,7 +1381,8 @@ export async function crmApiHandler(req, res) {
                  ol.id,ol.prepared_quantity,ol.preparation_status,p.name AS product_name
           FROM order_lines ol
           LEFT JOIN products p ON p.id=ol.product_id
-          WHERE ol.order_id=? ORDER BY ol.id`).all(Number(shipment.order_id || 0)).map(attachOrderLineLots);
+          WHERE ol.order_id=? ORDER BY ol.id`).all(Number(shipment.order_id || 0));
+        const linesWithLots = attachOrderLineLotsBatch(lines);
         return send(res, 200, {
           shipment: {
             code: shipment.code,
@@ -1390,7 +1406,7 @@ export async function crmApiHandler(req, res) {
             client_name: shipment.client_name || "Cliente",
             location_name: shipment.location_name || "",
           },
-          lines,
+          lines: linesWithLots,
         });
       }
       if (p[1] === "documents" && p[2] && p[3] === "share" && p[4] && req.method === "GET") {
@@ -2582,7 +2598,7 @@ export async function crmApiHandler(req, res) {
         const cached = !isLookup && limitValue === null && offsetValue === 0
           ? cachedRows(t, includeDeleted, includeInactive)
           : null;
-        if (cached) return send(res, 200, t === "shipments" ? cached.map(attachShipmentTrackingToken) : t === "order_lines" ? cached.map(attachOrderLineLots) : cached);
+        if (cached) return send(res, 200, t === "shipments" ? cached.map(attachShipmentTrackingToken) : t === "order_lines" ? attachOrderLineLotsBatch(cached) : cached);
         const source = t === "orders"
           ? `orders LEFT JOIN clients AS order_client ON order_client.id=orders.client_id`
           : t === "shipments"
@@ -2615,7 +2631,7 @@ export async function crmApiHandler(req, res) {
         const responseRows = t === "shipments"
           ? rows.map(attachShipmentTrackingToken)
           : t === "order_lines"
-            ? rows.map(attachOrderLineLots)
+            ? attachOrderLineLotsBatch(rows)
             : rows;
         return send(
           res,
