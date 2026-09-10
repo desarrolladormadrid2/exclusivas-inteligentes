@@ -10,8 +10,15 @@ function Write-Log {
 }
 
 function Test-CrmHealth {
-  $result = & node -e "const http=require('http');const r=http.get({host:'127.0.0.1',port:3000,path:'/',timeout:15000},res=>{process.exit(res.statusCode===200?0:1)});r.on('timeout',()=>process.exit(1));r.on('error',()=>process.exit(1))" 2>$null
-  return ($LASTEXITCODE -eq 0)
+  for ($attempt = 1; $attempt -le 3; $attempt++) {
+    & node -e "const http=require('http');const r=http.get({host:'127.0.0.1',port:3000,path:'/',timeout:15000},res=>{process.exit(res.statusCode===200?0:1)});r.on('timeout',()=>process.exit(1));r.on('error',()=>process.exit(1))" 2>$null
+    if ($LASTEXITCODE -eq 0) {
+      if ($attempt -gt 1) { Write-Log "CRM healthy after $attempt attempts (slow but alive)." }
+      return $true
+    }
+    Start-Sleep -Seconds 8
+  }
+  return $false
 }
 
 $listener = Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue |
@@ -32,10 +39,10 @@ $stale = Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction Si
 $stale | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 Start-Process -FilePath 'node' -ArgumentList '--env-file=.env.local','server-selfhost.mjs' -WorkingDirectory $projectRoot -WindowStyle Hidden
-Start-Sleep -Seconds 5
+Start-Sleep -Seconds 10
 
 if (Test-CrmHealth) {
   Write-Log "CRM restarted and healthy."
 } else {
-  Write-Log "CRM failed to start or not healthy!"
+  Write-Log "CRM failed to start or not healthy after multiple attempts!"
 }
