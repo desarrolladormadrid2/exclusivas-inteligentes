@@ -88,6 +88,7 @@ const migrationsByTable = {
     ["table", "CREATE TABLE IF NOT EXISTS delivery_route_stops(id INTEGER PRIMARY KEY AUTOINCREMENT,route_id INTEGER NOT NULL,position INTEGER NOT NULL,shipment_id INTEGER,client_id INTEGER,collection_point_id INTEGER,client_name TEXT,address TEXT,city TEXT,latitude REAL,longitude REAL,distance_km REAL DEFAULT 0,status TEXT DEFAULT 'Pendiente',notes TEXT,created_at TEXT,updated_at TEXT)"],
   ],
   order_lines: [
+    ["order_line_lots_table", "CREATE TABLE IF NOT EXISTS order_line_lots(id INTEGER PRIMARY KEY AUTOINCREMENT,order_line_id INTEGER NOT NULL,lot_id INTEGER,lot_code TEXT,expiry_date TEXT,quantity REAL DEFAULT 0,created_at TEXT,updated_at TEXT)"],
     ["incident_resolution", "ALTER TABLE order_lines ADD COLUMN incident_resolution TEXT"],
     ["incident_resolved_at", "ALTER TABLE order_lines ADD COLUMN incident_resolved_at TEXT"],
     ["incident_resolved_by", "ALTER TABLE order_lines ADD COLUMN incident_resolved_by TEXT"],
@@ -319,6 +320,7 @@ for (const sql of [
   "CREATE INDEX IF NOT EXISTS idx_orders_delivery_date ON orders(delivery_date)",
   "CREATE INDEX IF NOT EXISTS idx_orders_client ON orders(client_id)",
   "CREATE INDEX IF NOT EXISTS idx_order_lines_order ON order_lines(order_id)",
+  "CREATE INDEX IF NOT EXISTS idx_order_line_lots_line ON order_line_lots(order_line_id)",
   "CREATE INDEX IF NOT EXISTS idx_invoices_client ON invoices(client_id)",
   "CREATE INDEX IF NOT EXISTS idx_shipments_order ON shipments(order_id)",
   "CREATE INDEX IF NOT EXISTS idx_shipments_public_tracking ON shipments(public_tracking_token)",
