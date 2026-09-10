@@ -24,6 +24,7 @@ try {
   if (-not (Test-Path -LiteralPath '.env.local')) { throw 'Missing persistent .env.local in production directory.' }
   $env:NODE_ENV = 'production'
   npm.cmd ci --omit=dev
+  npm.cmd run build
 
   # Restart via the SYSTEM watchdog task (flag-based). The runner cannot kill
   # the SYSTEM-owned CRM directly (Win32_Process CommandLine is empty for it
