@@ -2838,7 +2838,11 @@ export async function crmApiHandler(req, res) {
             ? db.prepare("SELECT address,opening_time,closing_time FROM collection_points WHERE id=? AND (client_id=? OR client_id IS NULL)").get(Number(d.collection_point_id), Number(d.client_id || 0))
             : null;
           const shipmentCode = `ENV-${new Date().getFullYear()}-${String(Date.now()).slice(-7)}`;
-          const createdShipment = db.prepare("INSERT INTO shipments(code,order_id,client_id,collection_point_id,status,preparation_date,urgent,expected_delivery_at,address,packages,incidents,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(shipmentCode, Number(r.lastInsertRowid), d.client_id || null, d.collection_point_id || null, "Preparando", d.preparation_date || null, Number(d.urgent || 0), d.shipping_date || d.delivery_date || null, shippingLocation?.address || d.address || client?.address || null, 1, "", d.urgent ? "PEDIDO URGENTE · Revisar todas las líneas antes de preparar." : "Preparación pendiente de revisión.", now, now);
+          const preparationNotes = [
+            Number(d.urgent || 0) === 1 ? "PEDIDO URGENTE · Revisar todas las líneas antes de preparar." : "",
+            String(d.notes || "").trim(),
+          ].filter(Boolean).join("\n") || "Preparación pendiente de revisión.";
+          const createdShipment = db.prepare("INSERT INTO shipments(code,order_id,client_id,collection_point_id,status,preparation_date,urgent,expected_delivery_at,address,packages,incidents,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(shipmentCode, Number(r.lastInsertRowid), d.client_id || null, d.collection_point_id || null, "Preparando", d.preparation_date || null, Number(d.urgent || 0), d.shipping_date || d.delivery_date || null, shippingLocation?.address || d.address || client?.address || null, 1, "", preparationNotes, now, now);
           db.prepare("UPDATE shipments SET delivery_window_start=?,delivery_window_end=? WHERE id=?").run(d.delivery_window_start || shippingLocation?.opening_time || client?.opening_time || null, d.delivery_window_end || shippingLocation?.closing_time || client?.closing_time || null, Number(createdShipment.lastInsertRowid));
         }
         if (t === "orders" && stockShortages.length) {
