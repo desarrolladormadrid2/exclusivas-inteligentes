@@ -5427,7 +5427,7 @@ body:has(.reparto-page) .assistant-global{display:none !important}
 .prep-packages-panel {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 16px;
   margin: 12px 0;
   padding: 13px 14px;
@@ -5435,7 +5435,7 @@ body:has(.reparto-page) .assistant-global{display:none !important}
   border-left: 4px solid #bd2027;
   background: #f8fafb;
 }
-.prep-packages-panel > div { display: grid; gap: 4px; }
+.prep-packages-panel > div { display: grid; gap: 4px; justify-items: center; text-align: center; }
 .prep-packages-panel b { color: #26343d; font-size: 12px; }
 .prep-packages-panel small { color: #71818a; font-size: 10px; }
 .prep-packages-panel input {

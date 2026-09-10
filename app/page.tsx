@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.90";
+const APP_VERSION = "2.0.91";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const initialModules = [
@@ -4172,8 +4172,12 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     setLocationSavingId(null);
   }
   async function savePreparationLocations() {
+    setPreparationValidationMessage("");
     const changedProducts = productOptions.filter((product) => String(locationDrafts[String(product.id)] || "").trim().toUpperCase() !== String(product.warehouse_location || "").trim().toUpperCase());
-    if (!changedProducts.length) return;
+    if (!changedProducts.length) {
+      setPreparationValidationMessage("Cambios guardados correctamente.");
+      return;
+    }
     const invalid = changedProducts.find((product) => !/^[A-Z]-([1-9]|[1-9]\d|[1-9]\d\d|200)$/.test(String(locationDrafts[String(product.id)] || "").trim().toUpperCase()));
     if (invalid) return setError(`La ubicación de ${invalid.name || "un producto"} debe tener el formato letra-número, por ejemplo B-126.`);
     setLocationSavingId(-1);
@@ -4184,8 +4188,13 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       return { product, value, response };
     }));
     const failed = results.find((result) => !result.response.ok);
-    if (failed) setError("No se pudieron guardar todas las ubicaciones. Revisa la conexión e inténtalo de nuevo.");
-    else setProductOptions((current) => current.map((product) => { const saved = results.find((result) => Number(result.product.id) === Number(product.id)); return saved ? { ...product, warehouse_location: saved.value } : product; }));
+    if (failed) {
+      setError("No se pudieron guardar todas las ubicaciones. Revisa la conexión e inténtalo de nuevo.");
+      setPreparationValidationMessage("");
+    } else {
+      setProductOptions((current) => current.map((product) => { const saved = results.find((result) => Number(result.product.id) === Number(product.id)); return saved ? { ...product, warehouse_location: saved.value } : product; }));
+      setPreparationValidationMessage("Cambios guardados correctamente.");
+    }
     setLocationSavingId(null);
   }
   async function savePreparationPackages() {
@@ -4203,8 +4212,10 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       if (!response.ok) throw new Error(data.error || "No se pudo guardar el número de bultos.");
       setPreview((current: any) => current ? { ...current, packages } : current);
       setRows((current) => current.map((item) => item.id === preview.id ? { ...item, packages } : item));
+      setPreparationValidationMessage("Bultos guardados correctamente.");
     } catch (error: any) {
       setError(error?.message || "No se pudo guardar el número de bultos.");
+      setPreparationValidationMessage("");
     } finally {
       setPreparationPackagesSaving(false);
     }
