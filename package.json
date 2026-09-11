@@ -1,6 +1,6 @@
 {
   "name": "site-creator-vinext-starter",
-  "version": "2.0.102",
+  "version": "2.0.103",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -12,6 +12,7 @@
     "start:selfhost": "node --env-file-if-exists=.env.local server-selfhost.mjs",
     "db:seed-historico": "node seed-historico.mjs",
     "db:seed-operativa-semana": "node scripts/seed-operativa-semana.mjs",
+    "db:seed-carga-colectiva": "node scripts/seed-carga-colectiva.mjs",
     "db:datos-reales": "node depurar-datos-reales.mjs",
     "db:geolocalizar": "node scripts/geocode-locations.mjs",
     "db:migrate-remote": "node scripts/migrate-remote-schema.mjs",

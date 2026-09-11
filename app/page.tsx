@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.102";
+const APP_VERSION = "2.0.103";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 function preparationLotAllocations(line: any) {
