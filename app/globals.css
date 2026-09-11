@@ -3673,12 +3673,16 @@ footer span {
 .collective-load-note b { flex: 0 0 auto; color: #26343d; }
 .collective-load-feedback { margin: 8px 20px 0; }
 .collective-load-list { margin: 12px 20px 4px; border: 1px solid #d1d9dd; }
-.collective-load-grid { display: grid; grid-template-columns: minmax(95px, .75fr) minmax(220px, 2.2fr) minmax(78px, .7fr) minmax(90px, .8fr) minmax(90px, .8fr) minmax(110px, .9fr) minmax(110px, .9fr); gap: 10px; align-items: center; }
+.collective-load-grid { display: grid; grid-template-columns: 34px minmax(95px, .75fr) minmax(220px, 2.2fr) minmax(78px, .7fr) minmax(90px, .8fr) minmax(90px, .8fr) minmax(110px, .9fr) minmax(110px, .9fr); gap: 10px; align-items: center; }
 .collective-load-grid-head { padding: 9px 11px; background: #f1f5f6; color: #60737d; font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
 .collective-load-record { border-top: 1px solid #dfe6e9; border-left: 4px solid #d99a2b; background: #fff; }
 .collective-load-record:first-of-type { border-top: 0; }
 .collective-load-record.is-validated { border-left-color: #198754; background: #fbfefc; }
+.collective-load-record.is-selected { box-shadow: inset 0 0 0 1px #b91c1c; }
 .collective-load-record-main { min-height: 58px; padding: 9px 11px; color: #26343d; font-size: 11px; }
+.collective-load-select { display: grid; place-items: center; min-width: 26px; min-height: 30px; cursor: pointer; }
+.collective-load-select input { width: 20px; height: 20px; margin: 0; accent-color: #b91c1c; }
+.collective-load-select span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .collective-load-record-main > div { display: grid; gap: 2px; min-width: 0; }
 .collective-load-record-main > div b { overflow-wrap: anywhere; color: #526670; font-size: 10px; }
 .collective-load-record-main > div span { overflow-wrap: anywhere; font-weight: 700; }
@@ -3690,6 +3694,7 @@ footer span {
 .collective-load-source-row > div { display: grid; gap: 2px; min-width: 0; }
 .collective-load-source-row > div b { color: #26343d; font-size: 10px; }
 .collective-load-source-row > div span, .collective-load-source-row > div small { overflow-wrap: anywhere; color: #71818a; font-size: 10px; }
+.collective-load-source-row > div .collective-load-source-requested { color: #26343d; font-weight: 700; }
 .collective-load-source-row label { display: grid; gap: 3px; color: #60737d; font-size: 9px; font-weight: 700; }
 .collective-load-source-row input { width: 100%; min-height: 34px; box-sizing: border-box; padding: 6px 8px; border: 1px solid #b8cbd2; color: #26343d; font: inherit; font-size: 13px; font-weight: 700; }
 .collective-load-source-row input:focus { border-color: #b91c1c; outline: 2px solid #f3b4b8; outline-offset: 1px; }
@@ -3698,8 +3703,8 @@ footer span {
 .collective-load-empty { display: grid; justify-items: center; gap: 5px; padding: 36px 20px; color: #71818a; text-align: center; }
 .collective-load-empty b { color: #26343d; }
 .collective-load-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px 18px; }
-@media (max-width: 850px) { .collective-load-grid-head { display: none; }.collective-load-record-main { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 12px; }.collective-load-record-main > button { justify-self: start; }.collective-load-source-row { grid-template-columns: minmax(0, 1fr) minmax(110px, .7fr); }.collective-load-source-row .collective-load-status, .collective-load-source-row .row-action { justify-self: start; }.prep-collective-toolbar { align-items: stretch; flex-direction: column; }.prep-collective-toolbar .button { width: 100%; } }
-@media (max-width: 520px) { .collective-load-overlay { align-items: start; padding: 0; }.collective-load-modal { width: 100%; max-height: 100vh; min-height: 100vh; }.collective-load-header, .collective-load-summary, .collective-load-actions { padding-left: 12px; padding-right: 12px; }.collective-load-note, .collective-load-list { margin-left: 12px; margin-right: 12px; }.collective-load-record-main { grid-template-columns: 1fr 1fr; }.collective-load-source-lines { padding-left: 12px; }.collective-load-source-row { grid-template-columns: 1fr; }.collective-load-source-row label { max-width: 180px; } }
+@media (max-width: 850px) { .collective-load-grid-head { display: none; }.collective-load-record-main { grid-template-columns: 34px repeat(2, minmax(0, 1fr)); gap: 7px 12px; }.collective-load-record-main > button { justify-self: start; }.collective-load-source-row { grid-template-columns: minmax(0, 1fr) minmax(110px, .7fr); }.collective-load-source-row .collective-load-status, .collective-load-source-row .row-action { justify-self: start; }.prep-collective-toolbar { align-items: stretch; flex-direction: column; }.prep-collective-toolbar .button { width: 100%; } }
+@media (max-width: 520px) { .collective-load-overlay { align-items: start; padding: 0; }.collective-load-modal { width: 100%; max-height: 100vh; min-height: 100vh; }.collective-load-header, .collective-load-summary, .collective-load-actions { padding-left: 12px; padding-right: 12px; }.collective-load-note, .collective-load-list { margin-left: 12px; margin-right: 12px; }.collective-load-record-main { grid-template-columns: 30px 1fr 1fr; }.collective-load-source-lines { padding-left: 12px; }.collective-load-source-row { grid-template-columns: 1fr; }.collective-load-source-row label { max-width: 180px; } }
 @media print { body:has(.collective-load-overlay) * { visibility: hidden !important; } body:has(.collective-load-overlay) .collective-load-overlay, body:has(.collective-load-overlay) .collective-load-overlay * { visibility: visible !important; }.collective-load-overlay { position: absolute; inset: 0; display: block; padding: 0; background: #fff; }.collective-load-modal { width: 100%; max-height: none; overflow: visible; border: 0; box-shadow: none; }.collective-load-close, .collective-load-actions, .collective-load-source-row input, .collective-load-source-row .row-action, .collective-load-record-main > button { display: none !important; }.collective-load-source-lines { display: grid !important; }.collective-load-list { margin-left: 0; margin-right: 0; }.collective-load-record { break-inside: avoid; } }
 
 /* Avisos/notas: texto largo legible, sin desbordar tarjetas ni cambiar de sección. */
