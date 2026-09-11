@@ -12,7 +12,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Crear pedidos demo directamente en Turso
-        shell: powershell
+        shell: powershell -ExecutionPolicy Bypass -Command "& '{0}'"
         run: |
           $ErrorActionPreference = 'Stop'
           $productionRoot = 'C:\Users\luism\Desktop\exclusivas-inteligentes'
