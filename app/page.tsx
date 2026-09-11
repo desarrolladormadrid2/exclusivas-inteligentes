@@ -1768,7 +1768,7 @@ function ProductLabelModal({ product, actor, onClose, onSaved }: { product: any;
     <div className="preview-overlay product-label-overlay" onClick={(event) => event.target === event.currentTarget && onClose()}>
       <div className="product-label-modal" onClick={(event) => event.stopPropagation()}>
         <div className="product-label-head"><div><p className="eyebrow">ETIQUETA DE PRODUCTO</p><h2>{product.name}</h2><small>Genera, guarda e imprime los códigos del catálogo.</small></div><button type="button" onClick={onClose} aria-label="Cerrar">×</button></div>
-        <div className="product-label-code"><label>Código de barras / referencia<input value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} /></label><button className="button primary" type="button" onClick={saveCode} disabled={saving}>{saving ? "Guardando…" : "Guardar código"}</button></div>
+        <div className="product-label-code"><label>Código de barras / referencia<div className="product-barcode-entry"><input value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }} /><BarcodeScanner label="Escanear código" description="Usa la cámara o un lector de mano; el código quedará en este producto." onDetected={(value) => setCode(value.trim().toUpperCase())} /></div><small className="product-barcode-help">Enfoca este campo y pulsa el lector de códigos. Después guarda el código.</small></label><button className="button primary" type="button" onClick={saveCode} disabled={saving}>{saving ? "Guardando…" : "Guardar código"}</button></div>
         {error && <p className="users-manager-error">{error}</p>}
         <div className={`product-label-preview product-label-print-${printMode}`}>
           <div className="print-label"><b>EXCLUSIVAS</b><strong>{product.name}</strong><small>{product.sku || code}</small><svg ref={barcodeRef} aria-label={`Código de barras ${code}`} /><span>{Number(product.unit_price || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</span><a className="button secondary product-code-download" href={barcodeDownloadUrl || "#"} download={`${code || "codigo-producto"}-barras.svg`} onClick={(event) => !barcodeDownloadUrl && event.preventDefault()}>Descargar barras SVG</a></div>
@@ -5147,6 +5147,14 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             <div><button type="button" className="button primary" onClick={createShippingLocation}>Guardar ubicación</button><button type="button" className="button secondary" onClick={() => setNewShippingLocationOpen(false)}>Cancelar</button></div>
           </div>}
         </>
+      ) : active === "Productos" && f === "barcode" ? (
+        <div className="product-barcode-field">
+          <div className="product-barcode-entry">
+            <input aria-label="Código de barras" value={form[f] ?? ""} onChange={(event) => handleFormChange(f, event.target.value.toUpperCase())} onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }} placeholder="Escanea o escribe el código" inputMode="numeric" />
+            <BarcodeScanner label="Escanear código" description="Apunta al código o usa la pistola lectora. El resultado se guardará en la ficha del producto." onDetected={(value) => handleFormChange(f, value.trim().toUpperCase())} />
+          </div>
+          <small className="product-barcode-help">Puedes escanear con una pistola conectada al equipo o usar la cámara.</small>
+        </div>
       ) : active === "Productos" && f === "supplier_id" ? (
         <div className="supplier-picker">
           <input aria-label="Buscar proveedor" autoComplete="off" placeholder="Buscar por nombre, NIF, teléfono o email…" value={supplierSearch || (lookups.suppliers || []).find((item: any) => Number(item.id) === Number(form.supplier_id))?.name || ""} onChange={(event) => { const value = event.target.value; setSupplierSearch(value); if (!value) handleFormChange(f, ""); }} />
