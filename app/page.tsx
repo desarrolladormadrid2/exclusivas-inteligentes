@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.98";
+const APP_VERSION = "2.0.99";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 function preparationLotAllocations(line: any) {
@@ -717,6 +717,7 @@ const cfg: any = {
     title: "Pedidos",
     fields: [
       "code",
+      "created_at",
       "client_id",
       "created_by",
       "collection_point_id",
@@ -740,6 +741,7 @@ const cfg: any = {
     ],
     labels: [
       "Código",
+      "Fecha de creación",
       "Cliente",
       "Solicitado por",
       "Lugar de envío",
@@ -1927,6 +1929,25 @@ function DocumentTemplatePreview({ template, onClose, onSaved, actor }: { templa
   return <div className="preview-overlay document-template-overlay" onClick={(event) => event.target === event.currentTarget && onClose()}><div className="document-template-modal" onClick={(event) => event.stopPropagation()}><div className="document-template-toolbar"><div><p className="eyebrow">{editMode ? "EDICIÓN · " : "PREVISUALIZACIÓN · "}{template.type}</p><h2>{editMode ? draft.title : template.title}</h2><small>{editMode ? "Modifica la plantilla aquí y guarda los cambios sin salir de esta ventana." : "Ejemplo rellenado con datos de muestra. Las variables se completarán al usar la plantilla."}</small></div><button type="button" onClick={onClose} aria-label="Cerrar">×</button></div>{editMode ? <div className="document-template-editor"><label>Nombre de la plantilla<input value={draft.title || ""} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label><div className="document-template-editor-grid"><label>Tipo<select value={draft.type || "General"} onChange={(event) => setDraft({ ...draft, type: event.target.value })}>{["Presupuesto", "Correo", "Albarán", "Factura", "Hoja de carga", "Contrato", "Alta de cliente", "Condiciones", "General"].map((value) => <option key={value}>{value}</option>)}</select></label><label>Formato<select value={draft.format || "HTML"} onChange={(event) => setDraft({ ...draft, format: event.target.value })}>{["HTML", "Texto plano", "PDF", "Word", "Correo electrónico"].map((value) => <option key={value}>{value}</option>)}</select></label></div><label>Descripción<input value={draft.description || ""} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label><label>Asunto o encabezado<input value={draft.subject || ""} onChange={(event) => setDraft({ ...draft, subject: event.target.value })} /></label><label>Contenido<textarea className="document-template-content-editor" value={draft.content || ""} onChange={(event) => setDraft({ ...draft, content: event.target.value })} /></label><small className="document-template-variable-help">Variables disponibles: {"{{cliente}}"}, {"{{fecha}}"}, {"{{total}}"}, {"{{lineas}}"}, {"{{direccion}}"} y otras variables de la plantilla.</small></div> : <article className="document-sheet"><header><div className="document-sheet-brand"><span>E</span><div><b>Exclusivas</b><small>INTELIGENTES</small></div></div><div className="document-sheet-meta">{template.code}<br />{template.format || "HTML"}</div></header><div className="document-sheet-rule" /><p className="document-sheet-subject">{String(template.subject || "").replace(/\{\{\s*(\w+)\s*\}\}/g, (_match, key) => sampleValues[String(key).toLowerCase()] || `{{${key}}}`)}</p><pre>{rendered}</pre></article>}<div className="document-template-actions">{editMode ? <><button type="button" className="button secondary" onClick={() => { setDraft({ ...template, content: normalizeTemplateText(template.content) }); setEditMode(false); }}>Cancelar</button><button type="button" className="button primary" disabled={saving} onClick={saveTemplate}>{saving ? "Guardando…" : "Guardar cambios"}</button></> : <><button type="button" className="button primary" onClick={() => setEditMode(true)}>Editar plantilla</button><button type="button" className="button secondary" onClick={onClose}>Cerrar</button><button type="button" className="button secondary" onClick={download}>Descargar texto</button><button type="button" className="button primary" onClick={() => window.print()}>Imprimir documento</button></>}</div></div></div>;
 }
 
+function DocumentCreatedModal({ notice, onClose, onOpenSection }: { notice: any; onClose: () => void; onOpenSection: () => void }) {
+  const label = notice.documentType === "Factura" ? "factura" : "albarán";
+  return <div className="preview-overlay document-created-overlay" role="dialog" aria-modal="true" aria-labelledby="document-created-title" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <article className="document-created-modal" onClick={(event) => event.stopPropagation()}>
+      <button type="button" className="preview-close" aria-label="Cerrar" onClick={onClose}>×</button>
+      <div className="document-created-icon" aria-hidden="true">✓</div>
+      <p className="eyebrow">DOCUMENTO GENERADO</p>
+      <h2 id="document-created-title">{notice.documentType} creado correctamente</h2>
+      <p className="document-created-code">{notice.code}</p>
+      <p className="document-created-copy">El {label} ya está guardado y el pedido ha actualizado su estado. Puedes abrirlo ahora o continuar trabajando.</p>
+      <div className="document-created-actions">
+        {notice.shareUrl ? <a className="button primary" href={notice.shareUrl} target="_blank" rel="noreferrer">Ver {label}</a> : <button type="button" className="button primary" onClick={onOpenSection}>Ver {label}</button>}
+        <button type="button" className="button secondary" onClick={onOpenSection}>Ir a {notice.module}</button>
+        <button type="button" className="button link-button" onClick={onClose}>Cerrar</button>
+      </div>
+    </article>
+  </div>;
+}
+
 function ProductIntelligencePanel({ products, suppliers, actor }: { products: any[]; suppliers: any[]; actor: string }) {
   const [productId, setProductId] = useState("");
   const [offers, setOffers] = useState<any[]>([]);
@@ -2479,6 +2500,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const [inlineDraft, setInlineDraft] = useState<any>({});
   const [search, setSearch] = useState("");
   const [preview, setPreview] = useState<any>(null);
+  const [documentCreationNotice, setDocumentCreationNotice] = useState<any>(null);
   const [entryDetail, setEntryDetail] = useState<any>(null);
   const [entryEdit, setEntryEdit] = useState<any>(null);
   const [entryIncidentSaving, setEntryIncidentSaving] = useState<number | null>(null);
@@ -2521,6 +2543,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const [shippingFilter, setShippingFilter] = useState("todos");
   const [listDateFrom, setListDateFrom] = useState("");
   const [listDateTo, setListDateTo] = useState("");
+  const [orderCreatedFrom, setOrderCreatedFrom] = useState("");
+  const [orderCreatedTo, setOrderCreatedTo] = useState("");
   const [listClient, setListClient] = useState("");
   const [listStatus, setListStatus] = useState("Todos");
   const [previewLines, setPreviewLines] = useState<any[]>([]);
@@ -2578,7 +2602,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const [pageSize, setPageSize] = useState(25);
   const [listSupplier, setListSupplier] = useState("");
   const [visibleFields, setVisibleFields] = useState<string[]>(c.fields);
-  const orderListFields = ["code", "client_id", "status", "billing_status", "payment_status", "shipping_status", "preparation_date", "delivery_date"];
+  const orderListFields = ["code", "created_at", "client_id", "status", "billing_status", "payment_status", "shipping_status", "preparation_date", "delivery_date"];
   const stockListFields = ["product_id", "unit", "warehouse_name", "stock", "stock_reserved", "available_stock", "min_stock", "stock_status"];
   const warehouseListFields: Record<string, string[]> = {
     products: ["name", "sku", "barcode", "category", "format", "unit", "unit_price", "cost_price", "stock", "stock_reserved", "min_stock", "warehouse_location", "warehouse_id", "product_status"],
@@ -2604,6 +2628,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   useEffect(() => {
     setListDateFrom("");
     setListDateTo("");
+    setOrderCreatedFrom("");
+    setOrderCreatedTo("");
     setListClient("");
     setListStatus("Todos");
     setListSupplier("");
@@ -3853,9 +3879,6 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     );
     const d = await r.json();
     if (!r.ok) return alert(d.error || "No se pudo generar el documento");
-    alert(
-      `${type === "invoice" ? "Factura" : "Albarán"} ${d.code} creado correctamente`,
-    );
     const nextStatus = type === "invoice" ? "Facturado" : "Preparado";
     const nextValues = type === "invoice"
       ? { status: nextStatus, billing_status: "Facturado", invoice_id: d.id }
@@ -3876,6 +3899,13 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     } catch {
       setLookups((current: any) => ({ ...current, [resource]: [d, ...(current[resource] || [])] }));
     }
+    setDocumentCreationNotice({
+      documentType: type === "invoice" ? "Factura" : "Albarán",
+      code: d.code,
+      id: d.id,
+      module: type === "invoice" ? "Facturas" : "Albaranes",
+      shareUrl: d.share_url || "",
+    });
   }
   async function convertDeliveryToInvoice(row: any) {
     const r = await fetch(
@@ -3884,7 +3914,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     );
     const d = await r.json();
     if (!r.ok) return alert(d.error || "No se pudo generar la factura");
-    alert(`Factura ${d.code} creada correctamente desde el albarán`);
+    setDocumentCreationNotice({ documentType: "Factura", code: d.code, id: d.id, module: "Facturas", shareUrl: d.share_url || "" });
   }
   async function convertProformaToInvoice(row: any) {
     const code = String(row.code || "").replace(/^PRO-/, "FAC-") || `FAC-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
@@ -3896,7 +3926,9 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     const updated = await response.json().catch(() => ({}));
     if (!response.ok) return alert(updated.error || "No se pudo convertir la proforma");
     setRows((current) => current.map((item) => item.id === row.id ? updated : item));
-    alert(`Factura ${updated.code} creada a partir de la proforma`);
+    let prepared = updated;
+    try { prepared = await prepareInvoicePdf(updated) || updated; } catch { /* El documento se puede abrir desde el listado aunque el PDF falle. */ }
+    setDocumentCreationNotice({ documentType: "Factura", code: prepared.code, id: prepared.id, module: "Facturas", shareUrl: prepared.share_url || "" });
   }
   async function prepareInvoicePdf(row: any, force = false) {
     const response = await fetch(`/api/invoices/${row.id}/pdf`, { method: "POST", headers: actorHeaders, body: JSON.stringify({ force }) });
@@ -3917,8 +3949,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     const link = data.share_url || `${window.location.origin}/api/invoices/share/${encodeURIComponent(data.share_token)}`;
     try { await navigator.clipboard.writeText(link); alert("Enlace seguro de la factura copiado."); } catch { window.prompt("Copia este enlace seguro de factura:", link); }
   }
-  async function prepareCommercialDocumentPdf(row: any, type: "order" | "quote", force = false) {
-    const label = type === "order" ? "pedido" : "presupuesto";
+  async function prepareCommercialDocumentPdf(row: any, type: "order" | "quote" | "delivery", force = false) {
+    const label = type === "order" ? "pedido" : type === "delivery" ? "albarán" : "presupuesto";
     const response = await fetch(`/api/documents/${type}/${row.id}/pdf`, { method: "POST", headers: actorHeaders, body: JSON.stringify({ force }) });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) { alert(data.error || `No se pudo generar el PDF del ${label}`); return null; }
@@ -3926,13 +3958,13 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     setPreview((current: any) => current && Number(current.id) === Number(data.id) ? { ...current, ...data } : current);
     return data;
   }
-  async function openCommercialDocumentPdf(row: any, type: "order" | "quote") {
+  async function openCommercialDocumentPdf(row: any, type: "order" | "quote" | "delivery") {
     const data = await prepareCommercialDocumentPdf(row, type);
     if (!data) return;
     window.open(data.share_url || `/api/documents/${type}/share/${encodeURIComponent(data.share_token)}`, "_blank", "noopener,noreferrer");
   }
-  async function copyCommercialDocumentLink(row: any, type: "order" | "quote") {
-    const label = type === "order" ? "pedido" : "presupuesto";
+  async function copyCommercialDocumentLink(row: any, type: "order" | "quote" | "delivery") {
+    const label = type === "order" ? "pedido" : type === "delivery" ? "albarán" : "presupuesto";
     const data = await prepareCommercialDocumentPdf(row, type);
     if (!data) return;
     const link = data.share_url || `${window.location.origin}/api/documents/${type}/share/${encodeURIComponent(data.share_token)}`;
@@ -4834,11 +4866,14 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     const linkedInvoice = active === "Cobros" ? (lookups.invoices || []).find((item: any) => Number(item.id) === Number(row.invoice_id)) : null;
     const rowClientId = row.client_id || linkedInvoice?.client_id || "";
     const rowDate = String(active === "Facturas" ? (row.issue_date || row.created_at) : active === "Cobros" ? (row.payment_date || row.created_at) : active === "Devoluciones" ? (row.return_date || row.created_at) : active === "Pedidos" ? (row.delivery_date || row.created_at) : active === "Preparación de pedidos" ? (row.preparation_date || row.expected_delivery_at || row.created_at) : active === "Entradas" ? (row.receipt_date || row.created_at) : active === "Compras" ? (row.order_date || row.created_at) : (row.created_at || row.movement_date || "")).slice(0, 10);
+    const rowCreatedDate = String(row.created_at || "").slice(0, 10);
     const matchesListClient = !listClient || String(rowClientId) === String(listClient);
     const rowSupplierId = row.supplier_id || row.primary_supplier_id || "";
     const matchesListSupplier = !listSupplier || String(rowSupplierId) === String(listSupplier);
     const matchesListFrom = !listDateFrom || (rowDate && rowDate >= listDateFrom);
     const matchesListTo = !listDateTo || (rowDate && rowDate <= listDateTo);
+    const matchesOrderCreatedFrom = active !== "Pedidos" || !orderCreatedFrom || (rowCreatedDate && rowCreatedDate >= orderCreatedFrom);
+    const matchesOrderCreatedTo = active !== "Pedidos" || !orderCreatedTo || (rowCreatedDate && rowCreatedDate <= orderCreatedTo);
     const matchesListStatus = listStatus === "Todos" || String(row.status || "") === listStatus;
     const available = Number(row.available_stock ?? Number(row.stock || 0) - Number(row.stock_reserved || 0));
     const criticalStock = available <= Number(row.min_stock || 0);
@@ -4850,7 +4885,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       || (quickView === "not-shipped" && ["Pendiente de enviar", "Preparado"].includes(currentShippingStatus))
       || (quickView === "critical" && criticalStock)
       || (quickView === "review" && (reviewStatus || currentBillingStatus !== "Facturado" && active === "Pedidos"));
-    if (!isProducts && !isLoadPreparation) return matchesText && matchesBilling && matchesShipping && matchesQuickView && (!listFilterActive || (matchesListClient && matchesListSupplier && matchesListFrom && matchesListTo && matchesListStatus));
+    if (!isProducts && !isLoadPreparation) return matchesText && matchesBilling && matchesShipping && matchesQuickView && matchesOrderCreatedFrom && matchesOrderCreatedTo && (!listFilterActive || (matchesListClient && matchesListSupplier && matchesListFrom && matchesListTo && matchesListStatus));
     if (isLoadPreparation) return matchesText && matchesQuickView && (!preparationDateFilter || String(row.preparation_date || "").slice(0, 10) === preparationDateFilter);
     const matchesCategory = !productFilters.category || row.category === productFilters.category;
     const matchesBrand = !productFilters.brand || row.brand === productFilters.brand;
@@ -4906,7 +4941,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const pagedRows = sortedRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   useEffect(() => {
     setPage(1);
-  }, [search, quickView, listDateFrom, listDateTo, listClient, listStatus, listSupplier, billingFilter, shippingFilter, preparationDateFilter, productFilters]);
+  }, [search, quickView, listDateFrom, listDateTo, orderCreatedFrom, orderCreatedTo, listClient, listStatus, listSupplier, billingFilter, shippingFilter, preparationDateFilter, productFilters]);
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
@@ -5437,10 +5472,14 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           {listFilterActive && <>
             <label className="list-filter-field">Cliente<select value={listClient} onChange={(event) => setListClient(event.target.value)} aria-label={`Filtrar ${active.toLowerCase()} por cliente`}><option value="">Todos los clientes</option>{(lookups.clients || []).map((client: any) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label>
             {active === "Compras" && <label className="list-filter-field">Proveedor<select value={listSupplier} onChange={(event) => setListSupplier(event.target.value)} aria-label="Filtrar compras por proveedor"><option value="">Todos los proveedores</option>{(lookups.suppliers || []).map((supplier: any) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}</select></label>}
-            <label className="list-filter-field">Desde<input type="date" value={listDateFrom} onChange={(event) => setListDateFrom(event.target.value)} aria-label={`Fecha inicial de ${active.toLowerCase()}`} /></label>
-            <label className="list-filter-field">Hasta<input type="date" value={listDateTo} onChange={(event) => setListDateTo(event.target.value)} aria-label={`Fecha final de ${active.toLowerCase()}`} /></label>
+            <label className="list-filter-field">{active === "Pedidos" ? "Entrega desde" : "Desde"}<input type="date" value={listDateFrom} onChange={(event) => setListDateFrom(event.target.value)} aria-label={`${active === "Pedidos" ? "Fecha inicial de entrega" : `Fecha inicial de ${active.toLowerCase()}`}`} /></label>
+            <label className="list-filter-field">{active === "Pedidos" ? "Entrega hasta" : "Hasta"}<input type="date" value={listDateTo} onChange={(event) => setListDateTo(event.target.value)} aria-label={`${active === "Pedidos" ? "Fecha final de entrega" : `Fecha final de ${active.toLowerCase()}`}`} /></label>
+            {active === "Pedidos" && <>
+              <label className="list-filter-field">Pedido creado desde<input type="date" value={orderCreatedFrom} onChange={(event) => setOrderCreatedFrom(event.target.value)} aria-label="Fecha inicial de creación del pedido" /></label>
+              <label className="list-filter-field">Pedido creado hasta<input type="date" value={orderCreatedTo} onChange={(event) => setOrderCreatedTo(event.target.value)} aria-label="Fecha final de creación del pedido" /></label>
+            </>}
             <label className="list-filter-field">Estado<select value={listStatus} onChange={(event) => setListStatus(event.target.value)} aria-label={`Filtrar ${active.toLowerCase()} por estado`}><option>Todos</option>{listStatusOptions.map((status) => <option key={status}>{status}</option>)}</select></label>
-            {(listClient || listSupplier || listDateFrom || listDateTo || listStatus !== "Todos") && <button type="button" className="deleted-toggle" onClick={() => { setListClient(""); setListSupplier(""); setListDateFrom(""); setListDateTo(""); setListStatus("Todos"); }}>Limpiar filtros</button>}
+            {(listClient || listSupplier || listDateFrom || listDateTo || orderCreatedFrom || orderCreatedTo || listStatus !== "Todos") && <button type="button" className="deleted-toggle" onClick={() => { setListClient(""); setListSupplier(""); setListDateFrom(""); setListDateTo(""); setOrderCreatedFrom(""); setOrderCreatedTo(""); setListStatus("Todos"); }}>Limpiar filtros</button>}
           </>}
           {isLoadPreparation && <div className="prep-date-filter" aria-label="Filtrar preparación por fecha"><label>Preparar el día <input type="date" value={preparationDateFilter} onChange={(event) => setPreparationDateFilter(event.target.value)} /></label><button type="button" className={`button ${preparationDateFilter === tabletTodayInput() ? "primary" : "secondary"}`} aria-pressed={preparationDateFilter === tabletTodayInput()} onClick={() => setPreparationDateFilter(tabletTodayInput())}>Hoy</button><button type="button" className={`button ${preparationDateFilter === tabletDateOffset(1) ? "primary" : "secondary"}`} aria-pressed={preparationDateFilter === tabletDateOffset(1)} onClick={() => setPreparationDateFilter(tabletDateOffset(1))}>Mañana</button><button type="button" className={`button ${preparationDateFilter === "" ? "primary" : "secondary"}`} aria-pressed={preparationDateFilter === ""} onClick={() => setPreparationDateFilter("")}>Todos</button></div>}
           {isLoadPreparation && <div className="prep-summary"><b>{filteredRows.length} pedidos a preparar</b><span>{preparationUrgentCount} urgentes</span><span>{preparationIncidentCount} con incidencia</span></div>}
@@ -5554,7 +5593,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             </thead>
             <tbody>
               {pagedRows.map((r) => (
-                  <tr key={r.id ?? r.product_id} data-inline-row={r.id ?? r.product_id} data-row-modal={active === "Presupuestos" || active === "Pedidos" || active === "Envíos" || usesRecordModal || active === "Entradas" ? "true" : undefined} className={`${isProducts && Number(r.stock || 0) - Number(r.stock_reserved || 0) <= Number(r.min_stock || 0) ? "product-row-critical" : ""}${isLoadPreparation && Number(r.urgent) === 1 ? " prep-row-urgent" : ""}${isLoadPreparation && r.status === "Preparado con incidencia" ? " prep-row-incident" : ""}${Number(r.deleted) === 1 ? " deleted-row" : ""}${active === "Pedidos" ? " order-list-row" : ""}`} onClick={(event) => { if (inlineEditing === (r.id ?? r.product_id) || (event.target as HTMLElement).closest("button, input, select, textarea, a, details, summary")) return; if (active === "Entradas") { void openEntryDetail(r); return; } if (active === "Envíos") { void openPreview(r); return; } if (active === "Presupuestos" || active === "Pedidos") { if (active === "Pedidos" && isOrderSent(r)) void openPreview(r); else void openRecordModal(r); return; } if (isLoadPreparation) { void openPreparationRow(r); return; } if (usesRecordModal) { void openRecordModal(r); return; } beginInline(r); }}>
+                  <tr key={r.id ?? r.product_id} data-inline-row={r.id ?? r.product_id} data-row-modal={active === "Presupuestos" || active === "Pedidos" || active === "Envíos" || active === "Facturas" || active === "Albaranes" || usesRecordModal || active === "Entradas" ? "true" : undefined} className={`${isProducts && Number(r.stock || 0) - Number(r.stock_reserved || 0) <= Number(r.min_stock || 0) ? "product-row-critical" : ""}${isLoadPreparation && Number(r.urgent) === 1 ? " prep-row-urgent" : ""}${isLoadPreparation && r.status === "Preparado con incidencia" ? " prep-row-incident" : ""}${Number(r.deleted) === 1 ? " deleted-row" : ""}${active === "Pedidos" ? " order-list-row" : ""}`} onClick={(event) => { if (inlineEditing === (r.id ?? r.product_id) || (event.target as HTMLElement).closest("button, input, select, textarea, a, details, summary")) return; if (active === "Entradas") { void openEntryDetail(r); return; } if (active === "Envíos" || active === "Facturas" || active === "Albaranes") { void openPreview(r); return; } if (active === "Presupuestos" || active === "Pedidos") { if (active === "Pedidos" && isOrderSent(r)) void openPreview(r); else void openRecordModal(r); return; } if (isLoadPreparation) { void openPreparationRow(r); return; } if (usesRecordModal) { void openRecordModal(r); return; } beginInline(r); }}>
                     {isProducts && <td className="product-check-column" data-label="Seleccionar"><input type="checkbox" checked={selectedProductIds.includes(Number(r.id))} onChange={() => toggleProductSelection(Number(r.id))} aria-label={`Seleccionar ${r.name}`} /></td>}
                     {isProducts && <td className="product-image-column" data-label="Imagen"><button type="button" className={`product-thumbnail-button${productImageSource(r) ? "" : " product-reference-thumbnail"}`} onClick={() => setProductDetail(r)} aria-label={`Abrir imagen de ${r.name}`}>{<img src={productDisplayImageSource(r)} alt={productImageSource(r) ? "" : `Imagen de referencia para ${r.name}`} loading="lazy" />}</button></td>}
                     {isProducts && renderProductLots(r)}
@@ -5634,12 +5673,11 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                           </>
                         )}
                         {active === "Albaranes" && (
-                          <button
-                            className="row-action workflow"
-                            onClick={() => convertDeliveryToInvoice(r)}
-                          >
-                            Crear factura
-                          </button>
+                          <>
+                            <button className="row-action workflow" onClick={() => void openCommercialDocumentPdf(r, "delivery")}>Ver PDF</button>
+                            <button className="row-action" onClick={() => void copyCommercialDocumentLink(r, "delivery")}>Compartir enlace</button>
+                            <button className="row-action workflow" onClick={() => convertDeliveryToInvoice(r)}>Crear factura</button>
+                          </>
                         )}
                         {active === "Facturas" && r.status === "Proforma" && (
                           <button className="row-action workflow" onClick={() => convertProformaToInvoice(r)}>
@@ -5689,7 +5727,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                               Cancelar
                             </button>
                           </>
-                        ) : active === "Pedidos" || active === "Entradas" || active === "Envíos" ? null : (
+                        ) : active === "Pedidos" || active === "Entradas" || active === "Envíos" || active === "Facturas" || active === "Albaranes" ? null : (
                           <button
                             className="row-action"
                             onClick={() => usesRecordModal ? void openRecordModal(r) : beginInline(r)}
@@ -5775,6 +5813,18 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           }}
         />
       )}
+      {documentCreationNotice && <DocumentCreatedModal
+        notice={documentCreationNotice}
+        onClose={() => setDocumentCreationNotice(null)}
+        onOpenSection={() => {
+          const module = documentCreationNotice.module;
+          setDocumentCreationNotice(null);
+          setPreview(null);
+          setFormOpen(false);
+          setEditing(null);
+          onNavigate?.(module);
+        }}
+      />}
       {preview && (
         <div className="preview-overlay document-preview-overlay" onClick={() => { setPreview(null); setShipmentLabelOpen(false); }}>
           <div
@@ -6066,6 +6116,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
               })()}
             </div>}
             <div className="preview-document-actions">
+              {(active === "Facturas" || active === "Albaranes") && <button className="button workflow" type="button" onClick={() => { const row = preview; setPreview(null); void openRecordModal(row); }}>Editar documento</button>}
               <button className="button secondary" disabled={previewLoading} onClick={() => window.print()}>
                 Imprimir / guardar PDF
               </button>
@@ -6074,6 +6125,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
               </button>}
             </div>
             {active === "Facturas" && <div className="invoice-document-actions"><button type="button" className="button workflow" onClick={() => void openInvoicePdf(preview)}>Ver PDF generado</button><button type="button" className="button secondary" onClick={() => void copyInvoiceLink(preview)}>Copiar enlace seguro</button><button type="button" className="button workflow" onClick={() => void sendInvoiceEmail(preview)}>Enviar por email</button><button type="button" className="button secondary" onClick={() => void prepareInvoicePdf(preview, true)}>Regenerar PDF</button></div>}
+            {active === "Albaranes" && <div className="invoice-document-actions"><button type="button" className="button workflow" onClick={() => void openCommercialDocumentPdf(preview, "delivery")}>Ver PDF generado</button><button type="button" className="button secondary" onClick={() => void copyCommercialDocumentLink(preview, "delivery")}>Copiar enlace seguro</button><button type="button" className="button secondary" onClick={() => void prepareCommercialDocumentPdf(preview, "delivery", true)}>Regenerar PDF</button></div>}
             {active === "Pedidos" && <><div className="document-pdf-actions"><button type="button" className="button workflow" onClick={() => void openCommercialDocumentPdf(preview, "order")}>Ver PDF generado</button><button type="button" className="button secondary" onClick={() => void copyCommercialDocumentLink(preview, "order")}>Copiar enlace seguro</button><button type="button" className="button secondary" onClick={() => void prepareCommercialDocumentPdf(preview, "order", true)}>Regenerar PDF</button></div><div className="order-preview-actions"><button type="button" className="button workflow" onClick={() => void (getOrderShipment(preview) ? openOrderLoadNote(preview) : createOrderLoadNote(preview))}>{getOrderShipment(preview) ? "Abrir nota de carga" : "Crear nota de carga"}</button>{!isOrderSent(preview) && <button type="button" className="button secondary" onClick={() => { setPreview(null); beginInline(preview); }}>Editar pedido</button>}<button type="button" className="button secondary" onClick={() => void convertOrder(preview, "delivery")}>Crear albarán</button><button type="button" className="button primary" onClick={() => void convertOrder(preview, "invoice")}>Crear factura</button></div></>}
             {active === "Presupuestos" && <><div className="document-pdf-actions"><button type="button" className="button workflow" onClick={() => void openCommercialDocumentPdf(preview, "quote")}>Ver PDF generado</button><button type="button" className="button secondary" onClick={() => void copyCommercialDocumentLink(preview, "quote")}>Copiar enlace seguro</button><button type="button" className="button secondary" onClick={() => void prepareCommercialDocumentPdf(preview, "quote", true)}>Regenerar PDF</button></div><div className="quote-preview-actions"><button type="button" className="button secondary" onClick={() => void sendQuoteToClient(preview)}>Enviar al cliente</button><button type="button" className="button primary" disabled={preview.status === "Convertido"} onClick={() => void convertQuoteToOrder(preview)}>{preview.status === "Convertido" ? "Convertido a pedido" : "Convertir a pedido"}</button></div></>}
           </div>

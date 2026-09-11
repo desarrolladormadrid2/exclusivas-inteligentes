@@ -255,6 +255,7 @@ function invoiceShareUrl(req, token) {
 const commercialPdfConfigs = {
   order: { table: "orders", lines: "order_lines", foreignKey: "order_id", label: "PEDIDO", folder: "pedidos", prefix: "pedido", dateFields: ["order_date", "delivery_date", "created_at"] },
   quote: { table: "quotes", lines: "quote_lines", foreignKey: "quote_id", label: "PRESUPUESTO", folder: "presupuestos", prefix: "presupuesto", dateFields: ["quote_date", "created_at"] },
+  delivery: { table: "delivery_notes", lines: "delivery_note_lines", foreignKey: "delivery_note_id", label: "ALBARÁN", folder: "albaranes", prefix: "albaran", dateFields: ["delivery_date", "created_at"] },
 };
 function commercialPdfConfig(type) {
   const config = commercialPdfConfigs[String(type || "").toLowerCase()];
@@ -683,7 +684,7 @@ if (remoteMode && process.env.RUN_REMOTE_MIGRATIONS === "1") {
   try { db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_share_token ON invoices(share_token) WHERE share_token IS NOT NULL").run(); } catch {}
 }
 try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_share_token ON invoices(share_token) WHERE share_token IS NOT NULL"); } catch {}
-for (const table of ["orders", "quotes"]) {
+for (const table of ["orders", "quotes", "delivery_notes"]) {
   for (const column of [
     "pdf_public_id TEXT",
     "pdf_url TEXT",
@@ -699,7 +700,7 @@ for (const table of ["orders", "quotes"]) {
 // Igual que en facturas, el adaptador Turso no ejecuta DDL genérico durante el
 // arranque; estas columnas se aplican de forma explícita en la primera instancia.
 if (remoteMode && process.env.RUN_REMOTE_MIGRATIONS === "1") {
-  for (const table of ["orders", "quotes"]) {
+  for (const table of ["orders", "quotes", "delivery_notes"]) {
     for (const column of [
       "pdf_public_id TEXT",
       "pdf_url TEXT",
@@ -714,7 +715,7 @@ if (remoteMode && process.env.RUN_REMOTE_MIGRATIONS === "1") {
     try { db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_${table}_share_token ON ${table}(share_token) WHERE share_token IS NOT NULL`).run(); } catch {}
   }
 }
-for (const table of ["orders", "quotes"]) {
+for (const table of ["orders", "quotes", "delivery_notes"]) {
   try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_${table}_share_token ON ${table}(share_token) WHERE share_token IS NOT NULL`); } catch {}
 }
 // El adaptador remoto no ejecuta las migraciones DDL genéricas del arranque.
@@ -1612,7 +1613,7 @@ export async function crmApiHandler(req, res) {
         const orders = db.prepare("SELECT id,code,status,amount,created_at,updated_at,delivery_date,preparation_date,shipping_date,address,urgent FROM orders WHERE client_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 50").all(session.id);
         const shipments = db.prepare("SELECT id,code,order_id,status,expected_delivery_at,address,packages,delivered_at,delivery_signature_status,delivery_recipient_name,delivery_signature_at,public_tracking_token FROM shipments WHERE client_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 50").all(session.id).map(attachShipmentTrackingToken);
         const invoices = db.prepare("SELECT i.id,i.code,i.order_id,i.amount,i.status,i.issue_date,i.due_date,i.pdf_url,i.pdf_status,i.pdf_generated_at,i.share_token FROM invoices i WHERE i.client_id=? AND CAST(COALESCE(i.deleted,0) AS INTEGER)=0 ORDER BY i.id DESC LIMIT 50").all(session.id).map((row) => ({ ...row, share_url: row.share_token ? invoiceShareUrl(req, row.share_token) : null }));
-        const deliveryNotes = db.prepare("SELECT id,code,order_id,status,created_at,updated_at FROM delivery_notes WHERE client_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 50").all(session.id);
+        const deliveryNotes = db.prepare("SELECT id,code,order_id,status,created_at,updated_at,pdf_url,pdf_status,pdf_generated_at,share_token FROM delivery_notes WHERE client_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 50").all(session.id).map((row) => ({ ...row, share_url: row.share_token ? documentShareUrl(req, "delivery", row.share_token) : null }));
         for (const order of orders) order.lines = db.prepare("SELECT ol.product_id,ol.quantity,ol.quantity_requested,ol.quantity_unit,ol.units_factor,ol.unit_price,ol.amount,p.name product_name,p.sku FROM order_lines ol LEFT JOIN products p ON p.id=ol.product_id WHERE ol.order_id=? ORDER BY ol.id").all(Number(order.id));
         return send(res, 200, {
           profile: client,
@@ -2457,8 +2458,12 @@ export async function crmApiHandler(req, res) {
         invalidateReadCache(delivery ? "delivery_note_lines" : "invoice_lines");
         invalidateReadCache("orders");
         let pdf = null;
-        if (!delivery) {
-          try { pdf = await ensureInvoicePdf(newId, actor); } catch (error) { pdf = { pdf_status: "Pendiente · PDF no generado", pdf_error: error?.message || "No se pudo generar el PDF" }; }
+        try {
+          pdf = delivery
+            ? await ensureCommercialDocumentPdf("delivery", newId, actor)
+            : await ensureInvoicePdf(newId, actor);
+        } catch (error) {
+          pdf = { pdf_status: "Pendiente · PDF no generado", pdf_error: error?.message || "No se pudo generar el PDF" };
         }
         return send(res, 201, {
           id: newId,
@@ -2469,7 +2474,9 @@ export async function crmApiHandler(req, res) {
           status: "Pendiente",
           pdf_status: pdf?.pdf_status || null,
           pdf_generated_at: pdf?.pdf_generated_at || null,
-          share_url: pdf?.share_token ? invoiceShareUrl(req, pdf.share_token) : null,
+          share_url: pdf?.share_token
+            ? delivery ? documentShareUrl(req, "delivery", pdf.share_token) : invoiceShareUrl(req, pdf.share_token)
+            : null,
           pdf_error: pdf?.pdf_error || null,
         });
       }

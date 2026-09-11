@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* El navegador no debe introducir azul de sistema en controles de la marca. */
+input[type="checkbox"] { accent-color: #b91c1c; }
+
 /* Netlify injects its promotional badge into the document at runtime. Keep
    the production UI free of host branding without touching application UI. */
 #nl-badge-frame,
@@ -3039,6 +3042,15 @@ footer span {
 .document-template-editor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .document-template-content-editor { min-height: 330px; resize: vertical; line-height: 1.55; }
 .document-template-variable-help { color: #71818a; font-size: 10px; }
+.document-created-overlay { z-index: 260; }
+.document-created-modal { position: relative; box-sizing: border-box; width: min(500px, calc(100vw - 32px)); padding: 30px; border-top: 4px solid #198754; background: #fff; box-shadow: 0 22px 70px rgba(25,40,48,.3); color: #26343d; }
+.document-created-modal .preview-close { position: absolute; top: 12px; right: 14px; }
+.document-created-icon { display: grid; place-items: center; width: 42px; height: 42px; margin-bottom: 16px; border-radius: 50%; background: #e8f7ef; color: #087f5b; font-size: 24px; font-weight: 800; }
+.document-created-modal h2 { margin: 4px 0 7px; font-size: 22px; font-weight: 600; }
+.document-created-code { margin: 0; color: #b91c1c; font-size: 16px; font-weight: 800; letter-spacing: .04em; }
+.document-created-copy { margin: 14px 0 0; color: #687782; font-size: 12px; line-height: 1.55; }
+.document-created-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+.document-created-actions .button { text-decoration: none; }
 @media (max-width: 600px) { .document-template-editor-grid { grid-template-columns: 1fr; } .document-template-content-editor { min-height: 260px; } }
 @media (max-width: 900px) { .document-template-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 600px) { .document-template-cards { grid-template-columns: 1fr; } .document-sheet { min-height: 420px; padding: 22px 18px; } }
