@@ -1,0 +1,30 @@
+name: Seed demo de carga colectiva
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    runs-on: [self-hosted, Windows, exclusivas-inteligentes]
+    timeout-minutes: 10
+    steps:
+      - name: Crear pedidos demo directamente en Turso
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $productionRoot = 'C:\Users\luism\Desktop\exclusivas-inteligentes'
+          if (-not (Test-Path -LiteralPath $productionRoot)) {
+            throw "No existe el directorio de producción: $productionRoot"
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $productionRoot '.env.local'))) {
+            throw 'No existe el .env.local persistente de producción.'
+          }
+          Push-Location $productionRoot
+          try {
+            npm.cmd run db:seed-carga-colectiva
+          } finally {
+            Pop-Location
+          }
