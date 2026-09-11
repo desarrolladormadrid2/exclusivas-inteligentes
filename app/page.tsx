@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.100";
+const APP_VERSION = "2.0.101";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 function preparationLotAllocations(line: any) {
@@ -2082,6 +2082,128 @@ function PreparationDayCards({ rows, lookups, onOpen, dateFilter, onDateFilterCh
   return <section className="prep-command-board" aria-label="Comandas de preparación"><div className="prep-command-toolbar"><div className="prep-command-toolbar-title"><b>Pedidos para preparar</b><span>{dateFilter ? `Preparación del ${formatSpanishDateValue(dateFilter, false)}` : "Todas las preparaciones"}</span></div><div className="prep-command-filters"><label>Preparar el día<input type="date" value={dateFilter} onChange={(event) => onDateFilterChange(event.target.value)} /></label><button type="button" className={`button ${dateFilter === today ? "primary" : "secondary"}`} aria-pressed={dateFilter === today} onClick={() => onDateFilterChange(today)}>Hoy</button><button type="button" className={`button ${dateFilter === tomorrow ? "primary" : "secondary"}`} aria-pressed={dateFilter === tomorrow} onClick={() => onDateFilterChange(tomorrow)}>Mañana</button><button type="button" className={`button ${dateFilter === "" ? "primary" : "secondary"}`} aria-pressed={dateFilter === ""} onClick={() => onDateFilterChange("")}>Todos</button></div></div><div className="prep-command-summary"><span><b>{items.length}</b> pedidos</span><span><b>{items.filter((row) => Number(row.urgent) === 1).length}</b> urgentes</span><span><b>{items.filter((row) => row.status === "Preparado con incidencia").length}</b> con incidencia</span><span className="prep-command-summary-hint">Pulsa una comanda para revisar sus líneas</span></div>{!items.length ? <div className="prep-command-empty"><b>{dateFilter ? "No hay pedidos para esta fecha" : "No hay pedidos pendientes"}</b><span>{dateFilter ? "Prueba otra fecha o pulsa “Todos”." : "Cuando se creen preparaciones aparecerán aquí."}</span></div> : <div className="prep-command-columns">{groups.map((group) => { const groupItems = items.filter(group.match); return <section className={`prep-command-column prep-command-${group.key}`} key={group.key}><header><div><b>{group.title}</b><small>{group.hint}</small></div><strong>{groupItems.length}</strong></header><div>{groupItems.map(renderCard)}{!groupItems.length && <p className="prep-command-none">Sin pedidos</p>}</div></section>; })}</div>}</section>;
 }
 
+function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { rows: any[]; lookups: any; dateFilter: string; actor: string; onClose: () => void }) {
+  const [sourceLines, setSourceLines] = useState<any[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [loading, setLoading] = useState(true);
+  const [savingId, setSavingId] = useState<number | null>(null);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const items = rows
+    .filter((row) => !dateFilter || String(row.preparation_date || row.delivery_date || row.expected_delivery_at || "").slice(0, 10) === dateFilter)
+    .filter((row) => !["Cancelado", "Anulado"].includes(String(row.status || "")));
+  const orderIds = Array.from(new Set(items.map((row) => Number(row.order_id || row._source_order_id || 0)).filter(Boolean)));
+  const orderKey = orderIds.join(",");
+  const getProduct = (line: any) => (lookups.products || []).find((product: any) => Number(product.id) === Number(line.product_id));
+  const requestedQuantity = (line: any) => Number(line.quantity ?? line.quantity_requested ?? 0) || 0;
+  const preparedQuantity = (line: any) => {
+    const requested = requestedQuantity(line);
+    const allocated = preparationLotTotal(line);
+    if (allocated > 0) return allocated;
+    if (Number(line.prepared_quantity || 0) > 0) return Number(line.prepared_quantity);
+    return String(line.preparation_status || "") === "Preparado" || Number(line.prepared || 0) === 1 ? requested : 0;
+  };
+  const lineIsValidated = (line: any) => preparedQuantity(line) >= requestedQuantity(line) && requestedQuantity(line) > 0;
+  const shipmentForOrder = (orderId: number) => items.find((row) => !row._virtual_order && Number(row.order_id) === Number(orderId));
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    fetch("/api/order_lines", { headers: { "X-Actor": actor } })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("No se han podido cargar las líneas de los pedidos.")))
+      .then((payload) => {
+        if (cancelled) return;
+        const lines = (Array.isArray(payload) ? payload : []).filter((line: any) => orderIds.includes(Number(line.order_id)));
+        setSourceLines(lines);
+        setDrafts(Object.fromEntries(lines.map((line: any) => [String(line.id), String(preparedQuantity(line))])));
+      })
+      .catch((reason: any) => { if (!cancelled) setError(reason?.message || "No se han podido cargar las líneas de los pedidos."); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [orderKey, actor]);
+
+  const groups = Array.from(sourceLines.reduce((map: Map<string, any>, line: any) => {
+    const product = getProduct(line);
+    const location = warehouseLocationLabel(product?.warehouse_location || line.warehouse_location);
+    const key = `${line.product_id || "sin-producto"}|${location}`;
+    const current = map.get(key) || { key, product, location, lines: [], requested: 0, prepared: 0 };
+    current.lines.push(line);
+    current.requested += requestedQuantity(line);
+    current.prepared += preparedQuantity(line);
+    map.set(key, current);
+    return map;
+  }, new Map()).values()).sort((a: any, b: any) => String(a.location).localeCompare(String(b.location), "es", { numeric: true }) || String(a.product?.name || "").localeCompare(String(b.product?.name || ""), "es"));
+
+  async function updateShipmentStatus(orderId: number, nextLines: any[]) {
+    const shipment = shipmentForOrder(orderId);
+    if (!shipment) return;
+    const nextStatus = nextLines.some((line) => line.preparation_status === "Incidencia")
+      ? "Preparado con incidencia"
+      : nextLines.length > 0 && nextLines.every((line) => lineIsValidated(line))
+        ? "Preparado"
+        : "Preparando";
+    const response = await fetch(`/api/shipments/${shipment.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "X-Actor": actor },
+      body: JSON.stringify({ ...shipment, status: nextStatus, prepared_by: actor }),
+    });
+    if (!response.ok) throw new Error("La línea se guardó, pero no se pudo actualizar el estado de la nota de carga.");
+  }
+
+  async function saveLine(line: any, validate = false) {
+    if (savingId !== null) return;
+    const requested = requestedQuantity(line);
+    const quantity = Math.max(0, Number(drafts[String(line.id)] ?? preparedQuantity(line)) || 0);
+    if (quantity > requested) {
+      setError(`La cantidad preparada de ${getProduct(line)?.name || "la línea"} no puede superar ${requested}.`);
+      return;
+    }
+    if (validate && quantity < requested) {
+      setError("No se puede validar una línea incompleta. Ajusta primero la cantidad preparada.");
+      return;
+    }
+    setSavingId(Number(line.id));
+    setError("");
+    setMessage("");
+    const next = { ...line, prepared_quantity: quantity, prepared: quantity >= requested && requested > 0 ? 1 : 0, preparation_status: quantity >= requested && requested > 0 ? "Preparado" : quantity > 0 ? "Parcial" : "Pendiente" };
+    const response = await fetch(`/api/order_lines/${line.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "X-Actor": actor },
+      body: JSON.stringify(next),
+    });
+    if (!response.ok) {
+      setError("No se pudo guardar esta línea. Revisa la conexión y vuelve a intentarlo.");
+      setSavingId(null);
+      return;
+    }
+    const nextLines = sourceLines.map((item) => item.id === line.id ? next : item);
+    setSourceLines(nextLines);
+    setDrafts((current) => ({ ...current, [String(line.id)]: String(quantity) }));
+    try {
+      await updateShipmentStatus(Number(line.order_id), nextLines.filter((item) => Number(item.order_id) === Number(line.order_id)));
+      setMessage(validate ? "Registro validado correctamente." : "Cantidad preparada guardada correctamente.");
+    } catch (reason: any) {
+      setError(reason?.message || "La línea se guardó, pero no se pudo actualizar la nota de carga.");
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  return <div className="collective-load-overlay" role="dialog" aria-modal="true" aria-label="Orden de carga colectiva" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <section className="collective-load-modal" onClick={(event) => event.stopPropagation()}>
+      <header className="collective-load-header"><div><p className="eyebrow">LOGÍSTICA · PREPARACIÓN</p><h2>Orden de carga colectiva</h2><small>{dateFilter ? `Preparación del ${formatSpanishDateValue(dateFilter, false)}` : "Todas las preparaciones"} · artículos ordenados por ubicación</small></div><button type="button" className="preview-close collective-load-close" aria-label="Cerrar" onClick={onClose}>×</button></header>
+      <div className="collective-load-summary"><span><b>{items.length}</b> pedidos</span><span><b>{groups.length}</b> referencias</span><span><b>{sourceLines.filter(lineIsValidated).length}/{sourceLines.length}</b> líneas validadas</span><span><b>{Math.max(0, groups.reduce((total: number, group: any) => total + group.requested - group.prepared, 0))}</b> unidades pendientes</span></div>
+      <div className="collective-load-note"><b>Edición segura</b><span>La cantidad y la validación se guardan en la línea del pedido original. Si un artículo aparece en varios pedidos, despliega su registro para trabajar cada pedido por separado.</span></div>
+      {error && <p className="collective-load-feedback error-message" role="alert">{error}</p>}
+      {message && <p className="collective-load-feedback success-message" role="status">{message}</p>}
+      {loading ? <div className="collective-load-empty"><span className="loading-spinner" /><p>Cargando artículos de los pedidos…</p></div> : !groups.length ? <div className="collective-load-empty"><b>No hay artículos para esta fecha</b><span>Prueba otra fecha o vuelve a “Todos”.</span></div> : <div className="collective-load-list"><div className="collective-load-grid collective-load-grid-head"><b>Ubicación</b><b>Artículo</b><b>Pedidos</b><b>Cantidad</b><b>Preparada</b><b>Estado</b><b>Acciones</b></div>{groups.map((group: any) => { const complete = group.prepared >= group.requested && group.requested > 0; const groupKey = String(group.key); return <article className={`collective-load-record${complete ? " is-validated" : " is-pending"}`} key={groupKey}><div className="collective-load-grid collective-load-record-main"><strong>{group.location}</strong><div><b>{group.product?.sku || "Sin SKU"}</b><span>{group.product?.name || `Producto #${group.lines[0]?.product_id || "—"}`}</span></div><span>{group.lines.length} {group.lines.length === 1 ? "pedido" : "pedidos"}</span><strong>{group.requested} {quantityUnitLabel(group.lines[0]?.quantity_unit || group.product?.unit)}</strong><strong>{group.prepared} / {group.requested}</strong><span className={`collective-load-status${complete ? " valid" : " pending"}`}>{complete ? "Validado" : "Pendiente"}</span><button type="button" className="row-action workflow" onClick={() => setExpanded((current) => ({ ...current, [groupKey]: !current[groupKey] }))}>{expanded[groupKey] ? "Ocultar líneas" : "Ver líneas"}</button></div>{expanded[groupKey] && <div className="collective-load-source-lines">{group.lines.map((line: any) => { const product = getProduct(line); const validated = lineIsValidated(line); const order = items.find((item) => Number(item.order_id || item._source_order_id) === Number(line.order_id)); const lots = preparationLotAllocations(line).filter((lot: any) => lot.lot_code || lot.expiry_date || Number(lot.quantity) > 0); return <div className="collective-load-source-row" key={line.id}><div><b>{order?.code || `Pedido #${line.order_id}`}</b><span>{lots.length ? lots.map((lot: any) => `${lot.lot_code || "Sin lote"}${lot.expiry_date ? ` · caduca ${formatSpanishDateValue(lot.expiry_date, false)}` : ""}`).join(" · ") : "Sin lote asignado"}</span>{product?.warehouse_location && <small>Ubicación: {warehouseLocationLabel(product.warehouse_location)}</small>}</div><label>Cantidad preparada<input type="number" min="0" max={requestedQuantity(line)} step="any" value={drafts[String(line.id)] ?? "0"} onChange={(event) => setDrafts((current) => ({ ...current, [String(line.id)]: event.target.value }))} /></label><span className={`collective-load-status${validated ? " valid" : " pending"}`}>{validated ? "Validada" : "Pendiente"}</span><button type="button" className="row-action secondary" disabled={savingId !== null} onClick={() => void saveLine(line)}>{savingId === line.id ? "Guardando…" : "Guardar"}</button><button type="button" className="row-action workflow" disabled={savingId !== null || Number(drafts[String(line.id)] ?? preparedQuantity(line)) < requestedQuantity(line)} onClick={() => void saveLine(line, true)}>{validated ? "Validada ✓" : "Validar"}</button></div>; })}</div>}</article>; })}</div>}
+      <footer className="collective-load-actions"><button type="button" className="button secondary collective-load-print" onClick={() => window.print()}>Imprimir listado</button><button type="button" className="button secondary" onClick={onClose}>Cerrar</button></footer>
+    </section>
+  </div>;
+}
+
 function formatSpanishDateValue(value: any, includeTime = true) {
   const raw = String(value ?? "").replace("T", " ");
   const match = raw.slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -2567,6 +2689,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const [preparationClosingTimeDraft, setPreparationClosingTimeDraft] = useState("");
   const [preparationAddressSaving, setPreparationAddressSaving] = useState(false);
   const [preparationPackagesSaving, setPreparationPackagesSaving] = useState(false);
+  const [collectiveLoadOpen, setCollectiveLoadOpen] = useState(false);
   const [preparationAddressMessage, setPreparationAddressMessage] = useState("");
   const [preparationAddressError, setPreparationAddressError] = useState("");
   const [preparationUpdateClient, setPreparationUpdateClient] = useState(false);
@@ -5250,6 +5373,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       {productSaveMessage && active === "Productos" && <div className="success-message" role="status">{productSaveMessage}</div>}
       {!isLoadPreparation && active !== "Pedidos" && <BusinessRelatedPanels active={active} rows={rows} lookups={lookups} onNavigate={onNavigate} />}
       {isLoadPreparation && <div className="prep-export-row"><button type="button" className="button secondary icon-action" onClick={download} aria-label="Descargar Excel/CSV" title="Descargar Excel/CSV"><ToolbarIcon name="download" /><span className="icon-action-label">Descargar Excel/CSV</span></button></div>}
+      {isLoadPreparation && <div className="prep-collective-toolbar"><div><b>Preparación colectiva</b><small>Consulta y valida las líneas de todos los pedidos ordenadas por ubicación.</small></div><button type="button" className="button workflow" onClick={() => setCollectiveLoadOpen(true)}>Orden de carga colectiva</button></div>}
       {isLoadPreparation && <PreparationDayCards rows={preparationRows} lookups={lookups} dateFilter={preparationDateFilter} onDateFilterChange={setPreparationDateFilter} onOpen={(row) => void openPreparationRow(row)} />}
       {active === "Gastos y tickets" && (
         <ExpenseScanner
@@ -6136,6 +6260,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         </div>
       )}
       {shipmentLabelOpen && preview && isLoadPreparation && <ShipmentLabelModal shipment={preview} client={previewClient} lines={previewLines} products={productOptions} address={previewAddress} city={previewCity} onClose={() => setShipmentLabelOpen(false)} />}
+      {collectiveLoadOpen && isLoadPreparation && <CollectiveLoadModal rows={preparationRows} lookups={lookups} dateFilter={preparationDateFilter} actor={user?.username || "Usuario local"} onClose={() => setCollectiveLoadOpen(false)} />}
       {notePreview && (
         <div className="preview-overlay" onClick={() => setNotePreview(null)}>
           <article className="note-preview-card" onClick={(event) => event.stopPropagation()}>
