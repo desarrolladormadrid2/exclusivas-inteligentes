@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.99";
+const APP_VERSION = "2.0.100";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 function preparationLotAllocations(line: any) {
@@ -4748,7 +4748,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     .sort((a: any, b: any) => String(a.username || "").localeCompare(String(b.username || ""), "es"));
   const currentUsername = String(user?.username || "Usuario local");
   const preparationAssigneeNames = new Set(preparationAssigneeOptions.map((candidate: any) => String(candidate.username || "")));
-  const usesRecordModal = ["Clientes", "Proveedores", "Almacenes", "Lugares de recogida", "Productos"].includes(active);
+  const usesRecordModal = ["Clientes", "Proveedores", "Almacenes", "Lugares de recogida", "Productos", "Cobros"].includes(active);
   const previewLocation = preview ? (lookups.collection_points || []).find((item: any) => Number(item.id) === Number(preview.collection_point_id)) : null;
   const previewLatValue = Number(previewLocation?.latitude ?? previewClient?.latitude);
   const previewLonValue = Number(previewLocation?.longitude ?? previewClient?.longitude);
@@ -5656,13 +5656,17 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                         {(active === "Facturas" ||
                           active === "Albaranes" ||
                           active === "Preparación de pedidos" ||
-                          active === "Cobros" ||
                           active === "Compras") && (
                           <button
                             className="row-action primary"
                             onClick={() => void openPreparationRow(r)}
                           >
                             Vista previa
+                          </button>
+                        )}
+                        {active === "Cobros" && (
+                          <button className="row-action primary" onClick={() => void openRecordModal(r)}>
+                            Editar cobro
                           </button>
                         )}
                         {active === "Facturas" && (
@@ -5727,7 +5731,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                               Cancelar
                             </button>
                           </>
-                        ) : active === "Pedidos" || active === "Entradas" || active === "Envíos" || active === "Facturas" || active === "Albaranes" ? null : (
+                        ) : active === "Pedidos" || active === "Entradas" || active === "Envíos" || active === "Facturas" || active === "Albaranes" || active === "Cobros" ? null : (
                           <button
                             className="row-action"
                             onClick={() => usesRecordModal ? void openRecordModal(r) : beginInline(r)}
@@ -5890,7 +5894,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                 setRows((current) => current.map((item) => active === "Envíos" && Number(item.id) === Number(updated.id) ? { ...item, ...updated } : active === "Pedidos" && Number(item.id) === Number(updated.order_id || deliveryShipment.order_id) ? { ...item, status: "Entregado" } : item));
               }} />;
             })()}
-             {!(["Facturas", "Cobros"] as string[]).includes(active) && (previewLocation || previewAddress || previewClient?.address) && <section className="delivery-map-panel" aria-label="Ruta de entrega"><div className="delivery-map-info"><b>Ubicación de entrega</b><span>{previewLocation?.name || "Dirección del cliente"} · {previewAddress || "Dirección no indicada"}</span>{(previewLocation?.geocoding_status === "Geolocalizada" || previewClient?.geocoding_status === "Geolocalizada") ? <small>Ubicación geolocalizada</small> : <small>Pendiente de geolocalizar</small>}{previewLat && previewLon && <small className="delivery-distance">{previewWarehouseDistanceKm === null ? "Calculando distancia desde el almacén…" : previewWarehouseDistanceKm >= 0 ? `${previewWarehouseDistanceKm.toLocaleString("es-ES", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} km estimados desde ${previewWarehouse?.name || "el almacén"}` : "Distancia no disponible: completa las coordenadas del almacén."}</small>}</div><div className="delivery-map-visual">{previewLat && previewLon ? <><IntegratedMap locations={[{ latitude: previewLat, longitude: previewLon, name: previewLocation?.name || previewClient?.name }]} /><a className="button primary delivery-map-navigation" href={previewNavigationUrl} target="_blank" rel="noreferrer"><ToolbarIcon name="map" /> Navegar con Google Maps</a></> : <a className="button secondary icon-action map-action" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(previewMapQuery)}`} target="_blank" rel="noreferrer" aria-label="Buscar dirección en Google Maps" title="Buscar dirección en Google Maps"><ToolbarIcon name="map" /><span className="icon-action-label">Buscar en mapa</span></a>}</div></section>}
+             {!(["Facturas", "Albaranes", "Cobros"] as string[]).includes(active) && (previewLocation || previewAddress || previewClient?.address) && <section className="delivery-map-panel" aria-label="Ruta de entrega"><div className="delivery-map-info"><b>Ubicación de entrega</b><span>{previewLocation?.name || "Dirección del cliente"} · {previewAddress || "Dirección no indicada"}</span>{(previewLocation?.geocoding_status === "Geolocalizada" || previewClient?.geocoding_status === "Geolocalizada") ? <small>Ubicación geolocalizada</small> : <small>Pendiente de geolocalizar</small>}{previewLat && previewLon && <small className="delivery-distance">{previewWarehouseDistanceKm === null ? "Calculando distancia desde el almacén…" : previewWarehouseDistanceKm >= 0 ? `${previewWarehouseDistanceKm.toLocaleString("es-ES", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} km estimados desde ${previewWarehouse?.name || "el almacén"}` : "Distancia no disponible: completa las coordenadas del almacén."}</small>}</div><div className="delivery-map-visual">{previewLat && previewLon ? <><IntegratedMap locations={[{ latitude: previewLat, longitude: previewLon, name: previewLocation?.name || previewClient?.name }]} /><a className="button primary delivery-map-navigation" href={previewNavigationUrl} target="_blank" rel="noreferrer"><ToolbarIcon name="map" /> Navegar con Google Maps</a></> : <a className="button secondary icon-action map-action" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(previewMapQuery)}`} target="_blank" rel="noreferrer" aria-label="Buscar dirección en Google Maps" title="Buscar dirección en Google Maps"><ToolbarIcon name="map" /><span className="icon-action-label">Buscar en mapa</span></a>}</div></section>}
             {isLoadPreparation && <section className="preparation-delivery-panel" aria-label="Editar dirección de entrega">
               <div className="preparation-delivery-head"><div><b>Dirección de entrega</b><small>Se guarda en este pedido y en su nota de carga.</small></div></div>
               <div className="preparation-delivery-fields">
