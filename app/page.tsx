@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.119";
+const APP_VERSION = "2.0.120";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 function preparationLotAllocations(line: any) {
@@ -2923,6 +2923,9 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     setFormOpen(false);
     return true;
   }
+  function closeOrderEditorIfOpen(row: any) {
+    if (formOpen && editing && Number(editing.id) === Number(row?.id)) closeForm(true);
+  }
   useEffect(() => {
     try {
       if (c.api === "orders") {
@@ -3660,6 +3663,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   }
   async function createOrderLoadNote(row: any) {
     if (!row?.id) return;
+    closeOrderEditorIfOpen(row);
     const existing = getOrderShipment(row);
     if (existing) return openOrderLoadNote(row);
     if (String(row.status || "") === "Cancelado") {
@@ -3700,6 +3704,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     window.setTimeout(() => window.dispatchEvent(new CustomEvent("crm:previsualizar-preparacion", { detail: created.id })), 120);
   }
   async function openOrderLoadNote(row: any) {
+    closeOrderEditorIfOpen(row);
     const shipment = getOrderShipment(row);
     if (shipment) {
       onNavigate?.("Preparación de pedidos");
@@ -4138,6 +4143,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     }
   }
   async function convertOrder(row: any, type: "invoice" | "delivery") {
+    closeOrderEditorIfOpen(row);
     const r = await fetch(
       `/api/orders/convert-${type}/${row.id}`,
       { method: "POST", headers: actorHeaders },
@@ -4325,6 +4331,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     alert(`${imported} registros importados correctamente`);
   }
   async function openPreview(row: any) {
+    closeOrderEditorIfOpen(row);
     setShipmentLabelOpen(false);
     setPreview(row);
     if (active === "Preparación de pedidos") {
