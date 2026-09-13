@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.121";
+const APP_VERSION = "2.0.122";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 function preparationLotAllocations(line: any) {
@@ -2082,7 +2082,7 @@ function PreparationDayCards({ rows, lookups, onOpen, onOpenCollective, dateFilt
   return <section className="prep-command-board" aria-label="Comandas de preparación"><div className="prep-command-toolbar"><div className="prep-command-toolbar-title"><b>Pedidos para preparar</b><span>{dateFilter ? `Preparación del ${formatSpanishDateValue(dateFilter, false)}` : "Todas las preparaciones"}</span></div><div className="prep-command-filters"><label>Preparar el día<input type="date" value={dateFilter} onChange={(event) => onDateFilterChange(event.target.value)} /></label><button type="button" className={`button ${dateFilter === today ? "primary" : "secondary"}`} aria-pressed={dateFilter === today} onClick={() => onDateFilterChange(today)}>Hoy</button><button type="button" className={`button ${dateFilter === tomorrow ? "primary" : "secondary"}`} aria-pressed={dateFilter === tomorrow} onClick={() => onDateFilterChange(tomorrow)}>Mañana</button><button type="button" className={`button ${dateFilter === "" ? "primary" : "secondary"}`} aria-pressed={dateFilter === ""} onClick={() => onDateFilterChange("")}>Todos</button><button type="button" className="button primary prep-collective-button" onClick={onOpenCollective}>Orden de carga colectiva</button></div></div><div className="prep-command-summary"><span><b>{items.length}</b> pedidos</span><span><b>{items.filter((row) => Number(row.urgent) === 1).length}</b> urgentes</span><span><b>{items.filter((row) => row.status === "Preparado con incidencia").length}</b> con incidencia</span><span className="prep-command-summary-hint">Pulsa una comanda para revisar sus líneas</span></div>{!items.length ? <div className="prep-command-empty"><b>{dateFilter ? "No hay pedidos para esta fecha" : "No hay pedidos pendientes"}</b><span>{dateFilter ? "Prueba otra fecha o pulsa “Todos”." : "Cuando se creen preparaciones aparecerán aquí."}</span></div> : <div className="prep-command-columns">{groups.map((group) => { const groupItems = items.filter(group.match); return <section className={`prep-command-column prep-command-${group.key}`} key={group.key}><header><div><b>{group.title}</b><small>{group.hint}</small></div><strong>{groupItems.length}</strong></header><div>{groupItems.map(renderCard)}{!groupItems.length && <p className="prep-command-none">Sin pedidos</p>}</div></section>; })}</div>}</section>;
 }
 
-function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onOpenOrder }: { rows: any[]; lookups: any; dateFilter: string; actor: string; onClose: () => void; onOpenOrder: (orderId: number) => void }) {
+function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { rows: any[]; lookups: any; dateFilter: string; actor: string; onClose: () => void }) {
   const [sourceLines, setSourceLines] = useState<any[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [barcodeDrafts, setBarcodeDrafts] = useState<Record<string, string>>({});
@@ -2309,7 +2309,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onOpen
                    const lots = preparationLotAllocations(line).filter((lot: any) => lot.lot_code || lot.expiry_date || Number(lot.quantity) > 0);
                    const lineStateClass = barcodeMismatch ? " is-barcode-mismatch" : validated && !editing ? " is-validated" : incident ? " is-incident" : " is-pending";
                     return <div className={`collective-load-source-row${lineStateClass}`} key={line.id}>
-                     <button type="button" className="collective-load-source-order collective-load-source-order-link" onClick={() => onOpenOrder(Number(line.order_id))}><b>{order?.code || `Pedido #${line.order_id}`}</b><span className="collective-load-source-requested">Pedido: {requestedQuantity(line)} {quantityUnitLabel(line.quantity_unit || product?.unit)}</span></button>
+                     <div className="collective-load-source-order"><b>{order?.code || `Pedido #${line.order_id}`}</b><span className="collective-load-source-requested">Pedido: {requestedQuantity(line)} {quantityUnitLabel(line.quantity_unit || product?.unit)}</span></div>
                      <span className="collective-load-source-location">{product?.warehouse_location ? warehouseLocationLabel(product.warehouse_location) : "Sin ubicación"}</span>
                      <span className="collective-load-source-lot">{lots.length ? lots.map((lot: any) => `${lot.lot_code || "Sin lote"}${lot.expiry_date ? ` · ${formatSpanishDateValue(lot.expiry_date, false)}` : ""}`).join(" · ") : "Sin lote asignado"}</span>
                      <label className={`collective-load-barcode-field barcode-${scannedStatus}`}><span>{expectedBarcode(line) ? `Esperado: ${expectedBarcode(line)}` : "Sin código esperado"}</span><input aria-label={`Código de barras de ${order?.code || `pedido ${line.order_id}`}`} value={scannedCode} placeholder={expectedBarcode(line) || "Escanea código de barras"} disabled={validated && !editing} onChange={(event) => setBarcodeDrafts((current) => ({ ...current, [String(line.id)]: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }} /><small>{scannedStatus === "match" ? "Código correcto" : scannedStatus === "mismatch" ? "Código no coincide" : scannedStatus === "no-expected" ? "Sin código esperado" : "Pendiente de escanear"}</small></label>
@@ -2811,7 +2811,6 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const [preparationAddressSaving, setPreparationAddressSaving] = useState(false);
   const [preparationPackagesSaving, setPreparationPackagesSaving] = useState(false);
   const [collectiveLoadOpen, setCollectiveLoadOpen] = useState(false);
-  const [pendingOrderModalId, setPendingOrderModalId] = useState<number | null>(null);
   const [preparationAddressMessage, setPreparationAddressMessage] = useState("");
   const [preparationAddressError, setPreparationAddressError] = useState("");
   const [preparationUpdateClient, setPreparationUpdateClient] = useState(false);
@@ -3769,13 +3768,6 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     setQuoteLines(mappedLines);
     setFormDirty(false);
   }
-  useEffect(() => {
-    if (active !== "Pedidos" || pendingOrderModalId === null) return;
-    const order = (lookups.orders || []).find((item: any) => Number(item.id) === Number(pendingOrderModalId));
-    if (!order) return;
-    setPendingOrderModalId(null);
-    void openRecordModal(order);
-  }, [active, pendingOrderModalId, lookups.orders]);
   async function openEntryDetail(row: any) {
     const receiptId = Number(row?.id);
     if (!Number.isInteger(receiptId) || receiptId <= 0 || !String(row?.code || "").trim()) {
@@ -6436,7 +6428,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         </div>
       )}
       {shipmentLabelOpen && preview && isLoadPreparation && <ShipmentLabelModal shipment={preview} client={previewClient} lines={previewLines} products={productOptions} address={previewAddress} city={previewCity} onClose={() => setShipmentLabelOpen(false)} />}
-      {collectiveLoadOpen && isLoadPreparation && <CollectiveLoadModal rows={preparationRows} lookups={lookups} dateFilter={preparationDateFilter} actor={user?.username || "Usuario local"} onClose={() => setCollectiveLoadOpen(false)} onOpenOrder={(orderId) => { setCollectiveLoadOpen(false); setPendingOrderModalId(Number(orderId)); onNavigate?.("Pedidos"); }} />}
+      {collectiveLoadOpen && isLoadPreparation && <CollectiveLoadModal rows={preparationRows} lookups={lookups} dateFilter={preparationDateFilter} actor={user?.username || "Usuario local"} onClose={() => setCollectiveLoadOpen(false)} />}
       {notePreview && (
         <div className="preview-overlay" onClick={() => setNotePreview(null)}>
           <article className="note-preview-card" onClick={(event) => event.stopPropagation()}>
