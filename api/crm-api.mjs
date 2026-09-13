@@ -642,7 +642,7 @@ if (!remoteMode) {
   } catch {}
 }
 db.exec(
-  `CREATE TABLE IF NOT EXISTS order_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,order_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity REAL DEFAULT 0,unit_price REAL DEFAULT 0,discount REAL DEFAULT 0,vat REAL DEFAULT 21,amount REAL DEFAULT 0);CREATE TABLE IF NOT EXISTS quote_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,quote_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity REAL DEFAULT 0,unit_price REAL DEFAULT 0,discount REAL DEFAULT 0,vat REAL DEFAULT 21,amount REAL DEFAULT 0);CREATE TABLE IF NOT EXISTS delivery_note_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,delivery_note_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity REAL DEFAULT 0);CREATE TABLE IF NOT EXISTS invoice_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity REAL DEFAULT 0,unit_price REAL DEFAULT 0,discount REAL DEFAULT 0,vat REAL DEFAULT 21,amount REAL DEFAULT 0);`,
+  `CREATE TABLE IF NOT EXISTS order_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,order_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity REAL DEFAULT 0,unit_price REAL DEFAULT 0,discount REAL DEFAULT 0,vat REAL DEFAULT 21,amount REAL DEFAULT 0,barcode_scanned_code TEXT,barcode_scan_status TEXT DEFAULT 'pending',barcode_scanned_at TEXT,barcode_scanned_by TEXT);CREATE TABLE IF NOT EXISTS quote_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,quote_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity REAL DEFAULT 0,unit_price REAL DEFAULT 0,discount REAL DEFAULT 0,vat REAL DEFAULT 21,amount REAL DEFAULT 0);CREATE TABLE IF NOT EXISTS delivery_note_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,delivery_note_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity REAL DEFAULT 0);CREATE TABLE IF NOT EXISTS invoice_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity REAL DEFAULT 0,unit_price REAL DEFAULT 0,discount REAL DEFAULT 0,vat REAL DEFAULT 21,amount REAL DEFAULT 0);`,
 );
 db.exec(`CREATE TABLE IF NOT EXISTS invoice_orders(id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_id INTEGER NOT NULL,order_id INTEGER NOT NULL,UNIQUE(invoice_id,order_id),UNIQUE(order_id));`);
 if (!remoteMode) {
@@ -721,7 +721,7 @@ for (const table of ["orders", "quotes", "delivery_notes"]) {
 // El adaptador remoto no ejecuta las migraciones DDL genéricas del arranque.
 // Estas columnas se aplican explícitamente también en Turso.
 if (remoteMode && process.env.RUN_REMOTE_MIGRATIONS === "1") {
-  for (const [table, columns] of [["clients", ["opening_time TEXT", "closing_time TEXT"]], ["collection_points", ["opening_time TEXT", "closing_time TEXT"]], ["delivery_route_stops", ["opening_time TEXT", "closing_time TEXT"]]]) {
+  for (const [table, columns] of [["clients", ["opening_time TEXT", "closing_time TEXT"]], ["collection_points", ["opening_time TEXT", "closing_time TEXT"]], ["delivery_route_stops", ["opening_time TEXT", "closing_time TEXT"]], ["order_lines", ["barcode_scanned_code TEXT", "barcode_scan_status TEXT DEFAULT 'pending'", "barcode_scanned_at TEXT", "barcode_scanned_by TEXT"]]]) {
     for (const column of columns) { try { db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column}`).run(); } catch {} }
   }
 }
@@ -731,6 +731,7 @@ try { db.exec("ALTER TABLE order_lines ADD COLUMN prepared INTEGER DEFAULT 0"); 
 try { db.exec("ALTER TABLE order_lines ADD COLUMN prepared_quantity REAL DEFAULT 0"); } catch {}
 try { db.exec("ALTER TABLE order_lines ADD COLUMN preparation_status TEXT DEFAULT 'Pendiente'"); } catch {}
 for (const column of ["incident_resolution", "incident_resolved_at", "incident_resolved_by"]) { try { db.exec(`ALTER TABLE order_lines ADD COLUMN ${column} TEXT`); } catch {} }
+for (const column of ["barcode_scanned_code TEXT", "barcode_scan_status TEXT DEFAULT 'pending'", "barcode_scanned_at TEXT", "barcode_scanned_by TEXT"]) { try { db.exec(`ALTER TABLE order_lines ADD COLUMN ${column}`); } catch {} }
 const orderLineLotsTableSql = "CREATE TABLE IF NOT EXISTS order_line_lots(id INTEGER PRIMARY KEY AUTOINCREMENT,order_line_id INTEGER NOT NULL,lot_id INTEGER,lot_code TEXT,expiry_date TEXT,quantity REAL DEFAULT 0,created_at TEXT,updated_at TEXT)";
 if (remoteMode && typeof db.batch === "function") db.batch([{ sql: orderLineLotsTableSql }]);
 else db.exec(`${orderLineLotsTableSql};`);

@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.110";
+const APP_VERSION = "2.0.111";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 function preparationLotAllocations(line: any) {
@@ -2085,9 +2085,13 @@ function PreparationDayCards({ rows, lookups, onOpen, onOpenCollective, dateFilt
 function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { rows: any[]; lookups: any; dateFilter: string; actor: string; onClose: () => void }) {
   const [sourceLines, setSourceLines] = useState<any[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [barcodeDrafts, setBarcodeDrafts] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [incidentLineId, setIncidentLineId] = useState<number | null>(null);
+  const [incidentText, setIncidentText] = useState("");
+  const [incidentSaving, setIncidentSaving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [selectedGroups, setSelectedGroups] = useState<Record<string, boolean>>({});
@@ -2109,6 +2113,15 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
     const prepared = preparedQuantity(line);
     return prepared > 0 ? prepared : requestedQuantity(line);
   };
+  const expectedBarcode = (line: any) => String(getProduct(line)?.barcode || line.barcode || "").trim();
+  const barcodeDraft = (line: any) => String(barcodeDrafts[String(line.id)] ?? line.barcode_scanned_code ?? "").trim();
+  const barcodeCheck = (line: any, value = barcodeDraft(line)) => {
+    const scanned = String(value || "").trim();
+    const expected = expectedBarcode(line);
+    if (!scanned) return "pending";
+    if (!expected) return "no-expected";
+    return scanned.toLowerCase() === expected.toLowerCase() ? "match" : "mismatch";
+  };
   const lineIsValidated = (line: any) => Number(line.prepared || 0) === 1 && String(line.preparation_status || "") === "Preparado" && preparedQuantity(line) >= requestedQuantity(line) && requestedQuantity(line) > 0;
   const shipmentForOrder = (orderId: number) => items.find((row) => !row._virtual_order && Number(row.order_id) === Number(orderId));
 
@@ -2123,6 +2136,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
         const lines = (Array.isArray(payload) ? payload : []).filter((line: any) => orderIds.includes(Number(line.order_id)));
         setSourceLines(lines);
         setDrafts(Object.fromEntries(lines.map((line: any) => [String(line.id), String(defaultDraftQuantity(line))])));
+        setBarcodeDrafts(Object.fromEntries(lines.map((line: any) => [String(line.id), String(line.barcode_scanned_code || "")])));
       })
       .catch((reason: any) => { if (!cancelled) setError(reason?.message || "No se han podido cargar las líneas de los pedidos."); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -2157,7 +2171,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
     if (!response.ok) throw new Error("La línea se guardó, pero no se pudo actualizar el estado de la nota de carga.");
   }
 
-  async function saveLine(line: any, validate = false) {
+  async function saveLine(line: any) {
     if (savingId !== null) return;
     const requested = requestedQuantity(line);
     const quantity = Math.max(0, Number(drafts[String(line.id)] ?? defaultDraftQuantity(line)) || 0);
@@ -2165,22 +2179,25 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
       setError(`La cantidad preparada de ${getProduct(line)?.name || "la línea"} no puede superar ${requested}.`);
       return;
     }
-    if (validate && quantity < requested) {
-      setError("No se puede validar una línea incompleta. Ajusta primero la cantidad preparada.");
+    if (quantity < requested) {
+      setError("La línea está incompleta. Registra una incidencia para dejar constancia del faltante.");
       return;
     }
     setSavingId(Number(line.id));
     setError("");
     setMessage("");
     const isComplete = quantity >= requested && requested > 0;
-    const next = { ...line, prepared_quantity: quantity, prepared: validate && isComplete ? 1 : 0, preparation_status: validate && isComplete ? "Preparado" : quantity > 0 ? "Parcial" : "Pendiente" };
+    const scannedCode = barcodeDraft(line);
+    const scannedStatus = barcodeCheck(line, scannedCode);
+    const scannedAt = scannedCode ? new Date().toISOString() : null;
+    const next = { ...line, prepared_quantity: quantity, prepared: isComplete ? 1 : 0, preparation_status: "Preparado", barcode_scanned_code: scannedCode || null, barcode_scan_status: scannedStatus, barcode_scanned_at: scannedAt, barcode_scanned_by: scannedCode ? actor : null };
     const response = await fetch(`/api/order_lines/${line.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", "X-Actor": actor },
-      body: JSON.stringify({ prepared: next.prepared, prepared_quantity: next.prepared_quantity, preparation_status: next.preparation_status }),
+      body: JSON.stringify({ prepared: next.prepared, prepared_quantity: next.prepared_quantity, preparation_status: next.preparation_status, barcode_scanned_code: next.barcode_scanned_code, barcode_scan_status: next.barcode_scan_status, barcode_scanned_at: next.barcode_scanned_at, barcode_scanned_by: next.barcode_scanned_by }),
     });
     if (!response.ok) {
-      setError("No se pudo guardar esta línea. Revisa la conexión y vuelve a intentarlo.");
+      setError("No se pudo validar esta línea. Revisa la conexión y vuelve a intentarlo.");
       setSavingId(null);
       return;
     }
@@ -2189,11 +2206,61 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
     setDrafts((current) => ({ ...current, [String(line.id)]: String(quantity) }));
     try {
       await updateShipmentStatus(Number(line.order_id), nextLines.filter((item) => Number(item.order_id) === Number(line.order_id)));
-      setMessage(validate ? "Registro validado correctamente." : "Cantidad preparada guardada correctamente.");
+      setMessage(scannedStatus === "mismatch" ? "Línea validada. El código no coincide y queda marcada en rojo." : "Línea validada correctamente.");
     } catch (reason: any) {
       setError(reason?.message || "La línea se guardó, pero no se pudo actualizar la nota de carga.");
     } finally {
       setSavingId(null);
+    }
+  }
+
+  async function registerLineIncident(line: any) {
+    if (incidentSaving || savingId !== null) return;
+    const requested = requestedQuantity(line);
+    const quantity = Math.max(0, Number(drafts[String(line.id)] ?? defaultDraftQuantity(line)) || 0);
+    if (quantity >= requested && requested > 0) {
+      setError("La línea está completa. Utiliza Validar en lugar de registrar una incidencia.");
+      setIncidentLineId(null);
+      return;
+    }
+    const product = getProduct(line);
+    const order = items.find((item) => Number(item.order_id || item._source_order_id) === Number(line.order_id));
+    const missing = Math.max(0, requested - quantity);
+    const note = incidentText.trim() || `Faltan ${missing} ${quantityUnitLabel(line.quantity_unit || product?.unit)} de ${requested}. Registrar la cantidad real preparada y resolver antes del envío.`;
+    const scannedCode = barcodeDraft(line);
+    const scannedStatus = barcodeCheck(line, scannedCode);
+    setIncidentSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      const noteResponse = await fetch("/api/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Actor": actor },
+        body: JSON.stringify({ title: `Incidencia en preparación · ${order?.code || `Pedido #${line.order_id}`}`, content: `${product?.name || `Producto #${line.product_id}`}: ${note}`, priority: "Urgente", module: "Preparación de pedidos", important: 1, completed: 0, record_id: Number(line.order_id) || null, created_by: actor }),
+      });
+      const noteData = await noteResponse.json().catch(() => ({}));
+      if (!noteResponse.ok) throw new Error(noteData.error || "No se pudo crear la incidencia.");
+      const scannedAt = scannedCode ? new Date().toISOString() : null;
+      const next = { ...line, prepared_quantity: quantity, prepared: 0, preparation_status: "Incidencia", barcode_scanned_code: scannedCode || null, barcode_scan_status: scannedStatus, barcode_scanned_at: scannedAt, barcode_scanned_by: scannedCode ? actor : null };
+      const lineResponse = await fetch(`/api/order_lines/${line.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "X-Actor": actor },
+        body: JSON.stringify({ prepared: 0, prepared_quantity: quantity, preparation_status: "Incidencia", barcode_scanned_code: next.barcode_scanned_code, barcode_scan_status: next.barcode_scan_status, barcode_scanned_at: next.barcode_scanned_at, barcode_scanned_by: next.barcode_scanned_by }),
+      });
+      const lineData = await lineResponse.json().catch(() => ({}));
+      if (!lineResponse.ok) throw new Error(lineData.error || "La incidencia se creó, pero no se pudo actualizar la línea.");
+      const nextLines = sourceLines.map((item) => item.id === line.id ? next : item);
+      setSourceLines(nextLines);
+      setDrafts((current) => ({ ...current, [String(line.id)]: String(quantity) }));
+      setBarcodeDrafts((current) => ({ ...current, [String(line.id)]: scannedCode }));
+      await updateShipmentStatus(Number(line.order_id), nextLines.filter((item) => Number(item.order_id) === Number(line.order_id)));
+      setMessage("Incidencia registrada y vinculada a la línea del pedido.");
+      setIncidentLineId(null);
+      setIncidentText("");
+    } catch (reason: any) {
+      setError(reason?.message || "No se pudo registrar la incidencia.");
+    } finally {
+      setIncidentSaving(false);
     }
   }
 
@@ -2215,36 +2282,42 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
             return <article className={`collective-load-record${complete ? " is-validated" : " is-pending"}${selected ? " is-selected" : ""}`} key={groupKey}>
               <div className="collective-load-grid collective-load-record-main">
                 <label className="collective-load-select"><input type="checkbox" checked={selected} onChange={(event) => setSelectedGroups((current) => ({ ...current, [groupKey]: event.target.checked }))} aria-label={`Seleccionar ${group.product?.name || "artículo"}`} /><span>Seleccionar</span></label>
-                <strong>{group.location}</strong>
-                <div className="collective-load-article-toggle" role="button" tabIndex={0} aria-expanded={Boolean(expanded[groupKey])} title="Abrir o cerrar los envíos de este artículo" onClick={toggleGroup} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggleGroup(); } }}><b>{group.product?.sku || "Sin SKU"}</b><span>{group.product?.name || `Producto #${group.lines[0]?.product_id || "—"}`}</span></div>
-                <span>{group.lines.length} {group.lines.length === 1 ? "pedido" : "pedidos"}</span>
-                <strong>{group.requested} {quantityUnitLabel(group.lines[0]?.quantity_unit || group.product?.unit)}</strong>
-                <strong>{group.prepared} / {group.requested}</strong>
-                <span className={`collective-load-status${complete ? " valid" : " pending"}`}>{complete ? "Validado" : "Pendiente"}</span>
+                 <strong className="collective-load-group-location">{group.location}</strong>
+                 <div className="collective-load-article-toggle collective-load-group-article" role="button" tabIndex={0} aria-expanded={Boolean(expanded[groupKey])} title="Abrir o cerrar los envíos de este artículo" onClick={toggleGroup} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggleGroup(); } }}><b>{group.product?.sku || "Sin SKU"}</b><span>{group.product?.name || `Producto #${group.lines[0]?.product_id || "—"}`}</span></div>
+                 <span className="collective-load-group-orders">{group.lines.length} {group.lines.length === 1 ? "pedido" : "pedidos"}</span>
+                 <strong className="collective-load-group-quantity">{group.requested} {quantityUnitLabel(group.lines[0]?.quantity_unit || group.product?.unit)}</strong>
+                 <strong className="collective-load-group-prepared">{group.prepared} / {group.requested}</strong>
+                 <span className={`collective-load-status collective-load-group-status${complete ? " valid" : " pending"}`}>{complete ? "Validado" : "Pendiente"}</span>
               </div>
               {expanded[groupKey] && <div className="collective-load-source-lines">
                 <div className="collective-load-source-head"><b>Pedido</b><b>Ubicación</b><b>Lote / caducidad</b><b>Código de barras</b><b>Preparada</b><b>Estado</b><b>Acciones</b></div>
                 {group.lines.map((line: any) => {
-                  const product = getProduct(line);
-                  const validated = lineIsValidated(line);
-                  const order = items.find((item) => Number(item.order_id || item._source_order_id) === Number(line.order_id));
-                  const lots = preparationLotAllocations(line).filter((lot: any) => lot.lot_code || lot.expiry_date || Number(lot.quantity) > 0);
-                  return <div className={`collective-load-source-row${validated ? " is-validated" : " is-pending"}`} key={line.id}>
-                    <div className="collective-load-source-order"><b>{order?.code || `Pedido #${line.order_id}`}</b><span className="collective-load-source-requested">Pedido: {requestedQuantity(line)} {quantityUnitLabel(line.quantity_unit || product?.unit)}</span></div>
-                    <span className="collective-load-source-location">{product?.warehouse_location ? warehouseLocationLabel(product.warehouse_location) : "Sin ubicación"}</span>
-                    <span className="collective-load-source-lot">{lots.length ? lots.map((lot: any) => `${lot.lot_code || "Sin lote"}${lot.expiry_date ? ` · ${formatSpanishDateValue(lot.expiry_date, false)}` : ""}`).join(" · ") : "Sin lote asignado"}</span>
-                    <span className="collective-load-source-barcode">{product?.barcode || "Sin código"}</span>
-                    <label>Cantidad preparada<input type="number" min="0" max={requestedQuantity(line)} step="any" value={drafts[String(line.id)] ?? String(defaultDraftQuantity(line))} onChange={(event) => setDrafts((current) => ({ ...current, [String(line.id)]: event.target.value }))} /></label>
-                    <span className={`collective-load-status${validated ? " valid" : " pending"}`}>{validated ? "Validada" : "Pendiente"}</span>
-                    <div className="collective-load-source-actions"><button type="button" className="row-action secondary" disabled={savingId !== null} onClick={() => void saveLine(line)}>{savingId === line.id ? "Guardando…" : "Guardar"}</button><button type="button" className="row-action workflow" disabled={validated || savingId !== null || Number(drafts[String(line.id)] ?? defaultDraftQuantity(line)) < requestedQuantity(line)} onClick={() => void saveLine(line, true)}>{validated ? "Validada ✓" : "Validar"}</button></div>
-                  </div>;
-                })}
+                 const product = getProduct(line);
+                   const validated = lineIsValidated(line);
+                   const incident = String(line.preparation_status || "") === "Incidencia";
+                   const scannedCode = barcodeDraft(line);
+                   const scannedStatus = barcodeCheck(line, scannedCode);
+                   const barcodeMismatch = scannedStatus === "mismatch";
+                   const order = items.find((item) => Number(item.order_id || item._source_order_id) === Number(line.order_id));
+                   const lots = preparationLotAllocations(line).filter((lot: any) => lot.lot_code || lot.expiry_date || Number(lot.quantity) > 0);
+                   const lineStateClass = barcodeMismatch ? " is-barcode-mismatch" : validated ? " is-validated" : incident ? " is-incident" : " is-pending";
+                    return <div className={`collective-load-source-row${lineStateClass}`} key={line.id}>
+                     <div className="collective-load-source-order"><b>{order?.code || `Pedido #${line.order_id}`}</b><span className="collective-load-source-requested">Pedido: {requestedQuantity(line)} {quantityUnitLabel(line.quantity_unit || product?.unit)}</span></div>
+                     <span className="collective-load-source-location">{product?.warehouse_location ? warehouseLocationLabel(product.warehouse_location) : "Sin ubicación"}</span>
+                     <span className="collective-load-source-lot">{lots.length ? lots.map((lot: any) => `${lot.lot_code || "Sin lote"}${lot.expiry_date ? ` · ${formatSpanishDateValue(lot.expiry_date, false)}` : ""}`).join(" · ") : "Sin lote asignado"}</span>
+                     <label className={`collective-load-barcode-field barcode-${scannedStatus}`}><span>{expectedBarcode(line) ? `Esperado: ${expectedBarcode(line)}` : "Sin código esperado"}</span><input aria-label={`Código de barras de ${order?.code || `pedido ${line.order_id}`}`} value={scannedCode} placeholder={expectedBarcode(line) || "Escanea código de barras"} onChange={(event) => setBarcodeDrafts((current) => ({ ...current, [String(line.id)]: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }} /><small>{scannedStatus === "match" ? "Código correcto" : scannedStatus === "mismatch" ? "Código no coincide" : scannedStatus === "no-expected" ? "Sin código esperado" : "Pendiente de escanear"}</small></label>
+                     <label className="collective-load-prepared-field">Cantidad preparada<input type="number" min="0" max={requestedQuantity(line)} step="any" value={drafts[String(line.id)] ?? String(defaultDraftQuantity(line))} onChange={(event) => setDrafts((current) => ({ ...current, [String(line.id)]: event.target.value }))} /></label>
+                     <span className={`collective-load-status${validated ? " valid" : incident ? " incident" : " pending"}`}>{validated ? "Validada" : incident ? "Incidencia" : "Pendiente"}</span>
+                     <div className="collective-load-source-actions">{validated ? <button type="button" className="row-action validated" disabled>Validada ✓</button> : Number(drafts[String(line.id)] ?? defaultDraftQuantity(line)) < requestedQuantity(line) ? <button type="button" className="row-action danger" disabled={incidentSaving || savingId !== null} onClick={() => { setIncidentLineId(Number(line.id)); setIncidentText(""); setError(""); }}>{incident ? "Revisar incidencia" : "Registrar incidencia"}</button> : <button type="button" className="row-action workflow" disabled={savingId !== null || incidentSaving} onClick={() => void saveLine(line)}>{savingId === line.id ? "Validando…" : "Validar"}</button>}</div>
+                   </div>;
+                 })}
               </div>}
             </article>;
           })}
         </div>
       )}
-      <footer className="collective-load-actions"><button type="button" className="button secondary collective-load-print" onClick={() => window.print()}>Imprimir listado</button><button type="button" className="button secondary" onClick={onClose}>Cerrar</button></footer>
+       <footer className="collective-load-actions"><button type="button" className="button secondary collective-load-print" onClick={() => window.print()}>Imprimir listado</button><button type="button" className="button secondary" onClick={onClose}>Cerrar</button></footer>
+       {incidentLineId !== null && (() => { const incidentLine = sourceLines.find((line) => Number(line.id) === incidentLineId); if (!incidentLine) return null; const product = getProduct(incidentLine); const requested = requestedQuantity(incidentLine); const quantity = Math.max(0, Number(drafts[String(incidentLine.id)] ?? defaultDraftQuantity(incidentLine)) || 0); const missing = Math.max(0, requested - quantity); const order = items.find((item) => Number(item.order_id || item._source_order_id) === Number(incidentLine.order_id)); return <div className="collective-load-incident-overlay" role="dialog" aria-modal="true" aria-label="Registrar incidencia" onMouseDown={(event) => event.target === event.currentTarget && !incidentSaving && setIncidentLineId(null)}><section className="collective-load-incident-modal" onClick={(event) => event.stopPropagation()}><header><div><p className="eyebrow">PREPARACIÓN · INCIDENCIA</p><h3>Registrar incidencia</h3><small>{order?.code || `Pedido #${incidentLine.order_id}`} · {product?.name || `Producto #${incidentLine.product_id}`}</small></div><button type="button" className="preview-close" aria-label="Cerrar" disabled={incidentSaving} onClick={() => setIncidentLineId(null)}>×</button></header><div className="collective-load-incident-summary"><b>Preparadas: {quantity} de {requested}</b><span>Faltan {missing} {quantityUnitLabel(incidentLine.quantity_unit || product?.unit)}</span></div><label className="collective-load-incident-text">Qué ha ocurrido<textarea value={incidentText} onChange={(event) => setIncidentText(event.target.value)} placeholder={`Ej.: solo hay ${quantity} unidades disponibles.`} rows={4} autoFocus /></label><p className="collective-load-incident-help">La incidencia quedará vinculada al pedido y la línea seguirá marcada en rojo hasta resolverla.</p>{error && <p className="collective-load-feedback error-message" role="alert">{error}</p>}<footer><button type="button" className="button secondary" disabled={incidentSaving} onClick={() => setIncidentLineId(null)}>Cancelar</button><button type="button" className="button danger" disabled={incidentSaving} onClick={() => void registerLineIncident(incidentLine)}>{incidentSaving ? "Registrando…" : "Confirmar incidencia"}</button></footer></section></div>; })()}
     </section>
   </div>;
 }

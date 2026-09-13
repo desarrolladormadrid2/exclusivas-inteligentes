@@ -92,6 +92,10 @@ const migrationsByTable = {
     ["incident_resolution", "ALTER TABLE order_lines ADD COLUMN incident_resolution TEXT"],
     ["incident_resolved_at", "ALTER TABLE order_lines ADD COLUMN incident_resolved_at TEXT"],
     ["incident_resolved_by", "ALTER TABLE order_lines ADD COLUMN incident_resolved_by TEXT"],
+    ["barcode_scanned_code", "ALTER TABLE order_lines ADD COLUMN barcode_scanned_code TEXT"],
+    ["barcode_scan_status", "ALTER TABLE order_lines ADD COLUMN barcode_scan_status TEXT DEFAULT 'pending'"],
+    ["barcode_scanned_at", "ALTER TABLE order_lines ADD COLUMN barcode_scanned_at TEXT"],
+    ["barcode_scanned_by", "ALTER TABLE order_lines ADD COLUMN barcode_scanned_by TEXT"],
   ],
   notes: [
     ["status", "ALTER TABLE notes ADD COLUMN status TEXT DEFAULT 'Pendiente'"],

@@ -24,6 +24,7 @@ try {
   if (-not (Test-Path -LiteralPath '.env.local')) { throw 'Missing persistent .env.local in production directory.' }
   $env:NODE_ENV = 'production'
   npm.cmd ci --omit=dev
+  npm.cmd run db:migrate-remote
   npm.cmd run build
 
   # Restart via the SYSTEM watchdog task (flag-based). The runner cannot kill
