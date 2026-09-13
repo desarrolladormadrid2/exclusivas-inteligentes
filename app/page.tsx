@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.115";
+const APP_VERSION = "2.0.116";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 function preparationLotAllocations(line: any) {
@@ -2974,6 +2974,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const [dbError, setDbError] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadedListKey, setLoadedListKey] = useState("");
   const [lookups, setLookups] = useState<any>({
     clients: [],
     products: [],
@@ -3078,16 +3079,17 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           ? statusRows.filter((item: any) => c.statusFilter.includes(item.status || "Preparando"))
           : statusRows;
     };
-    let hasCachedRows = false;
+    const listKey = `${active}|${showDeleted ? "deleted" : "active"}|${showInactive ? "all-statuses" : "active-only"}`;
     try {
       const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
       if (Array.isArray(cached)) {
         setRows(applyList(cached));
-        hasCachedRows = true;
       }
     } catch { /* Si la caché está dañada, se ignora y se consulta la API. */ }
     // La caché sirve de respaldo si la API falla, pero no debe mostrarse como
     // si fuera el listado definitivo mientras llega la respuesta actualizada.
+    setLoadedListKey("");
+    setRows([]);
     setLoading(true);
     setDbError("");
     const params = new URLSearchParams();
@@ -3103,6 +3105,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       .then((x) => {
         const list = Array.isArray(x) ? x : [];
         setRows(applyList(list));
+        setLoadedListKey(listKey);
         try { localStorage.setItem(cacheKey, JSON.stringify(list)); } catch { /* La caché es opcional. */ }
       })
       .catch(() => {
@@ -5205,6 +5208,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pagedRows = sortedRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const currentListKey = `${active}|${showDeleted ? "deleted" : "active"}|${showInactive ? "all-statuses" : "active-only"}`;
+  const listIsReady = !loading && loadedListKey === currentListKey;
   useEffect(() => {
     setPage(1);
   }, [search, quickView, listDateFrom, listDateTo, orderCreatedFrom, orderCreatedTo, listClient, listStatus, listSupplier, billingFilter, shippingFilter, preparationDateFilter, productFilters]);
@@ -5727,7 +5732,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           </div>
         </section>
       )}
-      <div className={`panel table-panel${loading ? " is-loading" : ""}`}>
+      <div className={`panel table-panel${listIsReady ? "" : " is-loading"}`}>
         <div className="table-tools">
           <div className="table-tools-primary">
           <input
@@ -6028,20 +6033,20 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             </tbody>
           </table>
         </TopHorizontalScroll>
-      {!loading && sortedRows.length > 0 && <div className="table-pagination" aria-label="Paginación del listado">
+      {listIsReady && sortedRows.length > 0 && <div className="table-pagination" aria-label="Paginación del listado">
         <span>Mostrando {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, sortedRows.length)} de {sortedRows.length}</span>
         <label>Filas<select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }} aria-label="Filas por página"><option value="15">15</option><option value="25">25</option><option value="50">50</option><option value="100">100</option></select></label>
         <button type="button" className="button secondary" disabled={currentPage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Anterior</button>
         <b>Página {currentPage} de {totalPages}</b>
         <button type="button" className="button secondary" disabled={currentPage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>Siguiente</button>
       </div>}
-      {loading && (
+      {!listIsReady && (
         <div className="data-loading" role="status" aria-live="polite">
           <span className="loading-spinner" aria-hidden="true" />
           <LoadingIndicator label="Cargando datos desde la base de datos…" />
         </div>
       )}
-      {!loading && !filteredRows.length && (
+      {listIsReady && !filteredRows.length && (
         <p className="muted empty-row">{rows.length ? "No hay productos que coincidan con los filtros." : "No hay registros todavía."}</p>
       )}
       {deletedUndo && deletedUndo.api === c.api && <div className="undo-toast" role="status"><span>Se ha enviado a la papelera: <b>{deletedUndo.label}</b></span><button type="button" className="button secondary" onClick={() => void undoDelete()}>Deshacer</button></div>}

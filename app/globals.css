@@ -1437,7 +1437,10 @@ select option:hover { background-color: #d1d5db; color: #1f2937; }
   position: relative;
 }
 .table-panel.is-loading .table-scroll {
-  visibility: hidden;
+  display: none !important;
+}
+.table-panel.is-loading .table-scroll-top {
+  display: none !important;
 }
 .table-panel.is-loading > .data-loading {
   position: absolute;
