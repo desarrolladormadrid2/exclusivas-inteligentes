@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.109";
+const APP_VERSION = "2.0.110";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 function preparationLotAllocations(line: any) {
@@ -2109,7 +2109,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
     const prepared = preparedQuantity(line);
     return prepared > 0 ? prepared : requestedQuantity(line);
   };
-  const lineIsValidated = (line: any) => preparedQuantity(line) >= requestedQuantity(line) && requestedQuantity(line) > 0;
+  const lineIsValidated = (line: any) => Number(line.prepared || 0) === 1 && String(line.preparation_status || "") === "Preparado" && preparedQuantity(line) >= requestedQuantity(line) && requestedQuantity(line) > 0;
   const shipmentForOrder = (orderId: number) => items.find((row) => !row._virtual_order && Number(row.order_id) === Number(orderId));
 
   useEffect(() => {
@@ -2152,7 +2152,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
     const response = await fetch(`/api/shipments/${shipment.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", "X-Actor": actor },
-      body: JSON.stringify({ ...shipment, status: nextStatus, prepared_by: actor }),
+      body: JSON.stringify({ status: nextStatus, prepared_by: actor }),
     });
     if (!response.ok) throw new Error("La línea se guardó, pero no se pudo actualizar el estado de la nota de carga.");
   }
@@ -2172,11 +2172,12 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
     setSavingId(Number(line.id));
     setError("");
     setMessage("");
-    const next = { ...line, prepared_quantity: quantity, prepared: quantity >= requested && requested > 0 ? 1 : 0, preparation_status: quantity >= requested && requested > 0 ? "Preparado" : quantity > 0 ? "Parcial" : "Pendiente" };
+    const isComplete = quantity >= requested && requested > 0;
+    const next = { ...line, prepared_quantity: quantity, prepared: validate && isComplete ? 1 : 0, preparation_status: validate && isComplete ? "Preparado" : quantity > 0 ? "Parcial" : "Pendiente" };
     const response = await fetch(`/api/order_lines/${line.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", "X-Actor": actor },
-      body: JSON.stringify(next),
+      body: JSON.stringify({ prepared: next.prepared, prepared_quantity: next.prepared_quantity, preparation_status: next.preparation_status }),
     });
     if (!response.ok) {
       setError("No se pudo guardar esta línea. Revisa la conexión y vuelve a intentarlo.");
@@ -2207,7 +2208,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
         <div className="collective-load-list">
           <div className="collective-load-grid collective-load-grid-head"><b aria-hidden="true" /><b>Ubicación</b><b>Artículo</b><b>Pedidos</b><b>Cantidad</b><b>Preparada</b><b>Estado</b></div>
           {groups.map((group: any) => {
-            const complete = group.prepared >= group.requested && group.requested > 0;
+            const complete = group.lines.length > 0 && group.lines.every(lineIsValidated);
             const groupKey = String(group.key);
             const selected = Boolean(selectedGroups[groupKey]);
             const toggleGroup = () => setExpanded((current) => ({ ...current, [groupKey]: !current[groupKey] }));
@@ -2228,14 +2229,14 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
                   const validated = lineIsValidated(line);
                   const order = items.find((item) => Number(item.order_id || item._source_order_id) === Number(line.order_id));
                   const lots = preparationLotAllocations(line).filter((lot: any) => lot.lot_code || lot.expiry_date || Number(lot.quantity) > 0);
-                  return <div className="collective-load-source-row" key={line.id}>
+                  return <div className={`collective-load-source-row${validated ? " is-validated" : " is-pending"}`} key={line.id}>
                     <div className="collective-load-source-order"><b>{order?.code || `Pedido #${line.order_id}`}</b><span className="collective-load-source-requested">Pedido: {requestedQuantity(line)} {quantityUnitLabel(line.quantity_unit || product?.unit)}</span></div>
                     <span className="collective-load-source-location">{product?.warehouse_location ? warehouseLocationLabel(product.warehouse_location) : "Sin ubicación"}</span>
                     <span className="collective-load-source-lot">{lots.length ? lots.map((lot: any) => `${lot.lot_code || "Sin lote"}${lot.expiry_date ? ` · ${formatSpanishDateValue(lot.expiry_date, false)}` : ""}`).join(" · ") : "Sin lote asignado"}</span>
                     <span className="collective-load-source-barcode">{product?.barcode || "Sin código"}</span>
                     <label>Cantidad preparada<input type="number" min="0" max={requestedQuantity(line)} step="any" value={drafts[String(line.id)] ?? String(defaultDraftQuantity(line))} onChange={(event) => setDrafts((current) => ({ ...current, [String(line.id)]: event.target.value }))} /></label>
                     <span className={`collective-load-status${validated ? " valid" : " pending"}`}>{validated ? "Validada" : "Pendiente"}</span>
-                    <div className="collective-load-source-actions"><button type="button" className="row-action secondary" disabled={savingId !== null} onClick={() => void saveLine(line)}>{savingId === line.id ? "Guardando…" : "Guardar"}</button><button type="button" className="row-action workflow" disabled={savingId !== null || Number(drafts[String(line.id)] ?? defaultDraftQuantity(line)) < requestedQuantity(line)} onClick={() => void saveLine(line, true)}>{validated ? "Validada ✓" : "Validar"}</button></div>
+                    <div className="collective-load-source-actions"><button type="button" className="row-action secondary" disabled={savingId !== null} onClick={() => void saveLine(line)}>{savingId === line.id ? "Guardando…" : "Guardar"}</button><button type="button" className="row-action workflow" disabled={validated || savingId !== null || Number(drafts[String(line.id)] ?? defaultDraftQuantity(line)) < requestedQuantity(line)} onClick={() => void saveLine(line, true)}>{validated ? "Validada ✓" : "Validar"}</button></div>
                   </div>;
                 })}
               </div>}
