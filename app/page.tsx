@@ -2225,7 +2225,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
                   const order = items.find((item) => Number(item.order_id || item._source_order_id) === Number(line.order_id));
                   const lots = preparationLotAllocations(line).filter((lot: any) => lot.lot_code || lot.expiry_date || Number(lot.quantity) > 0);
                   return <div className="collective-load-source-row" key={line.id}>
-                    <div className="collective-load-source-order"><b>{order?.code || `Pedido #${line.order_id}`}</b><span>Pedido: {requestedQuantity(line)} {quantityUnitLabel(line.quantity_unit || product?.unit)}</span></div>
+                    <div className="collective-load-source-order"><b>{order?.code || `Pedido #${line.order_id}`}</b><span className="collective-load-source-requested">Pedido: {requestedQuantity(line)} {quantityUnitLabel(line.quantity_unit || product?.unit)}</span></div>
                     <span className="collective-load-source-location">{product?.warehouse_location ? warehouseLocationLabel(product.warehouse_location) : "Sin ubicación"}</span>
                     <span className="collective-load-source-lot">{lots.length ? lots.map((lot: any) => `${lot.lot_code || "Sin lote"}${lot.expiry_date ? ` · ${formatSpanishDateValue(lot.expiry_date, false)}` : ""}`).join(" · ") : "Sin lote asignado"}</span>
                     <span className="collective-load-source-barcode">{product?.barcode || "Sin código"}</span>
