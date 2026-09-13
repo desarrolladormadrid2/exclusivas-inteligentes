@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.111";
+const APP_VERSION = "2.0.112";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 function preparationLotAllocations(line: any) {
@@ -2287,7 +2287,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
                  <span className="collective-load-group-orders">{group.lines.length} {group.lines.length === 1 ? "pedido" : "pedidos"}</span>
                  <strong className="collective-load-group-quantity">{group.requested} {quantityUnitLabel(group.lines[0]?.quantity_unit || group.product?.unit)}</strong>
                  <strong className="collective-load-group-prepared">{group.prepared} / {group.requested}</strong>
-                 <span className={`collective-load-status collective-load-group-status${complete ? " valid" : " pending"}`}>{complete ? "Validado" : "Pendiente"}</span>
+                 <span className={`collective-load-status collective-load-group-status${complete ? " valid" : " pending"}`}>{complete ? "Artículo completo" : "Pendiente"}</span>
               </div>
               {expanded[groupKey] && <div className="collective-load-source-lines">
                 <div className="collective-load-source-head"><b>Pedido</b><b>Ubicación</b><b>Lote / caducidad</b><b>Código de barras</b><b>Preparada</b><b>Estado</b><b>Acciones</b></div>
