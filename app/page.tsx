@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.108";
+const APP_VERSION = "2.0.109";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 function preparationLotAllocations(line: any) {
@@ -2105,6 +2105,10 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
     if (Number(line.prepared_quantity || 0) > 0) return Number(line.prepared_quantity);
     return String(line.preparation_status || "") === "Preparado" || Number(line.prepared || 0) === 1 ? requested : 0;
   };
+  const defaultDraftQuantity = (line: any) => {
+    const prepared = preparedQuantity(line);
+    return prepared > 0 ? prepared : requestedQuantity(line);
+  };
   const lineIsValidated = (line: any) => preparedQuantity(line) >= requestedQuantity(line) && requestedQuantity(line) > 0;
   const shipmentForOrder = (orderId: number) => items.find((row) => !row._virtual_order && Number(row.order_id) === Number(orderId));
 
@@ -2118,7 +2122,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
         if (cancelled) return;
         const lines = (Array.isArray(payload) ? payload : []).filter((line: any) => orderIds.includes(Number(line.order_id)));
         setSourceLines(lines);
-        setDrafts(Object.fromEntries(lines.map((line: any) => [String(line.id), String(preparedQuantity(line))])));
+        setDrafts(Object.fromEntries(lines.map((line: any) => [String(line.id), String(defaultDraftQuantity(line))])));
       })
       .catch((reason: any) => { if (!cancelled) setError(reason?.message || "No se han podido cargar las líneas de los pedidos."); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -2156,7 +2160,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
   async function saveLine(line: any, validate = false) {
     if (savingId !== null) return;
     const requested = requestedQuantity(line);
-    const quantity = Math.max(0, Number(drafts[String(line.id)] ?? preparedQuantity(line)) || 0);
+    const quantity = Math.max(0, Number(drafts[String(line.id)] ?? defaultDraftQuantity(line)) || 0);
     if (quantity > requested) {
       setError(`La cantidad preparada de ${getProduct(line)?.name || "la línea"} no puede superar ${requested}.`);
       return;
@@ -2229,9 +2233,9 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
                     <span className="collective-load-source-location">{product?.warehouse_location ? warehouseLocationLabel(product.warehouse_location) : "Sin ubicación"}</span>
                     <span className="collective-load-source-lot">{lots.length ? lots.map((lot: any) => `${lot.lot_code || "Sin lote"}${lot.expiry_date ? ` · ${formatSpanishDateValue(lot.expiry_date, false)}` : ""}`).join(" · ") : "Sin lote asignado"}</span>
                     <span className="collective-load-source-barcode">{product?.barcode || "Sin código"}</span>
-                    <label>Cantidad preparada<input type="number" min="0" max={requestedQuantity(line)} step="any" value={drafts[String(line.id)] ?? "0"} onChange={(event) => setDrafts((current) => ({ ...current, [String(line.id)]: event.target.value }))} /></label>
+                    <label>Cantidad preparada<input type="number" min="0" max={requestedQuantity(line)} step="any" value={drafts[String(line.id)] ?? String(defaultDraftQuantity(line))} onChange={(event) => setDrafts((current) => ({ ...current, [String(line.id)]: event.target.value }))} /></label>
                     <span className={`collective-load-status${validated ? " valid" : " pending"}`}>{validated ? "Validada" : "Pendiente"}</span>
-                    <div className="collective-load-source-actions"><button type="button" className="row-action secondary" disabled={savingId !== null} onClick={() => void saveLine(line)}>{savingId === line.id ? "Guardando…" : "Guardar"}</button><button type="button" className="row-action workflow" disabled={savingId !== null || Number(drafts[String(line.id)] ?? preparedQuantity(line)) < requestedQuantity(line)} onClick={() => void saveLine(line, true)}>{validated ? "Validada ✓" : "Validar"}</button></div>
+                    <div className="collective-load-source-actions"><button type="button" className="row-action secondary" disabled={savingId !== null} onClick={() => void saveLine(line)}>{savingId === line.id ? "Guardando…" : "Guardar"}</button><button type="button" className="row-action workflow" disabled={savingId !== null || Number(drafts[String(line.id)] ?? defaultDraftQuantity(line)) < requestedQuantity(line)} onClick={() => void saveLine(line, true)}>{validated ? "Validada ✓" : "Validar"}</button></div>
                   </div>;
                 })}
               </div>}
