@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.116";
+const APP_VERSION = "2.0.117";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 function preparationLotAllocations(line: any) {
@@ -2359,11 +2359,7 @@ function BusinessRelatedPanels({ active, rows, lookups, onNavigate }: { active: 
       { title: "Histórico de facturas de venta", text: "Consulta las facturas emitidas y su estado de cobro desde el listado fiscal.", value: `${invoiceRows.length} facturas`, action: "Ver facturas", target: "Facturas" },
       { title: "Notas de abono de venta", text: "Gestiona devoluciones y abonos vinculados a clientes, facturas y productos.", value: "Devoluciones y abonos", action: "Ver abonos", target: "Devoluciones" },
     ],
-    Facturas: [
-      { title: "Facturas de venta", text: "Listado actual de facturas, vencimientos, importes y estado de cobro.", value: `${rows.length} documentos`, action: "Ver ventas", target: "Facturas" },
-      { title: "Histórico de facturas de venta", text: "Conserva el histórico completo y permite filtrar o exportar los documentos.", value: `${invoiceRows.length || rows.length} registros`, action: "Exportar histórico", target: "Facturas" },
-      { title: "Notas de abono", text: "Abonos y devoluciones relacionados con las facturas de venta.", value: "Gestión relacionada", action: "Ver abonos", target: "Devoluciones" },
-    ],
+    Facturas: [],
     Compras: [
       { title: "Pedidos de compra", text: "Solicitudes y compras a proveedores pendientes de validar o recibir.", value: `${rows.length} pedidos`, action: "Ver compras", target: "Compras" },
       { title: "Facturas de compra", text: "Registra el gasto asociado a proveedores y contrástalo con los pedidos recibidos.", value: `${purchaseRows.length} compras`, action: "Ver gastos", target: "Gastos y tickets" },
