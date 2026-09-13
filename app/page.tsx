@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.105";
+const APP_VERSION = "2.0.106";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 function preparationLotAllocations(line: any) {
@@ -2199,7 +2199,46 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
       <div className="collective-load-note"><b>Edición segura</b><span>La cantidad y la validación se guardan en la línea del pedido original. Si un artículo aparece en varios pedidos, despliega su registro para trabajar cada pedido por separado.</span></div>
       {error && <p className="collective-load-feedback error-message" role="alert">{error}</p>}
       {message && <p className="collective-load-feedback success-message" role="status">{message}</p>}
-      {loading ? <div className="collective-load-empty"><span className="loading-spinner" /><p>Cargando artículos de los pedidos…</p></div> : !groups.length ? <div className="collective-load-empty"><b>No hay artículos para esta fecha</b><span>Prueba otra fecha o vuelve a “Todos”.</span></div> : <div className="collective-load-list"><div className="collective-load-grid collective-load-grid-head"><b aria-hidden="true" /><b>Ubicación</b><b>Artículo</b><b>Pedidos</b><b>Cantidad</b><b>Preparada</b><b>Estado</b></div>{groups.map((group: any) => { const complete = group.prepared >= group.requested && group.requested > 0; const groupKey = String(group.key); const selected = Boolean(selectedGroups[groupKey]); const toggleGroup = () => setExpanded((current) => ({ ...current, [groupKey]: !current[groupKey] })); return <article className={`collective-load-record${complete ? " is-validated" : " is-pending"}${selected ? " is-selected" : ""}`} key={groupKey}><div className="collective-load-grid collective-load-record-main"><label className="collective-load-select"><input type="checkbox" checked={selected} onChange={(event) => setSelectedGroups((current) => ({ ...current, [groupKey]: event.target.checked }))} aria-label={`Seleccionar ${group.product?.name || "artículo"}`} /><span>Seleccionar</span></label><strong>{group.location}</strong><div className="collective-load-article-toggle" role="button" tabIndex={0} aria-expanded={Boolean(expanded[groupKey])} title="Abrir o cerrar los envíos de este artículo" onClick={toggleGroup} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggleGroup(); } }}><b>{group.product?.sku || "Sin SKU"}</b><span>{group.product?.name || `Producto #${group.lines[0]?.product_id || "—"}`}</span></div><span>{group.lines.length} {group.lines.length === 1 ? "pedido" : "pedidos"}</span><strong>{group.requested} {quantityUnitLabel(group.lines[0]?.quantity_unit || group.product?.unit)}</strong><strong>{group.prepared} / {group.requested}</strong><span className={`collective-load-status${complete ? " valid" : " pending"}`}>{complete ? "Validado" : "Pendiente"}</span></div>{expanded[groupKey] && <div className="collective-load-source-lines">{group.lines.map((line: any) => { const product = getProduct(line); const validated = lineIsValidated(line); const order = items.find((item) => Number(item.order_id || item._source_order_id) === Number(line.order_id)); const lots = preparationLotAllocations(line).filter((lot: any) => lot.lot_code || lot.expiry_date || Number(lot.quantity) > 0); return <div className="collective-load-source-row" key={line.id}><div><b>{order?.code || `Pedido #${line.order_id}`}</b><span className="collective-load-source-requested">Pedido: {requestedQuantity(line)} {quantityUnitLabel(line.quantity_unit || product?.unit)}</span><span>{lots.length ? lots.map((lot: any) => `${lot.lot_code || "Sin lote"}${lot.expiry_date ? ` · caduca ${formatSpanishDateValue(lot.expiry_date, false)}` : ""}`).join(" · ") : "Sin lote asignado"}</span>{product?.warehouse_location && <small>Ubicación: {warehouseLocationLabel(product.warehouse_location)}</small>}</div><label>Cantidad preparada<input type="number" min="0" max={requestedQuantity(line)} step="any" value={drafts[String(line.id)] ?? "0"} onChange={(event) => setDrafts((current) => ({ ...current, [String(line.id)]: event.target.value }))} /></label><span className={`collective-load-status${validated ? " valid" : " pending"}`}>{validated ? "Validada" : "Pendiente"}</span><button type="button" className="row-action secondary" disabled={savingId !== null} onClick={() => void saveLine(line)}>{savingId === line.id ? "Guardando…" : "Guardar"}</button><button type="button" className="row-action workflow" disabled={savingId !== null || Number(drafts[String(line.id)] ?? preparedQuantity(line)) < requestedQuantity(line)} onClick={() => void saveLine(line, true)}>{validated ? "Validada ✓" : "Validar"}</button></div>; })}</div>}</article>; })}</div>}
+      {loading ? <div className="collective-load-empty"><span className="loading-spinner" /><p>Cargando artículos de los pedidos…</p></div> : !groups.length ? <div className="collective-load-empty"><b>No hay artículos para esta fecha</b><span>Prueba otra fecha o vuelve a “Todos”.</span></div> : (
+        <div className="collective-load-list">
+          <div className="collective-load-grid collective-load-grid-head"><b aria-hidden="true" /><b>Ubicación</b><b>Artículo</b><b>Pedidos</b><b>Cantidad</b><b>Preparada</b><b>Estado</b></div>
+          {groups.map((group: any) => {
+            const complete = group.prepared >= group.requested && group.requested > 0;
+            const groupKey = String(group.key);
+            const selected = Boolean(selectedGroups[groupKey]);
+            const toggleGroup = () => setExpanded((current) => ({ ...current, [groupKey]: !current[groupKey] }));
+            return <article className={`collective-load-record${complete ? " is-validated" : " is-pending"}${selected ? " is-selected" : ""}`} key={groupKey}>
+              <div className="collective-load-grid collective-load-record-main">
+                <label className="collective-load-select"><input type="checkbox" checked={selected} onChange={(event) => setSelectedGroups((current) => ({ ...current, [groupKey]: event.target.checked }))} aria-label={`Seleccionar ${group.product?.name || "artículo"}`} /><span>Seleccionar</span></label>
+                <strong>{group.location}</strong>
+                <div className="collective-load-article-toggle" role="button" tabIndex={0} aria-expanded={Boolean(expanded[groupKey])} title="Abrir o cerrar los envíos de este artículo" onClick={toggleGroup} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggleGroup(); } }}><b>{group.product?.sku || "Sin SKU"}</b><span>{group.product?.name || `Producto #${group.lines[0]?.product_id || "—"}`}</span></div>
+                <span>{group.lines.length} {group.lines.length === 1 ? "pedido" : "pedidos"}</span>
+                <strong>{group.requested} {quantityUnitLabel(group.lines[0]?.quantity_unit || group.product?.unit)}</strong>
+                <strong>{group.prepared} / {group.requested}</strong>
+                <span className={`collective-load-status${complete ? " valid" : " pending"}`}>{complete ? "Validado" : "Pendiente"}</span>
+              </div>
+              {expanded[groupKey] && <div className="collective-load-source-lines">
+                <div className="collective-load-source-head"><b>Pedido</b><b>Ubicación</b><b>Lote / caducidad</b><b>Código de barras</b><b>Preparada</b><b>Estado</b><b>Acciones</b></div>
+                {group.lines.map((line: any) => {
+                  const product = getProduct(line);
+                  const validated = lineIsValidated(line);
+                  const order = items.find((item) => Number(item.order_id || item._source_order_id) === Number(line.order_id));
+                  const lots = preparationLotAllocations(line).filter((lot: any) => lot.lot_code || lot.expiry_date || Number(lot.quantity) > 0);
+                  return <div className="collective-load-source-row" key={line.id}>
+                    <div className="collective-load-source-order"><b>{order?.code || `Pedido #${line.order_id}`}</b><span>Pedido: {requestedQuantity(line)} {quantityUnitLabel(line.quantity_unit || product?.unit)}</span></div>
+                    <span className="collective-load-source-location">{product?.warehouse_location ? warehouseLocationLabel(product.warehouse_location) : "Sin ubicación"}</span>
+                    <span className="collective-load-source-lot">{lots.length ? lots.map((lot: any) => `${lot.lot_code || "Sin lote"}${lot.expiry_date ? ` · ${formatSpanishDateValue(lot.expiry_date, false)}` : ""}`).join(" · ") : "Sin lote asignado"}</span>
+                    <span className="collective-load-source-barcode">{product?.barcode || "Sin código"}</span>
+                    <label>Cantidad preparada<input type="number" min="0" max={requestedQuantity(line)} step="any" value={drafts[String(line.id)] ?? "0"} onChange={(event) => setDrafts((current) => ({ ...current, [String(line.id)]: event.target.value }))} /></label>
+                    <span className={`collective-load-status${validated ? " valid" : " pending"}`}>{validated ? "Validada" : "Pendiente"}</span>
+                    <div className="collective-load-source-actions"><button type="button" className="row-action secondary" disabled={savingId !== null} onClick={() => void saveLine(line)}>{savingId === line.id ? "Guardando…" : "Guardar"}</button><button type="button" className="row-action workflow" disabled={savingId !== null || Number(drafts[String(line.id)] ?? preparedQuantity(line)) < requestedQuantity(line)} onClick={() => void saveLine(line, true)}>{validated ? "Validada ✓" : "Validar"}</button></div>
+                  </div>;
+                })}
+              </div>}
+            </article>;
+          })}
+        </div>
+      )}
       <footer className="collective-load-actions"><button type="button" className="button secondary collective-load-print" onClick={() => window.print()}>Imprimir listado</button><button type="button" className="button secondary" onClick={onClose}>Cerrar</button></footer>
     </section>
   </div>;
