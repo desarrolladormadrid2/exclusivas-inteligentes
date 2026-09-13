@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.114";
+const APP_VERSION = "2.0.115";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 function preparationLotAllocations(line: any) {
@@ -3362,6 +3362,14 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       setError("Completa el código, el cliente y el lugar de envío antes de guardar el pedido.");
       return;
     }
+    if (isPurchaseForm && !editing && (!String(currentForm.code || "").trim() || !currentForm.supplier_id || !String(currentForm.order_date || "").trim())) {
+      setError("Completa el código, el proveedor y la fecha de compra antes de guardar.");
+      return;
+    }
+    if (isPurchaseForm && !editing && !quoteLines.length) {
+      setError("Añade al menos una línea con producto y unidades compradas antes de guardar.");
+      return;
+    }
     if (active === "Productos") {
       const requiredProductFields = ["name", "sku", "description", "category", "unit", "created_at", "warehouse_id", "warehouse_location", "inventory_valuation_method", "cost_price", "last_direct_cost", "markup_percent", "unit_price", "accounting_product_group", "accounting_vat_group", "inventory_register_group", "product_tracking_code", "supplier_id"];
       const productFieldLabels: Record<string, string> = { name: "Producto", sku: "Número proveedor", description: "Descripción", category: "Categoría", unit: "Unidad de medida base", created_at: "Fecha de alta", warehouse_id: "Código de almacén", warehouse_location: "Número de estante", inventory_valuation_method: "Valoración de existencias", cost_price: "Coste unitario", last_direct_cost: "Coste último directo", markup_percent: "Porcentaje de incremento de venta", unit_price: "Precio de venta", accounting_product_group: "Grupo contable prod. gen.", accounting_vat_group: "Grupo contable IVA", inventory_register_group: "Grupo registro inventario", product_tracking_code: "Código seguimiento producto", supplier_id: "Nombre proveedor" };
@@ -3388,8 +3396,9 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       ...currentForm,
       ...clientGeodata,
       ...(reopenPreparation ? { status: "Pendiente", reopen_preparation: true } : {}),
-      ...((c.api === "quotes" || isProforma || c.api === "orders") ? { amount: quoteAmount } : {}),
+      ...((c.api === "quotes" || isProforma || c.api === "orders" || isPurchaseForm) ? { amount: quoteAmount } : {}),
       ...(c.api === "orders" && !editing ? { lines: quoteLines } : {}),
+      ...(isPurchaseForm && !editing ? { lines: quoteLines.map((line) => ({ product_id: line.product_id, quantity: line.quantity, unit_cost: line.unit_price, amount: line.amount })) } : {}),
       ...(c.api === "expenses" && !currentForm.code
         ? { code: "GAS-" + String(Date.now()).slice(-8) }
         : {}),
@@ -5423,6 +5432,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     return `${prefix}${String(highest + 1).padStart(4, "0")}`;
   }
   const isOrderForm = c.api === "orders";
+  const isPurchaseForm = c.api === "purchase_orders";
   const formEntity = active === "Facturas" && form.status === "Proforma" ? "proforma" : (isOrderForm ? "pedido" : (createActionLabels[active] || "Crear registro").replace(/^Crear /, ""));
   const formTitle = `${editing ? "Editar" : "Crear"} ${formEntity}`;
   const orderScheduleFields = ["preparation_date", "shipping_date", "delivery_date"];
@@ -5457,6 +5467,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                     ? { created_at: tabletTodayInput(), preorder: "1", product_tracking_code: "Sin seguimiento", unit: "unidad", vat: "21", inventory_valuation_method: "FIFO", accounting_product_group: "Mercaderías", accounting_vat_group: "21%", inventory_register_group: "Mercaderías", product_status: "Activo" }
                   : active === "Gastos y tickets"
                     ? { expense_date: tabletTodayInput(), category: "Otros", vat: "21", payment_method: "Tarjeta" }
+                  : isPurchaseForm
+                    ? { code: `COM-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`, status: "Pendiente", order_date: tabletTodayInput(), expected_date: "", amount: 0 }
                   : isOrderForm || active === "Pedidos"
                     ? { code: nextOrderCode(), status: "Nuevo", created_by: user?.username || "Usuario local" }
                     : {}
@@ -5619,15 +5631,15 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             </section>
             </>
           ) : c.fields.map((f: string) => renderFormField(f, c.fields.indexOf(f)))}
-          {(active === "Presupuestos" || isOrderForm) && (
+          {(active === "Presupuestos" || isOrderForm || (isPurchaseForm && !editing)) && (
             <section className="quote-lines-editor">
-              <div className="quote-lines-head"><div><b>Líneas del {isOrderForm ? "pedido" : "presupuesto"}</b><small>Busca y añade varios productos como en un carrito.</small></div></div>
+              <div className="quote-lines-head"><div><b>{isOrderForm ? "Líneas del pedido" : isPurchaseForm ? "Líneas de la compra" : "Líneas del presupuesto"}</b><small>{isPurchaseForm ? "Añade cada producto y las unidades que estás comprando." : "Busca y añade varios productos como en un carrito."}</small></div></div>
               <div className="quote-line-add">
                 <label className="quote-line-field quote-line-product"><span>Producto</span><div className="quote-product-picker"><input aria-label="Buscar producto" autoComplete="off" placeholder="Buscar por nombre o SKU…" value={quoteProductSearch} onChange={(event) => { const value = event.target.value; const product = (lookups.products || []).find((item: any) => String(item.name).toLowerCase() === value.trim().toLowerCase() || String(item.sku || "").toLowerCase() === value.trim().toLowerCase()); const factor = quoteUnitsFactor(product, quoteLineDraft.quantity_unit); setQuoteProductSearch(value); setQuoteLineDraft({ ...quoteLineDraft, product_id: product ? String(product.id) : "", total_units: product && factor > 0 ? String(Number(quoteLineDraft.quantity || 1) * factor) : "", unit_price: product ? String(Number(product.unit_price || 0) * factor) : quoteLineDraft.unit_price }); }} />{quoteProductSearch && <button type="button" className="quote-product-clear" aria-label="Limpiar producto" onClick={() => { setQuoteProductSearch(""); setQuoteLineDraft({ ...quoteLineDraft, product_id: "", total_units: "", unit_price: "0" }); }}>×</button>}{quoteProductSearch.trim() && !quoteLineDraft.product_id && <div className="quote-product-suggestions">{(lookups.products || []).filter((item: any) => `${item.name || ""} ${item.sku || ""} ${item.brand || ""}`.toLowerCase().includes(quoteProductSearch.trim().toLowerCase())).slice(0, 8).map((item: any) => <button type="button" key={item.id} onClick={() => { const factor = quoteUnitsFactor(item, quoteLineDraft.quantity_unit); setQuoteProductSearch(`${item.name}${item.sku ? ` · ${item.sku}` : ""}`); setQuoteLineDraft({ ...quoteLineDraft, product_id: String(item.id), total_units: factor > 0 ? String(Number(quoteLineDraft.quantity || 1) * factor) : "", unit_price: String(Number(item.unit_price || 0) * factor) }); }}><b>{item.name}</b><small>{[item.sku, item.brand, item.category].filter(Boolean).join(" · ") || "Sin referencia"}</small></button>)}{!(lookups.products || []).some((item: any) => `${item.name || ""} ${item.sku || ""} ${item.brand || ""}`.toLowerCase().includes(quoteProductSearch.trim().toLowerCase())) && <span className="quote-product-no-results">No hay productos que coincidan.</span>}</div>}</div></label>
                 <label className="quote-line-field"><span>Tipo de cantidad</span><select aria-label="Tipo de cantidad" value={quoteLineDraft.quantity_unit} onChange={(event) => { const value = event.target.value; const product = (lookups.products || []).find((item: any) => Number(item.id) === Number(quoteLineDraft.product_id)); const factor = quoteUnitsFactor(product, value); setQuoteLineDraft({ ...quoteLineDraft, quantity_unit: value, total_units: product && factor > 0 ? String(Number(quoteLineDraft.quantity || 1) * factor) : "", unit_price: product ? String(Number(product.unit_price || 0) * factor) : quoteLineDraft.unit_price }); }}><option value="unidad">Unidad</option><option value="caja">Caja</option><option value="pack_4">Pack de 4</option><option value="pack_6">Pack de 6</option><option value="palet">Palé</option></select></label>
                 <label className="quote-line-field"><span>Cantidad</span><input aria-label="Cantidad" type="number" min="1" step="any" value={quoteLineDraft.quantity} onChange={(event) => { const value = event.target.value; const factor = quoteUnitsFactor(selectedQuoteProduct, quoteLineDraft.quantity_unit); setQuoteLineDraft({ ...quoteLineDraft, quantity: value, total_units: selectedQuoteProduct && factor > 0 ? String(Number(value || 0) * factor) : "" }); }} /></label>
-                <label className="quote-line-field"><span>Precio del formato (€)</span><input aria-label="Precio del formato" type="number" min="0" step="any" value={quoteLineDraft.unit_price} onChange={(event) => setQuoteLineDraft({ ...quoteLineDraft, unit_price: event.target.value })} /></label>
-                {isOrderForm ? <label className="quote-line-field"><span>Unidades totales{quoteLineDraft.product_id ? " *" : ""}</span><input aria-label="Unidades totales" type="number" min="1" step="any" required={Boolean(quoteLineDraft.product_id)} value={quoteTotalUnits} onChange={(event) => setQuoteLineDraft({ ...quoteLineDraft, total_units: event.target.value })} placeholder="Indica las unidades" /></label> : <label className="quote-line-field"><span>Descuento %</span><input aria-label="Descuento %" type="number" min="0" max="100" step="any" value={quoteLineDraft.discount} onChange={(event) => setQuoteLineDraft({ ...quoteLineDraft, discount: event.target.value })} /></label>}
+                <label className="quote-line-field"><span>{isPurchaseForm ? "Coste del formato (€)" : "Precio del formato (€)"}</span><input aria-label={isPurchaseForm ? "Coste del formato" : "Precio del formato"} type="number" min="0" step="any" value={quoteLineDraft.unit_price} onChange={(event) => setQuoteLineDraft({ ...quoteLineDraft, unit_price: event.target.value })} /></label>
+                {isOrderForm ? <label className="quote-line-field"><span>Unidades totales{quoteLineDraft.product_id ? " *" : ""}</span><input aria-label="Unidades totales" type="number" min="1" step="any" required={Boolean(quoteLineDraft.product_id)} value={quoteTotalUnits} onChange={(event) => setQuoteLineDraft({ ...quoteLineDraft, total_units: event.target.value })} placeholder="Indica las unidades" /></label> : !isPurchaseForm && <label className="quote-line-field"><span>Descuento %</span><input aria-label="Descuento %" type="number" min="0" max="100" step="any" value={quoteLineDraft.discount} onChange={(event) => setQuoteLineDraft({ ...quoteLineDraft, discount: event.target.value })} /></label>}
                 <button type="button" className="button secondary" onClick={addQuoteLine}>＋ Añadir línea</button>
               </div>
               {quoteLines.length ? <div className="quote-lines-list">{quoteLines.map((line, index) => <div className="quote-line-row" key={`${line.product_id}-${index}`}><span><b>{line.product_name}</b></span><span className="quote-line-detail"><b>{line.quantity_requested || line.quantity} {quantityUnitLabel(line.quantity_unit)}</b><small>{Number(line.quantity)} unidades totales · {Number(line.format_price ?? line.unit_price).toLocaleString("es-ES", { style: "currency", currency: "EUR" })} por formato</small></span><strong>{Number(line.amount).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</strong><button type="button" aria-label={`Quitar ${line.product_name}`} onClick={() => setQuoteLines((current) => current.filter((_, lineIndex) => lineIndex !== index))}>×</button></div>)}</div> : <p className="quote-lines-empty">Todavía no has añadido productos.</p>}

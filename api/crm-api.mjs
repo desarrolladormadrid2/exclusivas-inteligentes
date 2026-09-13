@@ -2699,6 +2699,7 @@ export async function crmApiHandler(req, res) {
         if (t === "orders" && !d.created_by) d.created_by = actor;
         if (t === "notes" && !d.created_by) d.created_by = actor;
         let orderLines = null;
+        let purchaseOrderLines = null;
         let stockShortages = [];
         let stockAlerts = [];
         if (t === "orders" && Array.isArray(d.lines) && d.lines.length) {
@@ -2726,6 +2727,28 @@ export async function crmApiHandler(req, res) {
           d.quantity = firstLine.quantity;
           d.unit_price = firstLine.unit_price;
           d.amount = orderLines.reduce((total, line) => total + line.amount, 0);
+          delete d.lines;
+        }
+        if (t === "purchase_orders") {
+          if (!String(d.code || "").trim() || !d.supplier_id || !String(d.order_date || "").trim()) {
+            return send(res, 400, { error: "La compra debe indicar código, proveedor y fecha" });
+          }
+          if (!Array.isArray(d.lines) || !d.lines.length) {
+            return send(res, 400, { error: "Añade al menos una línea de producto a la compra" });
+          }
+          purchaseOrderLines = d.lines.map((line) => {
+            const productId = Number(line.product_id);
+            const quantity = Number(line.quantity || 0);
+            const unitCost = Number(line.unit_cost ?? line.unit_price ?? 0);
+            return {
+              productId,
+              quantity,
+              unitCost,
+              amount: Number(line.amount ?? quantity * unitCost),
+            };
+          }).filter((line) => line.productId && line.quantity > 0 && Number.isFinite(line.unitCost) && line.unitCost >= 0);
+          if (!purchaseOrderLines.length) return send(res, 400, { error: "Cada línea debe indicar un producto y una cantidad mayor que cero" });
+          d.amount = purchaseOrderLines.reduce((total, line) => total + line.amount, 0);
           delete d.lines;
         }
         if (t === "payments") {
@@ -3007,6 +3030,11 @@ export async function crmApiHandler(req, res) {
           d.expiry_date = normalizedLotAllocations[0]?.expiry_date || null;
           if (d.prepared === undefined) d.prepared = 0;
           if (d.preparation_status === undefined) d.preparation_status = preparedQuantity > 0 ? "Pendiente" : "Pendiente";
+        }
+        if (t === "purchase_orders" && purchaseOrderLines) {
+          for (const line of purchaseOrderLines) {
+            db.prepare("INSERT INTO purchase_order_lines(purchase_order_id,product_id,quantity,unit_cost,amount) VALUES(?,?,?,?,?)").run(Number(r.lastInsertRowid), line.productId, line.quantity, line.unitCost, line.amount);
+          }
         }
         if (t === "orders") {
           const currentOrder = db.prepare("SELECT status FROM orders WHERE id=?").get(Number(p[2]));
