@@ -452,6 +452,11 @@ db.exec(`CREATE TABLE IF NOT EXISTS audit_logs(id INTEGER PRIMARY KEY AUTOINCREM
 db.exec(`CREATE TABLE IF NOT EXISTS scheduled_tasks(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,action_text TEXT NOT NULL,schedule_type TEXT DEFAULT 'Unica',recurrence TEXT,next_run TEXT,status TEXT DEFAULT 'Activa',last_run TEXT,last_result TEXT,created_by TEXT DEFAULT 'Usuario local',created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS backup_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,created_at TEXT NOT NULL,created_by TEXT,source TEXT DEFAULT 'Turso',tables_json TEXT NOT NULL,data_base64 TEXT NOT NULL,checksum TEXT NOT NULL,status TEXT DEFAULT 'Disponible',restored_at TEXT,restored_by TEXT,size_bytes INTEGER DEFAULT 0);`);
 db.exec(`CREATE TABLE IF NOT EXISTS delivery_routes(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,route_date TEXT NOT NULL,driver TEXT,vehicle TEXT,status TEXT DEFAULT 'Planificada',radius_meters REAL DEFAULT 150,origin_address TEXT,origin_latitude REAL,origin_longitude REAL,notes TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
+db.exec(`CREATE TABLE IF NOT EXISTS vehicles(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,name TEXT NOT NULL,plate TEXT UNIQUE,brand TEXT,model TEXT,active INTEGER DEFAULT 1,odometer_km REAL DEFAULT 0,maintenance_interval_km REAL DEFAULT 30000,maintenance_interval_days INTEGER DEFAULT 180,next_maintenance_km REAL,next_maintenance_date TEXT,notes TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
+db.exec(`CREATE TABLE IF NOT EXISTS vehicle_trips(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,vehicle_id INTEGER NOT NULL,route_id INTEGER,route_date TEXT NOT NULL,route_code TEXT,driver TEXT,planned_distance_km REAL DEFAULT 0,start_km REAL,end_km REAL,distance_km REAL,status TEXT DEFAULT 'Planificada',notes TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
+db.exec(`CREATE TABLE IF NOT EXISTS vehicle_refuels(id INTEGER PRIMARY KEY AUTOINCREMENT,vehicle_id INTEGER NOT NULL,trip_id INTEGER,fuel_date TEXT NOT NULL,station TEXT,liters REAL DEFAULT 0,amount REAL DEFAULT 0,ticket_reference TEXT,odometer_km REAL,notes TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
+db.exec(`CREATE TABLE IF NOT EXISTS vehicle_maintenance(id INTEGER PRIMARY KEY AUTOINCREMENT,vehicle_id INTEGER NOT NULL,maintenance_date TEXT NOT NULL,maintenance_km REAL DEFAULT 0,maintenance_type TEXT NOT NULL,amount REAL DEFAULT 0,next_due_km REAL,next_due_date TEXT,notes TEXT,status TEXT DEFAULT 'Realizado',created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
+try { db.exec("ALTER TABLE delivery_routes ADD COLUMN vehicle_id INTEGER"); } catch {}
 db.exec(`CREATE TABLE IF NOT EXISTS delivery_route_stops(id INTEGER PRIMARY KEY AUTOINCREMENT,route_id INTEGER NOT NULL,position INTEGER NOT NULL,shipment_id INTEGER,client_id INTEGER,collection_point_id INTEGER,client_name TEXT,address TEXT,city TEXT,opening_time TEXT,closing_time TEXT,latitude REAL,longitude REAL,distance_km REAL DEFAULT 0,status TEXT DEFAULT 'Pendiente',notes TEXT,driver_notes TEXT,invoice_delivery_method TEXT,created_at TEXT,updated_at TEXT);`);
 for (const column of ["opening_time TEXT", "closing_time TEXT", "driver_notes TEXT", "invoice_delivery_method TEXT"]) { try { db.exec(`ALTER TABLE delivery_route_stops ADD COLUMN ${column}`); } catch {} }
 try {
@@ -825,6 +830,10 @@ const tables = new Set([
   "import_records",
   "delivery_routes",
   "delivery_route_stops",
+  "vehicles",
+  "vehicle_trips",
+  "vehicle_refuels",
+  "vehicle_maintenance",
   "users",
 ]);
 const backupTables = [...tables];
@@ -971,6 +980,10 @@ for (const [name, table, columns] of [
   ["idx_import_records_batch", "import_records", "batch_id, entity, source_code"],
   ["idx_product_lots_expiry", "product_lots", "product_id, expiry_date"],
   ["idx_purchase_suggestions_status", "purchase_suggestions", "status, created_at"],
+  ["idx_vehicles_active", "vehicles", "active, name"],
+  ["idx_vehicle_trips_vehicle_date", "vehicle_trips", "vehicle_id, route_date"],
+  ["idx_vehicle_refuels_vehicle_date", "vehicle_refuels", "vehicle_id, fuel_date"],
+  ["idx_vehicle_maintenance_vehicle_date", "vehicle_maintenance", "vehicle_id, maintenance_date"],
 ]) {
   indexStatements.push(`CREATE INDEX IF NOT EXISTS ${name} ON ${table}(${columns})`);
 }
@@ -1187,6 +1200,42 @@ function storeRows(resource, includeDeleted, includeInactive, rows) {
 function recordAudit(actor, method, resource, action, details = "") {
   try { db.prepare("INSERT INTO audit_logs(actor,method,resource,action,details,created_at) VALUES(?,?,?,?,?,?)").run(actor || "Usuario local", method, resource, action, details, new Date().toISOString()); } catch {}
 }
+function vehicleMaintenanceState(vehicle) {
+  const today = new Date();
+  const todayText = today.toISOString().slice(0, 10);
+  const dueDate = String(vehicle?.next_maintenance_date || "").slice(0, 10);
+  const currentKm = Number(vehicle?.odometer_km || 0);
+  const dueKm = Number(vehicle?.next_maintenance_km || 0);
+  const kmRemaining = dueKm > 0 ? dueKm - currentKm : null;
+  const dateRemaining = dueDate ? Math.ceil((new Date(`${dueDate}T00:00:00`).getTime() - new Date(`${todayText}T00:00:00`).getTime()) / 86400000) : null;
+  const kmDue = kmRemaining !== null && kmRemaining <= 0;
+  const dateDue = dateRemaining !== null && dateRemaining <= 0;
+  const kmSoon = kmRemaining !== null && kmRemaining <= 1000;
+  const dateSoon = dateRemaining !== null && dateRemaining <= 14;
+  const alert = kmDue || dateDue ? "Mantenimiento vencido" : kmSoon || dateSoon ? "Mantenimiento próximo" : "Al día";
+  return { maintenance_status: alert, maintenance_alert: alert !== "Al día", km_remaining: kmRemaining, days_remaining: dateRemaining };
+}
+function addDaysDate(value, days) {
+  const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setDate(date.getDate() + Math.max(1, Number(days || 1)));
+  return date.toISOString().slice(0, 10);
+}
+function getVehicleWithMetrics(id) {
+  const vehicle = db.prepare("SELECT * FROM vehicles WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(id));
+  if (!vehicle) return null;
+  const trips = db.prepare("SELECT * FROM vehicle_trips WHERE vehicle_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY route_date DESC,id DESC LIMIT 30").all(Number(id));
+  const refuels = db.prepare("SELECT * FROM vehicle_refuels WHERE vehicle_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY fuel_date DESC,id DESC LIMIT 10").all(Number(id));
+  return { ...vehicle, ...vehicleMaintenanceState(vehicle), total_trip_km: trips.reduce((total, trip) => total + Number(trip.distance_km || 0), 0), total_fuel_liters: refuels.reduce((total, fuel) => total + Number(fuel.liters || 0), 0), total_fuel_amount: refuels.reduce((total, fuel) => total + Number(fuel.amount || 0), 0), trips, refuels };
+}
+function getVehicleList() {
+  return db.prepare("SELECT v.*,COALESCE((SELECT SUM(vr.liters) FROM vehicle_refuels vr WHERE vr.vehicle_id=v.id AND CAST(COALESCE(vr.deleted,0) AS INTEGER)=0),0) total_fuel_liters,COALESCE((SELECT SUM(vr.amount) FROM vehicle_refuels vr WHERE vr.vehicle_id=v.id AND CAST(COALESCE(vr.deleted,0) AS INTEGER)=0),0) total_fuel_amount FROM vehicles v WHERE CAST(COALESCE(v.deleted,0) AS INTEGER)=0 ORDER BY CAST(COALESCE(v.active,1) AS INTEGER) DESC,v.name,v.id").all().map((vehicle) => ({ ...vehicle, ...vehicleMaintenanceState(vehicle) }));
+}
+function updateVehicleOdometer(vehicleId, candidateKm) {
+  const km = Number(candidateKm);
+  if (!Number.isFinite(km) || km < 0) return;
+  db.prepare("UPDATE vehicles SET odometer_km=MAX(COALESCE(odometer_km,0),?),updated_at=? WHERE id=?").run(km, new Date().toISOString(), Number(vehicleId));
+}
 function executeScheduledTask(task) {
   const text = String(task.action_text || "").trim();
   let result = "Acción registrada";
@@ -1286,6 +1335,8 @@ function getRouteWithStops(id) {
     return match ? Number(match[1]) * 60 + Number(match[2]) : null;
   };
   const totalDistanceKm = stops.reduce((total, stop) => total + Number(stop.distance_km || 0), 0);
+  const vehicle = route.vehicle_id ? db.prepare("SELECT * FROM vehicles WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(route.vehicle_id)) : null;
+  const vehicleTrip = db.prepare("SELECT * FROM vehicle_trips WHERE route_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 1").get(Number(id));
   const warnings = [];
   let elapsedMinutes = 0;
   const departureMinutes = 8 * 60;
@@ -1299,7 +1350,7 @@ function getRouteWithStops(id) {
     else if (opening !== null && arrival < opening) elapsedMinutes += opening - arrival;
     elapsedMinutes += 15;
   }
-  return { ...route, stops, maps_url: mapsUrl, total_distance_km: Number(totalDistanceKm.toFixed(1)), estimated_minutes: Math.max(0, Math.round(elapsedMinutes)), time_window_warnings: warnings };
+  return { ...route, vehicle_name: vehicle?.name || "", vehicle_plate: vehicle?.plate || "", vehicle: route.vehicle || vehicle?.plate || vehicle?.name || "", vehicle_summary: vehicle ? { ...vehicle, ...vehicleMaintenanceState(vehicle) } : null, vehicle_trip: vehicleTrip, stops, maps_url: mapsUrl, total_distance_km: Number(totalDistanceKm.toFixed(1)), estimated_minutes: Math.max(0, Math.round(elapsedMinutes)), time_window_warnings: warnings };
 }
 function ensureShipmentTrackingToken(id) {
   const shipmentId = Number(id);
@@ -1536,6 +1587,114 @@ export async function crmApiHandler(req, res) {
         try { executeScheduledTask(task); } catch (error) { return send(res, 500, { error: error?.message || "No se pudo ejecutar la tarea" }); }
         return send(res, 200, db.prepare("SELECT * FROM scheduled_tasks WHERE id=?").get(Number(p[2])));
       }
+      if (p[1] === "vehicles") {
+        if (req.method === "GET" && !p[2]) return send(res, 200, getVehicleList());
+        if (req.method === "GET" && p[2]) return send(res, 200, getVehicleWithMetrics(p[2]) || { error: "Vehículo no encontrado" });
+        const body = await read(req);
+        if (req.method === "POST") {
+          const name = String(body.name || body.plate || "").trim();
+          if (!name) return send(res, 400, { error: "Indica el nombre o referencia del camión" });
+          const now = new Date().toISOString();
+          const code = String(body.code || `CAM-${String(Date.now()).slice(-6)}`).trim();
+          const odometer = Math.max(0, Number(body.odometer_km || 0));
+          const intervalKm = Math.max(1, Number(body.maintenance_interval_km || 30000));
+          const intervalDays = Math.max(1, Number(body.maintenance_interval_days || 180));
+          const nextKm = body.next_maintenance_km === undefined || body.next_maintenance_km === "" ? odometer + intervalKm : Math.max(0, Number(body.next_maintenance_km));
+          const nextDate = String(body.next_maintenance_date || "").slice(0, 10) || addDaysDate(now, intervalDays);
+          try {
+            const created = db.prepare("INSERT INTO vehicles(code,name,plate,brand,model,active,odometer_km,maintenance_interval_km,maintenance_interval_days,next_maintenance_km,next_maintenance_date,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(code, name, String(body.plate || "").trim() || null, String(body.brand || "").trim(), String(body.model || "").trim(), Number(body.active ?? 1) ? 1 : 0, odometer, intervalKm, intervalDays, nextKm, nextDate, String(body.notes || "").trim(), now, now);
+            recordAudit(actor, "POST", `vehicles/${Number(created.lastInsertRowid)}`, "Crear vehículo", JSON.stringify({ code, plate: body.plate || "" }));
+            return send(res, 201, getVehicleWithMetrics(Number(created.lastInsertRowid)));
+          } catch (error) { return send(res, 409, { error: error?.message || "No se pudo crear el vehículo" }); }
+        }
+        if (!p[2]) return send(res, 400, { error: "Indica el vehículo" });
+        const id = Number(p[2]);
+        const current = db.prepare("SELECT * FROM vehicles WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(id);
+        if (!current) return send(res, 404, { error: "Vehículo no encontrado" });
+        if (req.method === "PUT") {
+          const allowed = ["code", "name", "plate", "brand", "model", "active", "odometer_km", "maintenance_interval_km", "maintenance_interval_days", "next_maintenance_km", "next_maintenance_date", "notes"];
+          const changes = allowed.filter((key) => body[key] !== undefined);
+          if (!changes.length) return send(res, 400, { error: "No hay cambios para guardar" });
+          const values = changes.map((key) => key === "plate" ? String(body[key] || "").trim() || null : key === "active" ? (Number(body[key]) ? 1 : 0) : key === "next_maintenance_date" ? String(body[key] || "").slice(0, 10) || null : body[key]);
+          try { db.prepare(`UPDATE vehicles SET ${changes.map((key) => `${key}=?`).join(",")},updated_at=? WHERE id=?`).run(...values, new Date().toISOString(), id); } catch (error) { return send(res, 409, { error: error?.message || "No se pudo actualizar el vehículo" }); }
+          recordAudit(actor, "PUT", `vehicles/${id}`, "Editar vehículo", JSON.stringify(body));
+          return send(res, 200, getVehicleWithMetrics(id));
+        }
+        if (req.method === "DELETE") {
+          const now = new Date().toISOString();
+          db.prepare("UPDATE vehicles SET deleted='1',deleted_at=?,deleted_by=?,updated_at=? WHERE id=?").run(now, actor, now, id);
+          recordAudit(actor, "DELETE", `vehicles/${id}`, "Dar de baja vehículo");
+          return send(res, 200, { ok: true, id });
+        }
+      }
+      if (p[1] === "vehicle_trips") {
+        if (req.method === "GET") {
+          const date = new URL(req.url, "http://local").searchParams.get("date");
+          const rows = db.prepare(`SELECT vt.*,v.name vehicle_name,v.plate vehicle_plate FROM vehicle_trips vt JOIN vehicles v ON v.id=vt.vehicle_id WHERE CAST(COALESCE(vt.deleted,0) AS INTEGER)=0 ${date ? "AND vt.route_date=?" : ""} ORDER BY vt.route_date DESC,vt.id DESC LIMIT 500`).all(...(date ? [date] : []));
+          return send(res, 200, rows);
+        }
+        const body = await read(req);
+        const id = Number(p[2] || 0);
+        const current = id ? db.prepare("SELECT * FROM vehicle_trips WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(id) : null;
+        if (req.method === "POST") {
+          const vehicleId = Number(body.vehicle_id || 0);
+          if (!db.prepare("SELECT id FROM vehicles WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(vehicleId)) return send(res, 400, { error: "Selecciona un camión válido" });
+          const routeDate = String(body.route_date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+          const now = new Date().toISOString();
+          const code = String(body.code || `VIA-${routeDate.replaceAll("-", "")}-${String(Date.now()).slice(-5)}`);
+          const planned = Math.max(0, Number(body.planned_distance_km || 0));
+          const start = body.start_km === undefined || body.start_km === "" ? null : Math.max(0, Number(body.start_km));
+          const end = body.end_km === undefined || body.end_km === "" ? null : Math.max(0, Number(body.end_km));
+          if (start !== null && end !== null && end < start) return send(res, 400, { error: "Los kilómetros finales no pueden ser menores que los iniciales" });
+          const distance = start !== null && end !== null ? end - start : null;
+          const created = db.prepare("INSERT INTO vehicle_trips(code,vehicle_id,route_id,route_date,route_code,driver,planned_distance_km,start_km,end_km,distance_km,status,notes,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(code, vehicleId, Number(body.route_id || 0) || null, routeDate, String(body.route_code || "").trim(), String(body.driver || "").trim(), planned, start, end, distance, String(body.status || "Planificada"), String(body.notes || "").trim(), actor, now, now);
+          updateVehicleOdometer(vehicleId, end);
+          return send(res, 201, db.prepare("SELECT vt.*,v.name vehicle_name,v.plate vehicle_plate FROM vehicle_trips vt JOIN vehicles v ON v.id=vt.vehicle_id WHERE vt.id=?").get(Number(created.lastInsertRowid)));
+        }
+        if (!current) return send(res, 404, { error: "Jornada no encontrada" });
+        if (req.method === "PUT") {
+          const start = body.start_km === undefined || body.start_km === "" ? current.start_km : Math.max(0, Number(body.start_km));
+          const end = body.end_km === undefined || body.end_km === "" ? current.end_km : Math.max(0, Number(body.end_km));
+          if (start !== null && end !== null && Number(end) < Number(start)) return send(res, 400, { error: "Los kilómetros finales no pueden ser menores que los iniciales" });
+          const distance = start !== null && end !== null ? Number(end) - Number(start) : null;
+          const now = new Date().toISOString();
+          db.prepare("UPDATE vehicle_trips SET start_km=?,end_km=?,distance_km=?,status=COALESCE(?,status),notes=COALESCE(?,notes),updated_at=? WHERE id=?").run(start, end, distance, body.status === undefined ? null : String(body.status), body.notes === undefined ? null : String(body.notes), now, id);
+          updateVehicleOdometer(current.vehicle_id, end);
+          return send(res, 200, db.prepare("SELECT vt.*,v.name vehicle_name,v.plate vehicle_plate FROM vehicle_trips vt JOIN vehicles v ON v.id=vt.vehicle_id WHERE vt.id=?").get(id));
+        }
+      }
+      if (p[1] === "vehicle_refuels") {
+        if (req.method === "GET") return send(res, 200, db.prepare("SELECT vr.*,v.name vehicle_name,v.plate vehicle_plate FROM vehicle_refuels vr JOIN vehicles v ON v.id=vr.vehicle_id WHERE CAST(COALESCE(vr.deleted,0) AS INTEGER)=0 ORDER BY vr.fuel_date DESC,vr.id DESC LIMIT 500").all());
+        const body = await read(req);
+        if (req.method === "POST") {
+          const vehicleId = Number(body.vehicle_id || 0);
+          if (!db.prepare("SELECT id FROM vehicles WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(vehicleId)) return send(res, 400, { error: "Selecciona un camión válido" });
+          const amount = Math.max(0, Number(body.amount || 0));
+          const liters = Math.max(0, Number(body.liters || 0));
+          if (!amount && !liters) return send(res, 400, { error: "Indica al menos los litros o el importe del repostaje" });
+          const now = new Date().toISOString();
+          const created = db.prepare("INSERT INTO vehicle_refuels(vehicle_id,trip_id,fuel_date,station,liters,amount,ticket_reference,odometer_km,notes,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").run(vehicleId, Number(body.trip_id || 0) || null, String(body.fuel_date || now.slice(0, 10)).slice(0, 10), String(body.station || "").trim(), liters, amount, String(body.ticket_reference || "").trim(), body.odometer_km === undefined || body.odometer_km === "" ? null : Math.max(0, Number(body.odometer_km)), String(body.notes || "").trim(), actor, now, now);
+          updateVehicleOdometer(vehicleId, body.odometer_km);
+          return send(res, 201, db.prepare("SELECT vr.*,v.name vehicle_name,v.plate vehicle_plate FROM vehicle_refuels vr JOIN vehicles v ON v.id=vr.vehicle_id WHERE vr.id=?").get(Number(created.lastInsertRowid)));
+        }
+      }
+      if (p[1] === "vehicle_maintenance") {
+        if (req.method === "GET") return send(res, 200, db.prepare("SELECT vm.*,v.name vehicle_name,v.plate vehicle_plate FROM vehicle_maintenance vm JOIN vehicles v ON v.id=vm.vehicle_id WHERE CAST(COALESCE(vm.deleted,0) AS INTEGER)=0 ORDER BY vm.maintenance_date DESC,vm.id DESC LIMIT 500").all());
+        const body = await read(req);
+        if (req.method === "POST") {
+          const vehicleId = Number(body.vehicle_id || 0);
+          const vehicle = db.prepare("SELECT * FROM vehicles WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(vehicleId);
+          if (!vehicle) return send(res, 400, { error: "Selecciona un camión válido" });
+          const now = new Date().toISOString();
+          const date = String(body.maintenance_date || now).slice(0, 10);
+          const km = Math.max(0, Number(body.maintenance_km || vehicle.odometer_km || 0));
+          const nextKm = body.next_due_km === undefined || body.next_due_km === "" ? km + Math.max(1, Number(vehicle.maintenance_interval_km || 30000)) : Math.max(0, Number(body.next_due_km));
+          const nextDate = String(body.next_due_date || "").slice(0, 10) || addDaysDate(date, vehicle.maintenance_interval_days || 180);
+          const created = db.prepare("INSERT INTO vehicle_maintenance(vehicle_id,maintenance_date,maintenance_km,maintenance_type,amount,next_due_km,next_due_date,notes,status,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").run(vehicleId, date, km, String(body.maintenance_type || "Mantenimiento general").trim(), Math.max(0, Number(body.amount || 0)), nextKm, nextDate, String(body.notes || "").trim(), "Realizado", actor, now, now);
+          db.prepare("UPDATE vehicles SET odometer_km=MAX(COALESCE(odometer_km,0),?),next_maintenance_km=?,next_maintenance_date=?,updated_at=? WHERE id=?").run(km, nextKm, nextDate, now, vehicleId);
+          return send(res, 201, db.prepare("SELECT vm.*,v.name vehicle_name,v.plate vehicle_plate FROM vehicle_maintenance vm JOIN vehicles v ON v.id=vm.vehicle_id WHERE vm.id=?").get(Number(created.lastInsertRowid)));
+        }
+      }
       if (p[1] === "routes" && req.method === "GET") {
         if (p[2]) return send(res, 200, getRouteWithStops(p[2]) || { error: "Ruta no encontrada" });
         const routeDate = new URL(req.url, "http://local").searchParams.get("date");
@@ -1555,8 +1714,13 @@ export async function crmApiHandler(req, res) {
         const orderedStops = optimizeStops(stops, originLat, originLon);
         const now = new Date().toISOString();
         const routeCode = `RUT-${String(body.route_date).replace(/[^0-9]/g, "")}-${String(Date.now()).slice(-5)}`;
-        const route = db.prepare("INSERT INTO delivery_routes(code,route_date,driver,vehicle,status,radius_meters,origin_address,origin_latitude,origin_longitude,notes,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)").run(routeCode, String(body.route_date), String(body.driver || ""), String(body.vehicle || ""), "Planificada", Number(body.radius_meters || 150), String(body.origin_address || ""), originLat, originLon, String(body.notes || ""), actor, now, now);
+        const vehicleId = Number(body.vehicle_id || 0) || null;
+        const vehicle = vehicleId ? db.prepare("SELECT id,name,plate FROM vehicles WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(vehicleId) : null;
+        if (body.vehicle_id && !vehicle) return send(res, 400, { error: "El camión seleccionado no existe o está dado de baja" });
+        const vehicleLabel = String(body.vehicle || vehicle?.plate || vehicle?.name || "").trim();
+        const route = db.prepare("INSERT INTO delivery_routes(code,route_date,driver,vehicle,vehicle_id,status,radius_meters,origin_address,origin_latitude,origin_longitude,notes,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(routeCode, String(body.route_date), String(body.driver || ""), vehicleLabel, vehicleId, "Planificada", Number(body.radius_meters || 150), String(body.origin_address || ""), originLat, originLon, String(body.notes || ""), actor, now, now);
         for (const stop of orderedStops) db.prepare("INSERT INTO delivery_route_stops(route_id,position,shipment_id,client_id,collection_point_id,client_name,address,city,opening_time,closing_time,latitude,longitude,distance_km,status,notes,driver_notes,invoice_delivery_method,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(Number(route.lastInsertRowid), stop.position, stop.shipment_id, stop.client_id, stop.collection_point_id, stop.client_name, stop.address, stop.city, stop.opening_time, stop.closing_time, stop.latitude, stop.longitude, stop.distance_km, "Pendiente", stop.notes || "", stop.driver_notes || "", stop.invoice_delivery_method || "Pendiente de indicar", now, now);
+        if (vehicleId) db.prepare("INSERT INTO vehicle_trips(code,vehicle_id,route_id,route_date,route_code,driver,planned_distance_km,status,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(`VIA-${String(body.route_date).replace(/[^0-9]/g, "")}-${String(Date.now()).slice(-5)}`, vehicleId, Number(route.lastInsertRowid), String(body.route_date), routeCode, String(body.driver || ""), Number(orderedStops.reduce((total, stop) => total + Number(stop.distance_km || 0), 0).toFixed(1)), "Planificada", actor, now, now);
         recordAudit(actor, "POST", `routes/${Number(route.lastInsertRowid)}`, "Planificar ruta", JSON.stringify({ shipment_ids: shipmentIds, radius_meters: Number(body.radius_meters || 150) }));
         return send(res, 201, getRouteWithStops(Number(route.lastInsertRowid)));
       }
@@ -1588,7 +1752,14 @@ export async function crmApiHandler(req, res) {
       }
       if (p[1] === "routes" && req.method === "PUT" && p[2]) {
         const body = await read(req);
-        const allowed = ["driver", "vehicle", "status", "radius_meters", "notes", "origin_address", "origin_latitude", "origin_longitude"];
+        if (body.vehicle_id !== undefined) {
+          const selectedVehicle = Number(body.vehicle_id || 0) || null;
+          const vehicle = selectedVehicle ? db.prepare("SELECT name,plate FROM vehicles WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(selectedVehicle) : null;
+          if (selectedVehicle && !vehicle) return send(res, 400, { error: "El camión seleccionado no existe o está dado de baja" });
+          body.vehicle_id = selectedVehicle;
+          if (vehicle && body.vehicle === undefined) body.vehicle = vehicle.plate || vehicle.name;
+        }
+        const allowed = ["driver", "vehicle", "vehicle_id", "status", "radius_meters", "notes", "origin_address", "origin_latitude", "origin_longitude"];
         const changes = allowed.filter((key) => body[key] !== undefined);
         if (!changes.length) return send(res, 400, { error: "No hay cambios para guardar" });
         db.prepare(`UPDATE delivery_routes SET ${changes.map((key) => `${key}=?`).join(",")},updated_at=? WHERE id=?`).run(...changes.map((key) => body[key]), new Date().toISOString(), Number(p[2]));

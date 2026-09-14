@@ -83,6 +83,19 @@ const migrationsByTable = {
   ],
   delivery_routes: [
     ["table", "CREATE TABLE IF NOT EXISTS delivery_routes(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,route_date TEXT NOT NULL,driver TEXT,vehicle TEXT,status TEXT DEFAULT 'Planificada',radius_meters REAL DEFAULT 150,origin_address TEXT,origin_latitude REAL,origin_longitude REAL,notes TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT)"],
+    ["vehicle_id", "ALTER TABLE delivery_routes ADD COLUMN vehicle_id INTEGER"],
+  ],
+  vehicles: [
+    ["table", "CREATE TABLE IF NOT EXISTS vehicles(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,name TEXT NOT NULL,plate TEXT UNIQUE,brand TEXT,model TEXT,active INTEGER DEFAULT 1,odometer_km REAL DEFAULT 0,maintenance_interval_km REAL DEFAULT 30000,maintenance_interval_days INTEGER DEFAULT 180,next_maintenance_km REAL,next_maintenance_date TEXT,notes TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT)"],
+  ],
+  vehicle_trips: [
+    ["table", "CREATE TABLE IF NOT EXISTS vehicle_trips(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,vehicle_id INTEGER NOT NULL,route_id INTEGER,route_date TEXT NOT NULL,route_code TEXT,driver TEXT,planned_distance_km REAL DEFAULT 0,start_km REAL,end_km REAL,distance_km REAL,status TEXT DEFAULT 'Planificada',notes TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT)"],
+  ],
+  vehicle_refuels: [
+    ["table", "CREATE TABLE IF NOT EXISTS vehicle_refuels(id INTEGER PRIMARY KEY AUTOINCREMENT,vehicle_id INTEGER NOT NULL,trip_id INTEGER,fuel_date TEXT NOT NULL,station TEXT,liters REAL DEFAULT 0,amount REAL DEFAULT 0,ticket_reference TEXT,odometer_km REAL,notes TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT)"],
+  ],
+  vehicle_maintenance: [
+    ["table", "CREATE TABLE IF NOT EXISTS vehicle_maintenance(id INTEGER PRIMARY KEY AUTOINCREMENT,vehicle_id INTEGER NOT NULL,maintenance_date TEXT NOT NULL,maintenance_km REAL DEFAULT 0,maintenance_type TEXT NOT NULL,amount REAL DEFAULT 0,next_due_km REAL,next_due_date TEXT,notes TEXT,status TEXT DEFAULT 'Realizado',created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT)"],
   ],
   delivery_route_stops: [
     ["table", "CREATE TABLE IF NOT EXISTS delivery_route_stops(id INTEGER PRIMARY KEY AUTOINCREMENT,route_id INTEGER NOT NULL,position INTEGER NOT NULL,shipment_id INTEGER,client_id INTEGER,collection_point_id INTEGER,client_name TEXT,address TEXT,city TEXT,latitude REAL,longitude REAL,distance_km REAL DEFAULT 0,status TEXT DEFAULT 'Pendiente',notes TEXT,driver_notes TEXT,invoice_delivery_method TEXT,created_at TEXT,updated_at TEXT)"],
