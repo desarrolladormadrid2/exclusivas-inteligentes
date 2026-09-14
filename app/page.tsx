@@ -6,8 +6,38 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.122";
+const APP_VERSION = "2.0.123";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
+
+const WEEKDAY_OPTIONS = [
+  { value: "1", label: "Lunes" },
+  { value: "2", label: "Martes" },
+  { value: "3", label: "Miércoles" },
+  { value: "4", label: "Jueves" },
+  { value: "5", label: "Viernes" },
+  { value: "6", label: "Sábado" },
+  { value: "0", label: "Domingo" },
+];
+
+function parseWeeklyClosedDay(value: unknown) {
+  const normalized = String(value ?? "").trim().toLocaleLowerCase();
+  if (/^[0-6]$/.test(normalized)) return Number(normalized);
+  const match = WEEKDAY_OPTIONS.find((option) => normalizeSearchText(option.label) === normalizeSearchText(normalized));
+  return match ? Number(match.value) : null;
+}
+
+function dateInputFromLocalDate(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function nextOrderWorkingDate(closedDay?: unknown) {
+  const date = new Date();
+  date.setHours(12, 0, 0, 0);
+  date.setDate(date.getDate() + 1);
+  const closedWeekday = parseWeeklyClosedDay(closedDay);
+  while (closedWeekday !== null && date.getDay() === closedWeekday) date.setDate(date.getDate() + 1);
+  return dateInputFromLocalDate(date);
+}
 
 function preparationLotAllocations(line: any) {
   if (Array.isArray(line?.lot_allocations) && line.lot_allocations.length) {
@@ -320,6 +350,7 @@ const cfg: any = {
       "city",
       "opening_time",
       "closing_time",
+      "weekly_closed_day",
       "billing_address",
       "billing_city",
       "latitude",
@@ -338,8 +369,9 @@ const cfg: any = {
       "Email",
       "Dirección de entrega",
       "Ciudad de entrega",
-      "Hora de apertura",
-      "Hora de cierre",
+      "Recepción desde",
+      "Recepción hasta",
+      "Día de cierre semanal",
       "Dirección fiscal",
       "Ciudad fiscal",
       "Latitud",
@@ -3222,8 +3254,14 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       return;
     }
     if (active === "Pedidos" && field === "client_id") {
-      setForm((current: any) => ({ ...current, client_id: value, collection_point_id: "" }));
       const client = (lookups.clients || []).find((item: any) => Number(item.id) === Number(value));
+      const defaultOrderDate = nextOrderWorkingDate(client?.weekly_closed_day);
+      setForm((current: any) => ({
+        ...current,
+        client_id: value,
+        collection_point_id: "",
+        ...(!editing ? { preparation_date: defaultOrderDate, shipping_date: defaultOrderDate, delivery_date: defaultOrderDate } : {}),
+      }));
       setClientSearch(client ? `${client.name}${client.city ? ` · ${client.city}` : ""}` : "");
       setNewShippingLocationOpen(false);
       return;
@@ -4052,7 +4090,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     function newOrderRequested() {
       setQuoteLines([]);
       setQuoteProductSearch("");
-       beginForm({ code: nextOrderCode(), status: "Nuevo", created_by: user?.username || "Usuario local", quantity: 1 });
+      const defaultOrderDate = nextOrderWorkingDate();
+      beginForm({ code: nextOrderCode(), status: "Nuevo", created_by: user?.username || "Usuario local", quantity: 1, preparation_date: defaultOrderDate, shipping_date: defaultOrderDate, delivery_date: defaultOrderDate });
       setFormOpen(true);
     }
     window.addEventListener("crm:nuevo-pedido", newOrderRequested);
@@ -4938,6 +4977,9 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       const timeMatch = text.match(/T(\d{2}:\d{2})/);
       if (timeMatch) return timeMatch[1];
     }
+    if (field === "weekly_closed_day") {
+      return WEEKDAY_OPTIONS.find((option) => Number(option.value) === parseWeeklyClosedDay(value))?.label || "Sin día de cierre";
+    }
     if (active === "Documentos" && field === "content") return String(value).replaceAll("\\n", " ").replace(/\s+/g, " ").trim();
     const lookupSource = field === "client_id" ? lookups.clients
       : field === "product_id" ? lookups.products
@@ -5304,6 +5346,11 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             <div><button type="button" className="button primary" onClick={createShippingLocation}>Guardar ubicación</button><button type="button" className="button secondary" onClick={() => setNewShippingLocationOpen(false)}>Cancelar</button></div>
           </div>}
         </>
+      ) : active === "Clientes" && f === "weekly_closed_day" ? (
+        <select aria-label={c.labels[i]} value={form[f] ?? ""} onChange={(event) => handleFormChange(f, event.target.value)}>
+          <option value="">Sin día de cierre</option>
+          {WEEKDAY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
       ) : active === "Productos" && f === "barcode" ? (
         <div className="product-barcode-field">
           <div className="product-barcode-entry">
@@ -5395,7 +5442,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             ? ["title", "content"].includes(f)
             : active === "Productos"
             ? f === "name"
-            : !["phone", "email", "address", "notes", "opening_time", "closing_time", "delivery_window_start", "delivery_window_end", "attachment_name", "sent_by", "delivered_by"].includes(f) && !(c.api === "expenses" && f === "code")}
+            : !["phone", "email", "address", "notes", "opening_time", "closing_time", "weekly_closed_day", "delivery_window_start", "delivery_window_end", "attachment_name", "sent_by", "delivered_by"].includes(f) && !(c.api === "expenses" && f === "code")}
           type={["amount", "stock", "stock_reserved", "quantity", "unit_price", "box_price", "pack4_price", "pack6_price", "pallet_price", "client_id", "product_id", "order_id", "invoice_id", "stock_min", "stock_target", "stock_safety", "units_per_case", "cases_per_pallet", "units_per_pallet", "weight_kg", "volume_m3", "picking_order", "target_margin_percent", "min_margin_percent", "freight_cost", "handling_cost", "real_cost", "tax_surcharge_percent", "extra_tax_percent", "cost_price", "last_direct_cost", "markup_percent"].includes(f) ? "number" : timeFields.has(f) ? "time" : ["movement_date", "return_date", "reviewed_at", "authorized_at"].includes(f) ? "datetime-local" : ["expense_date", "delivery_date", "preparation_date", "shipping_date", "created_at"].includes(f) ? "date" : "text"}
           step={["unit_price", "cost_price", "last_direct_cost", "markup_percent"].includes(f) ? "0.01" : undefined}
           value={form[f] ?? ""}
@@ -5450,11 +5497,10 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const isPurchaseForm = c.api === "purchase_orders";
   const formEntity = active === "Facturas" && form.status === "Proforma" ? "proforma" : (isOrderForm ? "pedido" : (createActionLabels[active] || "Crear registro").replace(/^Crear /, ""));
   const formTitle = `${editing ? "Editar" : "Crear"} ${formEntity}`;
-  const orderScheduleFields = ["preparation_date", "shipping_date", "delivery_date"];
+  const orderScheduleFields = ["preparation_date", "shipping_date"];
   const orderScheduleHelp: Record<string, string> = {
     preparation_date: "El almacén prepara las líneas este día.",
     shipping_date: "El pedido sale con el reparto este día.",
-    delivery_date: "Fecha prevista de llegada al cliente.",
   };
   return (
     <>
@@ -5485,7 +5531,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                   : isPurchaseForm
                     ? { code: `COM-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`, status: "Pendiente", order_date: tabletTodayInput(), expected_date: "", amount: 0 }
                   : isOrderForm || active === "Pedidos"
-                    ? { code: nextOrderCode(), status: "Nuevo", created_by: user?.username || "Usuario local" }
+                    ? (() => { const defaultOrderDate = nextOrderWorkingDate(); return { code: nextOrderCode(), status: "Nuevo", created_by: user?.username || "Usuario local", preparation_date: defaultOrderDate, shipping_date: defaultOrderDate, delivery_date: defaultOrderDate }; })()
                     : {}
               );
               beginForm(nextForm);
@@ -5624,16 +5670,16 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             <details className="order-general-accordion" open>
               <summary><b>Datos generales del pedido</b><span><em className="order-created-date">Fecha del pedido: {formatSpanishDateValue(String(form.created_at || tabletTodayInput()).slice(0, 10), false)}</em> · {orderGeneralComplete ? <em className="accordion-complete" title="Campos obligatorios completos">✓ Completo</em> : <em className="accordion-pending">Pendiente de completar</em>} · Mostrar más/menos</span></summary>
               <div className="order-general-fields">
-                {c.fields.filter((f: string) => !["product_id", "quantity", "unit_price", "discount", "amount", "billing_status", "payment_status", "shipping_status", "prepared_by", "shipped_by", "delivered_by", ...orderScheduleFields].includes(f)).map((f: string) => renderFormField(f, c.fields.indexOf(f)))}
+                {c.fields.filter((f: string) => !["product_id", "quantity", "unit_price", "discount", "amount", "billing_status", "payment_status", "shipping_status", "prepared_by", "shipped_by", "delivered_by", "delivery_date", ...orderScheduleFields].includes(f)).map((f: string) => renderFormField(f, c.fields.indexOf(f)))}
               </div>
             </details>
             <section className="order-schedule-panel" aria-labelledby="order-schedule-title">
               <div className="order-schedule-head">
                 <div>
                   <b id="order-schedule-title">Planificación del pedido</b>
-                  <small>Estas fechas organizan la preparación del almacén, la salida y la entrega.</small>
+                  <small>Estas fechas organizan la preparación del almacén y la salida.</small>
                 </div>
-                <span>Preparación → envío → entrega</span>
+                <span>Preparación → envío</span>
               </div>
               <div className="order-schedule-grid">
                 {orderScheduleFields.map((field) => (

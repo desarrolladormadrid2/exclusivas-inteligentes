@@ -23,6 +23,23 @@ if (existsSync(envPath)) {
 function cloudinaryReady() {
   return Boolean(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
 }
+function parseWeeklyClosedDay(value) {
+  const normalized = String(value ?? "").trim().toLocaleLowerCase();
+  if (/^[0-6]$/.test(normalized)) return Number(normalized);
+  const names = { lunes: 1, martes: 2, miércoles: 3, miercoles: 3, jueves: 4, viernes: 5, sábado: 6, sabado: 6, domingo: 0 };
+  return Object.prototype.hasOwnProperty.call(names, normalized) ? names[normalized] : null;
+}
+function dateInputFromLocalDate(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+function nextOrderWorkingDate(closedDay) {
+  const date = new Date();
+  date.setHours(12, 0, 0, 0);
+  date.setDate(date.getDate() + 1);
+  const closedWeekday = parseWeeklyClosedDay(closedDay);
+  while (closedWeekday !== null && date.getDay() === closedWeekday) date.setDate(date.getDate() + 1);
+  return dateInputFromLocalDate(date);
+}
 function slugifyProductName(value) {
   return String(value || "producto")
     .normalize("NFD")
@@ -498,7 +515,7 @@ if (remoteMode && process.env.RUN_REMOTE_MIGRATIONS === "1") {
   }
 }
 for (const [table, columns] of [
-  ["clients", ["city TEXT", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
+  ["clients", ["city TEXT", "weekly_closed_day TEXT", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
   ["suppliers", ["active INTEGER DEFAULT 1", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
   ["orders", ["unit_price REAL DEFAULT 0", "discount REAL DEFAULT 0", "vat REAL DEFAULT 21", "notes TEXT", "delivery_date TEXT", "address TEXT", "collection_point_id INTEGER", "prepared_by TEXT", "shipped_by TEXT", "delivered_by TEXT", "preparation_date TEXT", "shipping_date TEXT", "delivery_city TEXT", "urgent INTEGER DEFAULT 0", "created_by TEXT", "stock_alert INTEGER DEFAULT 0", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
   ["products", ["sku TEXT", "cost_price REAL DEFAULT 0", "category TEXT", "format TEXT", "unit TEXT", "vat REAL DEFAULT 21", "stock_reserved REAL DEFAULT 0", "active INTEGER DEFAULT 1", "product_status TEXT DEFAULT 'Activo'", "min_stock REAL DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
@@ -511,7 +528,7 @@ for (const [table, columns] of [
 }
 if (remoteMode && process.env.RUN_REMOTE_MIGRATIONS === "1") {
   for (const [table, columns] of [
-    ["clients", ["city TEXT", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
+    ["clients", ["city TEXT", "weekly_closed_day TEXT", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
     ["suppliers", ["active INTEGER DEFAULT 1", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
     ["orders", ["unit_price REAL DEFAULT 0", "discount REAL DEFAULT 0", "vat REAL DEFAULT 21", "notes TEXT", "delivery_date TEXT", "address TEXT", "collection_point_id INTEGER", "prepared_by TEXT", "shipped_by TEXT", "delivered_by TEXT", "preparation_date TEXT", "shipping_date TEXT", "delivery_city TEXT", "urgent INTEGER DEFAULT 0", "created_by TEXT", "stock_alert INTEGER DEFAULT 0", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
     ["products", ["sku TEXT", "cost_price REAL DEFAULT 0", "category TEXT", "format TEXT", "unit TEXT", "vat REAL DEFAULT 21", "stock_reserved REAL DEFAULT 0", "active INTEGER DEFAULT 1", "product_status TEXT DEFAULT 'Activo'", "min_stock REAL DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
@@ -539,12 +556,12 @@ try { db.exec("ALTER TABLE inventory_movements ADD COLUMN stock_effect REAL"); }
 for (const [table, columns] of [
   ["products", ["photo_name TEXT", "photo_mime TEXT", "photo_data TEXT", "photo_url TEXT", "photo_public_id TEXT", "photo_thumbnail_url TEXT", "photo_web_url TEXT", "photo_bytes INTEGER DEFAULT 0", "photo_width INTEGER DEFAULT 0", "photo_height INTEGER DEFAULT 0", "photo_format TEXT", "description TEXT", "category_code TEXT", "warehouse_id INTEGER", "preorder INTEGER DEFAULT 1", "product_tracking_code TEXT DEFAULT 'Sin seguimiento'", "inventory_valuation_method TEXT DEFAULT 'FIFO'", "last_direct_cost REAL DEFAULT 0", "accounting_product_group TEXT DEFAULT 'Mercaderías'", "accounting_vat_group TEXT DEFAULT '21%'", "inventory_register_group TEXT DEFAULT 'Mercaderías'", "created_at TEXT", "created_by TEXT", "family TEXT", "subfamily TEXT", "purchase_format TEXT", "sale_format TEXT", "cases_per_pallet REAL DEFAULT 0", "units_per_pallet REAL DEFAULT 0", "weight_kg REAL DEFAULT 0", "volume_m3 REAL DEFAULT 0", "warehouse_location TEXT", "picking_order INTEGER DEFAULT 0", "product_status TEXT DEFAULT 'Activo'", "primary_supplier_id INTEGER", "fixed_supplier INTEGER DEFAULT 0", "target_margin_percent REAL DEFAULT 0", "min_margin_percent REAL DEFAULT 0", "stock_min REAL DEFAULT 0", "stock_target REAL DEFAULT 0", "stock_safety REAL DEFAULT 0", "lot_tracking INTEGER DEFAULT 0", "expiry_tracking INTEGER DEFAULT 0", "returnable_packaging INTEGER DEFAULT 0", "tax_surcharge_percent REAL DEFAULT 0", "extra_tax_name TEXT", "extra_tax_percent REAL DEFAULT 0", "freight_cost REAL DEFAULT 0", "handling_cost REAL DEFAULT 0", "real_cost REAL DEFAULT 0"]],
   ["suppliers", ["tax_id TEXT", "contact TEXT", "payment_terms TEXT", "city TEXT", "latitude REAL", "longitude REAL", "geocoding_status TEXT DEFAULT 'Pendiente'", "minimum_order REAL DEFAULT 0", "transport_cost REAL DEFAULT 0", "lead_time_days INTEGER DEFAULT 0", "reliability_percent REAL DEFAULT 0", "promotions TEXT", "rappel_percent REAL DEFAULT 0", "active INTEGER DEFAULT 1", "external_code TEXT", "source_system TEXT", "source_warehouse_code TEXT", "source_created_at TEXT", "source_closed_at TEXT", "source_balance REAL DEFAULT 0", "source_overdue_balance REAL DEFAULT 0", "source_payments REAL DEFAULT 0"]],
-  ["clients", ["city TEXT", "external_code TEXT", "source_system TEXT", "active INTEGER DEFAULT 1", "billing_address TEXT", "billing_city TEXT", "opening_time TEXT", "closing_time TEXT", "latitude REAL", "longitude REAL", "geocoded_at TEXT", "geocoding_status TEXT DEFAULT 'Pendiente'", "payment_method_code TEXT", "payment_terms_code TEXT", "source_warehouse_code TEXT", "source_created_at TEXT", "source_closed_at TEXT", "source_balance REAL DEFAULT 0", "source_overdue_balance REAL DEFAULT 0", "source_sales REAL DEFAULT 0", "source_payments REAL DEFAULT 0"]],
+  ["clients", ["city TEXT", "external_code TEXT", "source_system TEXT", "active INTEGER DEFAULT 1", "billing_address TEXT", "billing_city TEXT", "opening_time TEXT", "closing_time TEXT", "weekly_closed_day TEXT", "latitude REAL", "longitude REAL", "geocoded_at TEXT", "geocoding_status TEXT DEFAULT 'Pendiente'", "payment_method_code TEXT", "payment_terms_code TEXT", "source_warehouse_code TEXT", "source_created_at TEXT", "source_closed_at TEXT", "source_balance REAL DEFAULT 0", "source_overdue_balance REAL DEFAULT 0", "source_sales REAL DEFAULT 0", "source_payments REAL DEFAULT 0"]],
   ["products", ["external_code TEXT", "source_system TEXT", "active INTEGER DEFAULT 1", "source_type TEXT", "source_substitute TEXT", "assembly_item INTEGER DEFAULT 0", "cost_adjusted INTEGER DEFAULT 0", "default_split_template TEXT", "source_supplier_code TEXT", "source_created_at TEXT", "source_closed_at TEXT"]],
   ["purchase_orders", ["validation_status TEXT DEFAULT 'Pendiente de validar'", "request_id INTEGER", "supplier_ids TEXT", "comparison TEXT"]],
 ]) for (const column of columns) { try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${column}`); } catch {} }
 // Horarios independientes de la dirección para planificar futuras rutas.
-for (const [table, columns] of [["clients", ["opening_time TEXT", "closing_time TEXT"]], ["collection_points", ["opening_time TEXT", "closing_time TEXT"]]]) {
+for (const [table, columns] of [["clients", ["opening_time TEXT", "closing_time TEXT", "weekly_closed_day TEXT"]], ["collection_points", ["opening_time TEXT", "closing_time TEXT"]]]) {
   for (const column of columns) { try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${column}`); } catch {} }
 }
 // Conservamos los campos históricos de stock y rellenamos los nuevos umbrales
@@ -721,7 +738,7 @@ for (const table of ["orders", "quotes", "delivery_notes"]) {
 // El adaptador remoto no ejecuta las migraciones DDL genéricas del arranque.
 // Estas columnas se aplican explícitamente también en Turso.
 if (remoteMode && process.env.RUN_REMOTE_MIGRATIONS === "1") {
-  for (const [table, columns] of [["clients", ["opening_time TEXT", "closing_time TEXT"]], ["collection_points", ["opening_time TEXT", "closing_time TEXT"]], ["delivery_route_stops", ["opening_time TEXT", "closing_time TEXT"]], ["order_lines", ["barcode_scanned_code TEXT", "barcode_scan_status TEXT DEFAULT 'pending'", "barcode_scanned_at TEXT", "barcode_scanned_by TEXT"]]]) {
+  for (const [table, columns] of [["clients", ["opening_time TEXT", "closing_time TEXT", "weekly_closed_day TEXT"]], ["collection_points", ["opening_time TEXT", "closing_time TEXT"]], ["delivery_route_stops", ["opening_time TEXT", "closing_time TEXT"]], ["order_lines", ["barcode_scanned_code TEXT", "barcode_scan_status TEXT DEFAULT 'pending'", "barcode_scanned_at TEXT", "barcode_scanned_by TEXT"]]]) {
     for (const column of columns) { try { db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column}`).run(); } catch {} }
   }
 }
@@ -1080,7 +1097,7 @@ function normalizeReturnDisposition(input = {}) {
   };
 }
 const lookupFields = {
-  clients: ["id", "name", "city", "address", "billing_address", "billing_city", "opening_time", "closing_time", "latitude", "longitude", "geocoding_status", "phone", "email", "active", "external_code"],
+  clients: ["id", "name", "city", "address", "billing_address", "billing_city", "opening_time", "closing_time", "weekly_closed_day", "latitude", "longitude", "geocoding_status", "phone", "email", "active", "external_code"],
   suppliers: ["id", "name", "tax_id", "contact", "phone", "email", "address", "city", "latitude", "longitude", "geocoding_status", "active", "minimum_order", "transport_cost", "lead_time_days", "reliability_percent", "rappel_percent", "external_code"],
   warehouses: ["id", "name", "address"],
   collection_points: ["id", "code", "name", "client_id", "address", "city", "contact", "phone", "email", "opening_hours", "opening_time", "closing_time", "geocoding_status", "latitude", "longitude"],
@@ -2680,6 +2697,17 @@ export async function crmApiHandler(req, res) {
         }
         invalidateRelatedReadCaches(t);
         const now = new Date().toISOString();
+        if (t === "orders") {
+          const client = d.client_id
+            ? db.prepare("SELECT weekly_closed_day FROM clients WHERE id=?").get(Number(d.client_id))
+            : null;
+          const defaultOrderDate = nextOrderWorkingDate(client?.weekly_closed_day);
+          d.preparation_date = d.preparation_date || defaultOrderDate;
+          d.shipping_date = d.shipping_date || defaultOrderDate;
+          // Se conserva para compatibilidad con listados y documentos antiguos,
+          // aunque ya no se solicita este campo al crear el pedido.
+          d.delivery_date = d.delivery_date || d.shipping_date;
+        }
         if (t === "scheduled_tasks") {
           const title = String(d.title || "").trim();
           const actionText = String(d.action_text || "").trim();

@@ -188,6 +188,7 @@ const migrationsByTable = {
     ["portal_access_enabled", "ALTER TABLE clients ADD COLUMN portal_access_enabled INTEGER DEFAULT 0"],
     ["opening_time", "ALTER TABLE clients ADD COLUMN opening_time TEXT"],
     ["closing_time", "ALTER TABLE clients ADD COLUMN closing_time TEXT"],
+    ["weekly_closed_day", "ALTER TABLE clients ADD COLUMN weekly_closed_day TEXT"],
     ["deleted", "ALTER TABLE clients ADD COLUMN deleted INTEGER DEFAULT 0"],
     ["created_at", "ALTER TABLE clients ADD COLUMN created_at TEXT"],
     ["updated_at", "ALTER TABLE clients ADD COLUMN updated_at TEXT"],
