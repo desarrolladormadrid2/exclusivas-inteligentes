@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.125";
+const APP_VERSION = "2.0.126";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -348,6 +348,8 @@ const cfg: any = {
       "phone",
       "email",
       "invoice_delivery_method",
+      "pending_invoice_count",
+      "pending_invoice_total",
       "address",
       "city",
       "opening_time",
@@ -370,6 +372,8 @@ const cfg: any = {
       "Teléfono",
       "Email",
       "Entrega de factura",
+      "Facturas pendientes",
+      "Importe pendiente de cobro",
       "Dirección de entrega",
       "Ciudad de entrega",
       "Recepción desde",
@@ -2896,6 +2900,60 @@ function GoodsReceiptEditModal({ receipt, lookups, actor, onClose, onSaved }: { 
   return <div className="preview-overlay" role="dialog" aria-modal="true" onMouseDown={(event) => event.target === event.currentTarget && !saving && onClose()}><form className="goods-receipt-edit-modal" onSubmit={save} onClick={(event) => event.stopPropagation()}><header className="preview-header"><div><b>Editar entrada · {receipt.code}</b><small>Actualiza los datos generales sin alterar las cantidades ya incorporadas al stock.</small></div><button type="button" className="preview-close" aria-label="Cerrar" onClick={() => !saving && onClose()}>×</button></header><div className="goods-receipt-edit-grid"><label>Código de entrada<input value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value })} /></label><label>Proveedor<select value={form.supplier_id} onChange={(event) => setForm({ ...form, supplier_id: event.target.value, purchase_order_id: "" })}><option value="">Seleccionar proveedor…</option>{suppliers.map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Pedido de compra<select value={form.purchase_order_id} onChange={(event) => setForm({ ...form, purchase_order_id: event.target.value })}><option value="">Sin pedido vinculado</option>{purchaseOrders.map((item: any) => <option key={item.id} value={item.id}>{item.code} · {item.status}</option>)}</select></label><label>Factura de compra<select value={form.purchase_invoice_id} onChange={(event) => setForm({ ...form, purchase_invoice_id: event.target.value })}><option value="">Sin factura vinculada</option>{(lookups.invoices || []).map((item: any) => <option key={item.id} value={item.id}>{item.code} · {item.status || "Pendiente"}</option>)}</select></label><label>Almacén<select value={form.warehouse_id} onChange={(event) => setForm({ ...form, warehouse_id: event.target.value })}><option value="">Seleccionar almacén…</option>{warehouses.map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Fecha de recepción<input type="date" value={form.receipt_date} onChange={(event) => setForm({ ...form, receipt_date: event.target.value })} /></label><label className="goods-receipt-wide">Notas generales<textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="Observaciones de la recepción…" /></label></div>{error && <p className="error-message" role="alert">{error}</p>}<footer className="preview-actions"><button type="button" className="button secondary" onClick={onClose} disabled={saving}>Cancelar</button><button type="submit" className="button primary" disabled={saving}>{saving ? "Guardando…" : "Guardar cambios"}</button></footer></form></div>;
 }
 
+const settledInvoiceStatuses = new Set(["Cobrada", "Pagada", "Anulada", "Proforma"]);
+
+function invoicePaidAmount(invoiceId: any, payments: any[]) {
+  return (payments || [])
+    .filter((payment: any) => Number(payment.invoice_id) === Number(invoiceId) && Number(payment.deleted || 0) !== 1)
+    .reduce((total: number, payment: any) => total + Math.max(0, Number(payment.amount || 0)), 0);
+}
+
+function invoiceOutstandingAmount(invoice: any, payments: any[]) {
+  if (!invoice || settledInvoiceStatuses.has(String(invoice.status || "Pendiente"))) return 0;
+  return Math.max(0, Number(invoice.amount || 0) - invoicePaidAmount(invoice.id, payments));
+}
+
+function ClientReceivablesPanel({ client, invoices, payments }: { client: any; invoices: any[]; payments: any[] }) {
+  const pendingInvoices = (invoices || [])
+    .filter((invoice: any) => Number(invoice.client_id) === Number(client?.id))
+    .map((invoice: any) => ({
+      ...invoice,
+      paid_amount: invoicePaidAmount(invoice.id, payments),
+      outstanding_amount: invoiceOutstandingAmount(invoice, payments),
+    }))
+    .filter((invoice: any) => invoice.outstanding_amount > 0)
+    .sort((a: any, b: any) => String(a.due_date || "9999-12-31").localeCompare(String(b.due_date || "9999-12-31")) || Number(a.id || 0) - Number(b.id || 0));
+  const outstandingTotal = pendingInvoices.reduce((total: number, invoice: any) => total + invoice.outstanding_amount, 0);
+  return (
+    <section className="client-receivables-panel" aria-label="Facturas pendientes de cobro">
+      <div className="client-receivables-head">
+        <div>
+          <b>Facturas pendientes de cobro</b>
+          <small>Se calcula con las facturas y cobros registrados de este cliente.</small>
+        </div>
+        <div className="client-receivables-summary">
+          <span><strong>{pendingInvoices.length}</strong> facturas</span>
+          <span><strong>{outstandingTotal.toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</strong> pendiente</span>
+        </div>
+      </div>
+      {pendingInvoices.length ? (
+        <div className="client-receivables-list">
+          {pendingInvoices.map((invoice: any) => {
+            const status = invoice.paid_amount > 0 ? "Parcial" : invoice.status || "Pendiente";
+            return <div className="client-receivable-row" key={invoice.id}>
+              <div><b>{invoice.code || `Factura #${invoice.id}`}</b><small>{invoice.due_date ? `Vencimiento ${formatSpanishDateValue(String(invoice.due_date).slice(0, 10), false)}` : "Sin vencimiento indicado"}</small></div>
+              <span><small>Factura</small>{Number(invoice.amount || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</span>
+              <span><small>Pagado</small>{invoice.paid_amount.toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</span>
+              <strong><small>Pendiente</small>{invoice.outstanding_amount.toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</strong>
+              <em>{status}</em>
+            </div>;
+          })}
+        </div>
+      ) : <p className="client-receivables-empty">Este cliente no tiene facturas pendientes de cobro.</p>}
+    </section>
+  );
+}
+
 function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFormConsumed }: { active: string; user?: any; onNavigate?: (module: string) => void; assistantFormIntent?: any; onAssistantFormConsumed?: () => void }) {
   const c = cfg[active];
   const actorHeaders = {
@@ -3128,7 +3186,13 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       }
       if (saved) {
         const storedFields = JSON.parse(saved);
-        setVisibleFields(storedFields);
+        const nextFields = c.api === "clients"
+          ? Array.from(new Set([...storedFields, "pending_invoice_count", "pending_invoice_total"]))
+          : storedFields;
+        setVisibleFields(nextFields);
+        if (c.api === "clients" && JSON.stringify(nextFields) !== JSON.stringify(storedFields)) {
+          localStorage.setItem(`excluvas.columns.${c.api}`, JSON.stringify(nextFields));
+        }
       }
       else setVisibleFields(c.fields);
     } catch {
@@ -5648,6 +5712,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   }
   const isOrderForm = c.api === "orders";
   const isPurchaseForm = c.api === "purchase_orders";
+  const clientComputedFields = new Set(["pending_invoice_count", "pending_invoice_total"]);
   const formEntity = active === "Facturas" && form.status === "Proforma" ? "proforma" : (isOrderForm ? "pedido" : (createActionLabels[active] || "Crear registro").replace(/^Crear /, ""));
   const formTitle = `${editing ? "Editar" : "Crear"} ${formEntity}`;
   const orderScheduleFields = ["preparation_date", "shipping_date"];
@@ -5844,7 +5909,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
               </div>
             </section>
             </>
-          ) : c.fields.map((f: string) => renderFormField(f, c.fields.indexOf(f)))}
+          ) : c.fields.filter((f: string) => !(active === "Clientes" && clientComputedFields.has(f))).map((f: string) => renderFormField(f, c.fields.indexOf(f)))}
+          {active === "Clientes" && editing && <ClientReceivablesPanel client={form} invoices={lookups.invoices || []} payments={lookups.payments || []} />}
           {(active === "Presupuestos" || isOrderForm || (isPurchaseForm && !editing)) && (
             <section className="quote-lines-editor">
               <div className="quote-lines-head"><div><b>{isOrderForm ? "Líneas del pedido" : isPurchaseForm ? "Líneas de la compra" : "Líneas del presupuesto"}</b><small>{isPurchaseForm ? "Añade cada producto y las unidades que estás comprando." : "Busca y añade varios productos como en un carrito."}</small></div></div>
@@ -6094,7 +6160,11 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                           {inlineEditing === (r.id ?? r.product_id) ? (
                             renderInlineEditor(f, r)
                           ) : (
-                              f === "billing_status"
+                              f === "pending_invoice_count"
+                              ? `${Number(r.pending_invoice_count || 0).toLocaleString("es-ES")} ${Number(r.pending_invoice_count || 0) === 1 ? "factura" : "facturas"}`
+                              : f === "pending_invoice_total"
+                              ? Number(r.pending_invoice_total || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" })
+                              : f === "billing_status"
                               ? <span className={`billing-status billing-status-${String(r.billing_status || "Sin facturar").toLowerCase().replaceAll(" ", "-")}`}>{r.billing_status || "Sin facturar"}</span>
                               : f === "payment_status"
                               ? <span className={`payment-status payment-status-${getOrderPaymentStatus(r).toLowerCase().replaceAll(" ", "-")}`}>{getOrderPaymentStatus(r)}</span>

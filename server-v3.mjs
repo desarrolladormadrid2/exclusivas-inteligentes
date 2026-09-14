@@ -829,7 +829,24 @@ http
         const source = t === "orders"
           ? `orders LEFT JOIN clients AS order_client ON order_client.id=orders.client_id`
           : t;
-        const selection = isLookup ? lookupSelectFor(t) : t === "orders" ? "orders.*,order_client.name AS client_name,order_client.city AS client_city" : listSelectFor(t);
+        const selection = isLookup
+          ? lookupSelectFor(t)
+          : t === "orders"
+            ? "orders.*,order_client.name AS client_name,order_client.city AS client_city"
+            : t === "clients"
+              ? `clients.*,
+                (SELECT COUNT(*)
+                 FROM invoices pending_invoice
+                 WHERE pending_invoice.client_id=clients.id
+                   AND CAST(COALESCE(pending_invoice.deleted,0) AS INTEGER)=0
+                   AND COALESCE(pending_invoice.status,'Pendiente') NOT IN ('Cobrada','Pagada','Anulada','Proforma')
+                   AND COALESCE(pending_invoice.amount,0)-COALESCE((SELECT SUM(payment.amount) FROM payments payment WHERE payment.invoice_id=pending_invoice.id AND CAST(COALESCE(payment.deleted,0) AS INTEGER)=0),0)>0) AS pending_invoice_count,
+                (SELECT COALESCE(SUM(CASE WHEN COALESCE(pending_invoice.amount,0)-COALESCE((SELECT SUM(payment.amount) FROM payments payment WHERE payment.invoice_id=pending_invoice.id AND CAST(COALESCE(payment.deleted,0) AS INTEGER)=0),0)>0 THEN COALESCE(pending_invoice.amount,0)-COALESCE((SELECT SUM(payment.amount) FROM payments payment WHERE payment.invoice_id=pending_invoice.id AND CAST(COALESCE(payment.deleted,0) AS INTEGER)=0),0) ELSE 0 END),0)
+                 FROM invoices pending_invoice
+                 WHERE pending_invoice.client_id=clients.id
+                   AND CAST(COALESCE(pending_invoice.deleted,0) AS INTEGER)=0
+                   AND COALESCE(pending_invoice.status,'Pendiente') NOT IN ('Cobrada','Pagada','Anulada','Proforma')) AS pending_invoice_total`
+              : listSelectFor(t);
         const filters = [];
         if (!includeDeleted && hasColumn(t, "deleted")) filters.push(`CAST(COALESCE(${t === "orders" ? "orders" : t}.deleted,0) AS INTEGER)=0`);
         if (!includeInactive && ["suppliers", "clients", "products"].includes(t)) filters.push(t === "products" ? `CAST(COALESCE(products.active,1) AS INTEGER)=1 AND LOWER(COALESCE(products.product_status,'Activo')) NOT IN ('inactivo','baja','descatalogado')` : `CAST(COALESCE(${t}.active,1) AS INTEGER)=1`);

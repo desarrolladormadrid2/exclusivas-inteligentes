@@ -2295,6 +2295,23 @@ footer span {
 .payment-preview-details strong { color: #26343d; text-align: right; }
 .payment-preview-details .payment-preview-notes { grid-column: 1 / -1; display: block; }
 .payment-preview-notes p { margin: 6px 0 0; color: #526670; white-space: pre-wrap; }
+.client-receivables-panel { grid-column: 1 / -1; margin: 6px 0 4px; border: 1px solid #d1dbe0; border-left: 3px solid #b91c1c; background: #fbfcfc; }
+.client-receivables-head { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 14px; border-bottom: 1px solid #e2e8ea; }
+.client-receivables-head > div:first-child { display: grid; gap: 4px; }
+.client-receivables-head b { color: #26343d; font-size: 13px; }
+.client-receivables-head small, .client-receivable-row small { color: #71818a; font-size: 10px; }
+.client-receivables-summary { display: flex; align-items: baseline; gap: 16px; color: #71818a; font-size: 10px; white-space: nowrap; }
+.client-receivables-summary strong { margin-right: 4px; color: #b91c1c; font-size: 18px; }
+.client-receivables-list { display: grid; }
+.client-receivable-row { display: grid; grid-template-columns: minmax(150px, 1.3fr) repeat(3, minmax(95px, .7fr)) 78px; align-items: center; gap: 12px; padding: 9px 14px; border-bottom: 1px solid #edf1f2; color: #526670; font-size: 11px; }
+.client-receivable-row:last-child { border-bottom: 0; }
+.client-receivable-row > div, .client-receivable-row > span, .client-receivable-row > strong { display: grid; gap: 3px; min-width: 0; }
+.client-receivable-row > div b { overflow: hidden; color: #26343d; text-overflow: ellipsis; white-space: nowrap; }
+.client-receivable-row > span, .client-receivable-row > strong { text-align: right; }
+.client-receivable-row > strong { color: #b91c1c; }
+.client-receivable-row em { justify-self: end; padding: 4px 7px; border: 1px solid #e6b14d; border-radius: 12px; color: #9a5b00; font-size: 9px; font-style: normal; text-align: center; }
+.client-receivables-empty { margin: 0; padding: 13px 14px; color: #71818a; font-size: 11px; }
+@media (max-width: 760px) { .client-receivables-head { align-items: flex-start; flex-direction: column; gap: 8px; }.client-receivables-summary { width: 100%; justify-content: space-between; }.client-receivable-row { grid-template-columns: minmax(0, 1fr) repeat(2, minmax(74px, auto)); gap: 8px; }.client-receivable-row > span:nth-of-type(1) { display: none; }.client-receivable-row > span:nth-of-type(2), .client-receivable-row > strong { text-align: right; }.client-receivable-row em { grid-column: 2 / -1; justify-self: stretch; } }
 .expense-ai-icon { background: #b91c1c; }
 .note-preview-card { position: relative; width: min(680px, calc(100vw - 32px)); padding: 28px; background: #fff; border: 1px solid #d1d5db; box-shadow: 0 14px 40px rgba(30,38,44,.2); }
 .note-preview-card h2 { margin: 8px 0 18px; color: #26343d; font-size: 22px; }

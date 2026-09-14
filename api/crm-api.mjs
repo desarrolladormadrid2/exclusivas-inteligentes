@@ -2637,8 +2637,21 @@ export async function crmApiHandler(req, res) {
           ? lookupSelectFor(t)
           : t === "orders"
             ? "orders.*,order_client.name AS client_name,order_client.city AS client_city,CASE WHEN orders.status='Facturado' OR EXISTS(SELECT 1 FROM invoice_orders io JOIN invoices bi ON bi.id=io.invoice_id WHERE io.order_id=orders.id AND COALESCE(bi.status,'')<>'Anulada' AND COALESCE(bi.deleted,0)=0) OR EXISTS(SELECT 1 FROM invoices bi WHERE bi.order_id=orders.id AND COALESCE(bi.status,'')<>'Anulada' AND COALESCE(bi.deleted,0)=0) THEN 'Facturado' ELSE 'Sin facturar' END AS billing_status"
-            : t === "shipments"
+          : t === "shipments"
               ? "shipments.*,(SELECT shipping_date FROM orders WHERE orders.id=shipments.order_id) AS shipping_date"
+            : t === "clients"
+              ? `clients.*,
+                (SELECT COUNT(*)
+                 FROM invoices pending_invoice
+                 WHERE pending_invoice.client_id=clients.id
+                   AND CAST(COALESCE(pending_invoice.deleted,0) AS INTEGER)=0
+                   AND COALESCE(pending_invoice.status,'Pendiente') NOT IN ('Cobrada','Pagada','Anulada','Proforma')
+                   AND COALESCE(pending_invoice.amount,0)-COALESCE((SELECT SUM(payment.amount) FROM payments payment WHERE payment.invoice_id=pending_invoice.id AND CAST(COALESCE(payment.deleted,0) AS INTEGER)=0),0)>0) AS pending_invoice_count,
+                (SELECT COALESCE(SUM(CASE WHEN COALESCE(pending_invoice.amount,0)-COALESCE((SELECT SUM(payment.amount) FROM payments payment WHERE payment.invoice_id=pending_invoice.id AND CAST(COALESCE(payment.deleted,0) AS INTEGER)=0),0)>0 THEN COALESCE(pending_invoice.amount,0)-COALESCE((SELECT SUM(payment.amount) FROM payments payment WHERE payment.invoice_id=pending_invoice.id AND CAST(COALESCE(payment.deleted,0) AS INTEGER)=0),0) ELSE 0 END),0)
+                 FROM invoices pending_invoice
+                 WHERE pending_invoice.client_id=clients.id
+                   AND CAST(COALESCE(pending_invoice.deleted,0) AS INTEGER)=0
+                   AND COALESCE(pending_invoice.status,'Pendiente') NOT IN ('Cobrada','Pagada','Anulada','Proforma')) AS pending_invoice_total`
             : listSelectFor(t);
         const filters = [];
         if (!includeDeleted && hasColumn(t, "deleted")) filters.push(`CAST(COALESCE(${t === "orders" ? "orders" : t}.deleted,0) AS INTEGER)=0`);
