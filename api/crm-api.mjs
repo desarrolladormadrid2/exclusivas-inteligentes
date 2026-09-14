@@ -414,7 +414,7 @@ const db = remoteMode
 // concurrentes sin bloquear la aplicación y menos trabajo de disco.
 if (!remoteMode) db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-64000; PRAGMA foreign_keys=ON;");
 db.exec(`CREATE TABLE IF NOT EXISTS purchase_orders(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,supplier_id INTEGER,status TEXT DEFAULT 'Borrador',order_date TEXT DEFAULT CURRENT_DATE,expected_date TEXT,amount REAL DEFAULT 0,notes TEXT);`);
-for (const column of ["updated_at TEXT", "stock_applied_at TEXT", "stock_applied_by TEXT"]) {
+for (const column of ["updated_at TEXT", "stock_applied_at TEXT", "stock_applied_by TEXT", "supplier_invoice_code TEXT", "invoice_date TEXT", "payment_terms_snapshot TEXT", "payment_due_date TEXT", "payment_status TEXT DEFAULT 'Pendiente'", "payment_paid_at TEXT", "payment_reference TEXT"]) {
   try { db.exec(`ALTER TABLE purchase_orders ADD COLUMN ${column}`); } catch {}
 }
 db.exec(`CREATE TABLE IF NOT EXISTS purchase_order_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,purchase_order_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity REAL DEFAULT 0,unit_cost REAL DEFAULT 0,amount REAL DEFAULT 0);`);
@@ -564,7 +564,7 @@ for (const [table, columns] of [
   ["suppliers", ["tax_id TEXT", "contact TEXT", "payment_terms TEXT", "city TEXT", "latitude REAL", "longitude REAL", "geocoding_status TEXT DEFAULT 'Pendiente'", "minimum_order REAL DEFAULT 0", "transport_cost REAL DEFAULT 0", "lead_time_days INTEGER DEFAULT 0", "reliability_percent REAL DEFAULT 0", "promotions TEXT", "rappel_percent REAL DEFAULT 0", "active INTEGER DEFAULT 1", "external_code TEXT", "source_system TEXT", "source_warehouse_code TEXT", "source_created_at TEXT", "source_closed_at TEXT", "source_balance REAL DEFAULT 0", "source_overdue_balance REAL DEFAULT 0", "source_payments REAL DEFAULT 0"]],
   ["clients", ["city TEXT", "external_code TEXT", "source_system TEXT", "active INTEGER DEFAULT 1", "billing_address TEXT", "billing_city TEXT", "opening_time TEXT", "closing_time TEXT", "weekly_closed_day TEXT", "invoice_delivery_method TEXT", "latitude REAL", "longitude REAL", "geocoded_at TEXT", "geocoding_status TEXT DEFAULT 'Pendiente'", "payment_method_code TEXT", "payment_terms_code TEXT", "source_warehouse_code TEXT", "source_created_at TEXT", "source_closed_at TEXT", "source_balance REAL DEFAULT 0", "source_overdue_balance REAL DEFAULT 0", "source_sales REAL DEFAULT 0", "source_payments REAL DEFAULT 0"]],
   ["products", ["external_code TEXT", "source_system TEXT", "active INTEGER DEFAULT 1", "source_type TEXT", "source_substitute TEXT", "assembly_item INTEGER DEFAULT 0", "cost_adjusted INTEGER DEFAULT 0", "default_split_template TEXT", "source_supplier_code TEXT", "source_created_at TEXT", "source_closed_at TEXT"]],
-  ["purchase_orders", ["validation_status TEXT DEFAULT 'Pendiente de validar'", "request_id INTEGER", "supplier_ids TEXT", "comparison TEXT"]],
+  ["purchase_orders", ["validation_status TEXT DEFAULT 'Pendiente de validar'", "request_id INTEGER", "supplier_ids TEXT", "comparison TEXT", "supplier_invoice_code TEXT", "invoice_date TEXT", "payment_terms_snapshot TEXT", "payment_due_date TEXT", "payment_status TEXT DEFAULT 'Pendiente'", "payment_paid_at TEXT", "payment_reference TEXT"]],
 ]) for (const column of columns) { try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${column}`); } catch {} }
 // Horarios independientes de la dirección para planificar futuras rutas.
 for (const [table, columns] of [["clients", ["opening_time TEXT", "closing_time TEXT", "weekly_closed_day TEXT", "invoice_delivery_method TEXT"]], ["collection_points", ["opening_time TEXT", "closing_time TEXT"]]]) {
@@ -1120,7 +1120,7 @@ const lookupFields = {
   shipments: ["id", "code", "order_id", "client_id", "collection_point_id", "status", "expected_delivery_at", "preparation_date", "address", "delivery_city", "delivery_window_start", "delivery_window_end", "carrier", "packages", "incidents", "notes", "driver_notes", "invoice_delivery_method", "prepared_at", "prepared_by", "shipped_at", "shipped_by", "departure_at", "delivered_at", "delivered_by", "delivery_signature_status", "delivery_recipient_name", "delivery_signature_at", "delivery_signature_by", "delivery_signature_note", "payment_received_status", "payment_received_amount", "payment_received_method", "payment_received_reference", "payment_received_note", "payment_received_at", "payment_received_by", "public_tracking_token"],
   order_lines: ["id", "order_id", "product_id", "quantity", "quantity_requested", "quantity_unit", "prepared", "prepared_quantity", "preparation_status", "incident_resolution"],
   invoices: ["id", "code", "order_id", "client_id", "amount", "status", "created_at", "issue_date", "due_date"],
-  purchase_orders: ["id", "code", "supplier_id", "status", "order_date", "expected_date", "amount", "validation_status"],
+  purchase_orders: ["id", "code", "supplier_id", "status", "order_date", "expected_date", "amount", "validation_status", "supplier_invoice_code", "invoice_date", "payment_terms_snapshot", "payment_due_date", "payment_status", "payment_paid_at", "payment_reference"],
   goods_receipts: ["id", "code", "supplier_id", "purchase_order_id", "purchase_invoice_id", "warehouse_id", "receipt_date", "status", "validation_status", "validated_by", "validated_at", "line_count", "incident_count", "received_by", "notes"],
   goods_receipt_lines: ["id", "receipt_id", "product_id", "product_name_snapshot", "expected_quantity", "received_quantity", "damaged_quantity", "substituted_quantity", "substitute_product_id", "unit_cost", "expected_value", "received_value", "economic_difference", "status", "lot_id", "lot_code", "expiry_date", "notes", "location_verified_status", "location_verified_code", "location_verified_reason", "location_verified_by", "location_verified_at"],
   goods_receipt_incidents: ["id", "receipt_id", "receipt_line_id", "supplier_id", "type", "description", "expected_quantity", "received_quantity", "damaged_quantity", "substituted_quantity", "substitute_product_id", "economic_difference", "status", "claim_status", "attachment_name", "attachment_mime", "created_by", "created_at"],
@@ -1219,7 +1219,55 @@ function addDaysDate(value, days) {
   const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
   if (Number.isNaN(date.getTime())) return null;
   date.setDate(date.getDate() + Math.max(1, Number(days || 1)));
-  return date.toISOString().slice(0, 10);
+  return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
+}
+function addCalendarDays(value, days) {
+  const date = new Date(String(value).slice(0, 10) + "T00:00:00");
+  if (Number.isNaN(date.getTime())) return null;
+  date.setDate(date.getDate() + Math.max(0, Number(days || 0)));
+  return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
+}
+function paymentTermsDays(value) {
+  const text = String(value || "").trim().toLocaleLowerCase();
+  if (!text || /contado|inmediato|recibo inmediato|contra entrega/.test(text)) return 0;
+  const numbers = [...text.matchAll(/\d+(?:[.,]\d+)?/g)].map((match) => Number(String(match[0]).replace(",", "."))).filter(Number.isFinite);
+  return numbers.length ? Math.max(0, Math.round(Math.max(...numbers))) : 30;
+}
+function purchasePaymentInfo(row) {
+  const supplier = row?.supplier_id
+    ? db.prepare("SELECT id,name,payment_terms FROM suppliers WHERE id=?").get(Number(row.supplier_id))
+    : null;
+  const terms = String(row?.payment_terms_snapshot || supplier?.payment_terms || "30 días").trim() || "30 días";
+  const invoiceDate = String(row?.invoice_date || row?.order_date || row?.created_at || "").slice(0, 10) || null;
+  const dueDate = String(row?.payment_due_date || "").slice(0, 10) || addCalendarDays(invoiceDate, paymentTermsDays(terms));
+  const paymentStatus = String(row?.payment_status || "Pendiente").trim() || "Pendiente";
+  const today = new Date().toISOString().slice(0, 10);
+  const daysRemaining = dueDate ? Math.round((new Date(String(dueDate) + "T00:00:00").getTime() - new Date(String(today) + "T00:00:00").getTime()) / 86400000) : null;
+  const dueState = paymentStatus === "Pagada"
+    ? "Pagada"
+    : daysRemaining !== null && daysRemaining < 0
+      ? "Vencida"
+      : daysRemaining === 0
+        ? "Vence hoy"
+        : daysRemaining !== null && daysRemaining <= 7
+          ? "Próxima"
+          : "Pendiente";
+  return {
+    supplier_name: row?.supplier_name || supplier?.name || "Proveedor no indicado",
+    supplier_payment_terms: supplier?.payment_terms || terms,
+    payment_terms_display: terms,
+    invoice_date: invoiceDate,
+    payment_due_date: dueDate,
+    payment_status: paymentStatus,
+    payment_due_state: dueState,
+    payment_days_remaining: daysRemaining,
+  };
+}
+function enrichPurchaseOrder(row) {
+  return { ...row, ...purchasePaymentInfo(row) };
+}
+function getPurchaseOrderRows() {
+  return db.prepare("SELECT purchase_orders.*,suppliers.name supplier_name,suppliers.payment_terms supplier_payment_terms FROM purchase_orders LEFT JOIN suppliers ON suppliers.id=purchase_orders.supplier_id WHERE CAST(COALESCE(purchase_orders.deleted,0) AS INTEGER)=0 ORDER BY purchase_orders.order_date DESC,purchase_orders.id DESC LIMIT 500").all().map(enrichPurchaseOrder);
 }
 function getVehicleWithMetrics(id) {
   const vehicle = db.prepare("SELECT * FROM vehicles WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(id));
@@ -2791,7 +2839,10 @@ export async function crmApiHandler(req, res) {
           const deletedClause = includeDeleted || !hasColumn(tableReference, "deleted") ? "" : ` AND CAST(COALESCE(${tableReference}.deleted,0) AS INTEGER)=0`;
           const row = db.prepare(`SELECT ${selection} FROM ${source} WHERE ${tableReference}.id=?${deletedClause}`).get(Number(p[2]));
           if (!row) return send(res, 404, { error: "Registro no encontrado" });
-          return send(res, 200, t === "shipments" ? attachShipmentTrackingToken(row) : t === "order_lines" ? attachOrderLineLots(row) : row);
+          return send(res, 200, t === "shipments" ? attachShipmentTrackingToken(row) : t === "order_lines" ? attachOrderLineLots(row) : t === "purchase_orders" ? enrichPurchaseOrder(row) : row);
+        }
+        if (t === "purchase_orders" && !isLookup && !includeDeleted && limitValue === null && offsetValue === 0) {
+          return send(res, 200, getPurchaseOrderRows());
         }
         const cached = !isLookup && limitValue === null && offsetValue === 0
           ? cachedRows(t, includeDeleted, includeInactive)
@@ -2946,6 +2997,14 @@ export async function crmApiHandler(req, res) {
           if (!String(d.code || "").trim() || !d.supplier_id || !String(d.order_date || "").trim()) {
             return send(res, 400, { error: "La compra debe indicar código, proveedor y fecha" });
           }
+          const supplier = db.prepare("SELECT payment_terms FROM suppliers WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(d.supplier_id));
+          if (!supplier) return send(res, 400, { error: "El proveedor de la compra no existe" });
+          const invoiceDate = String(d.invoice_date || d.order_date).slice(0, 10);
+          const paymentTermsSnapshot = String(d.payment_terms_snapshot || supplier.payment_terms || "30 días").trim() || "30 días";
+          d.invoice_date = invoiceDate;
+          d.payment_terms_snapshot = paymentTermsSnapshot;
+          d.payment_due_date = String(d.payment_due_date || "").slice(0, 10) || addCalendarDays(invoiceDate, paymentTermsDays(paymentTermsSnapshot));
+          d.payment_status = String(d.payment_status || "Pendiente").trim() || "Pendiente";
           if (!Array.isArray(d.lines) || !d.lines.length) {
             return send(res, 400, { error: "Añade al menos una línea de producto a la compra" });
           }
@@ -3137,6 +3196,11 @@ export async function crmApiHandler(req, res) {
             if (line.product_id !== Number(d.product_id)) db.prepare("UPDATE products SET stock_reserved=COALESCE(stock_reserved,0)+? WHERE id=?").run(line.quantity, line.product_id);
           }
         }
+        if (t === "purchase_orders" && purchaseOrderLines) {
+          for (const line of purchaseOrderLines) {
+            db.prepare("INSERT INTO purchase_order_lines(purchase_order_id,product_id,quantity,unit_cost,amount) VALUES(?,?,?,?,?)").run(Number(r.lastInsertRowid), line.productId, line.quantity, line.unitCost, line.amount);
+          }
+        }
         if (t === "orders") {
           const client = d.client_id ? db.prepare("SELECT address,opening_time,closing_time,invoice_delivery_method FROM clients WHERE id=?").get(Number(d.client_id)) : null;
           const shippingLocation = d.collection_point_id
@@ -3164,7 +3228,9 @@ export async function crmApiHandler(req, res) {
         if (t === "invoice_lines" && d.invoice_id) markInvoicePdfStale(d.invoice_id);
         if (t === "order_lines" && d.order_id) markCommercialDocumentPdfStale("order", d.order_id);
         if (t === "quote_lines" && d.quote_id) markCommercialDocumentPdfStale("quote", d.quote_id);
-        const createdRecord = { id: Number(r.lastInsertRowid), ...d };
+        const createdRecord = t === "purchase_orders"
+          ? { id: Number(r.lastInsertRowid), ...d, ...purchasePaymentInfo({ id: Number(r.lastInsertRowid), ...d }) }
+          : { id: Number(r.lastInsertRowid), ...d };
         if (t === "shipments") createdRecord.public_tracking_token = ensureShipmentTrackingToken(Number(r.lastInsertRowid));
         if (t === "products") Object.assign(createdRecord, db.prepare("SELECT photo_url,photo_public_id,photo_thumbnail_url,photo_web_url,photo_bytes,photo_width,photo_height,photo_format FROM products WHERE id=?").get(Number(r.lastInsertRowid)) || {});
         if (t === "orders") createdRecord.stock_alerts = [...stockShortages, ...stockAlerts];
@@ -3222,6 +3288,27 @@ export async function crmApiHandler(req, res) {
         invalidateRelatedReadCaches(t);
         const currentRecord = db.prepare(`SELECT id FROM ${t} WHERE id=?`).get(Number(p[2]));
         if (!currentRecord) return send(res, 404, { error: "Registro no encontrado" });
+        const currentPurchase = t === "purchase_orders" ? db.prepare("SELECT * FROM purchase_orders WHERE id=?").get(Number(p[2])) : null;
+        if (t === "purchase_orders") {
+          const supplierId = Number(d.supplier_id ?? currentPurchase?.supplier_id ?? 0);
+          const supplier = supplierId ? db.prepare("SELECT payment_terms FROM suppliers WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(supplierId) : null;
+          if (!supplier) return send(res, 400, { error: "El proveedor de la compra no existe" });
+          const paymentTermsSnapshot = String(d.payment_terms_snapshot ?? currentPurchase?.payment_terms_snapshot ?? supplier.payment_terms ?? "30 días").trim() || "30 días";
+          const invoiceDate = String(d.invoice_date ?? currentPurchase?.invoice_date ?? d.order_date ?? currentPurchase?.order_date ?? "").slice(0, 10);
+          const paymentFieldsChanged = ["supplier_id", "invoice_date", "order_date", "payment_terms_snapshot", "payment_due_date"].some((field) => d[field] !== undefined);
+          if (paymentFieldsChanged) {
+            d.invoice_date = invoiceDate;
+            d.payment_terms_snapshot = paymentTermsSnapshot;
+            d.payment_due_date = String(d.payment_due_date || "").slice(0, 10) || addCalendarDays(invoiceDate, paymentTermsDays(paymentTermsSnapshot));
+          }
+          if (d.payment_status !== undefined) {
+            const paymentStatus = String(d.payment_status || "Pendiente").trim();
+            if (!["Pendiente", "Pagada", "Anulada"].includes(paymentStatus)) return send(res, 400, { error: "El estado de pago no es válido" });
+            d.payment_status = paymentStatus;
+            if (paymentStatus === "Pagada" && !currentPurchase?.payment_paid_at && !d.payment_paid_at) d.payment_paid_at = new Date().toISOString();
+            if (paymentStatus !== "Pagada" && d.payment_paid_at === undefined && currentPurchase?.payment_status === "Pagada") d.payment_paid_at = null;
+          }
+        }
         let normalizedLotAllocations = null;
         if (t === "order_lines" && incomingLotAllocations) {
           const currentLine = db.prepare("SELECT quantity,lot_code,expiry_date,prepared_quantity FROM order_lines WHERE id=?").get(Number(p[2]));
@@ -3243,11 +3330,6 @@ export async function crmApiHandler(req, res) {
           d.expiry_date = normalizedLotAllocations[0]?.expiry_date || null;
           if (d.prepared === undefined) d.prepared = 0;
           if (d.preparation_status === undefined) d.preparation_status = preparedQuantity > 0 ? "Pendiente" : "Pendiente";
-        }
-        if (t === "purchase_orders" && purchaseOrderLines) {
-          for (const line of purchaseOrderLines) {
-            db.prepare("INSERT INTO purchase_order_lines(purchase_order_id,product_id,quantity,unit_cost,amount) VALUES(?,?,?,?,?)").run(Number(r.lastInsertRowid), line.productId, line.quantity, line.unitCost, line.amount);
-          }
         }
         if (t === "orders") {
           const currentOrder = db.prepare("SELECT status FROM orders WHERE id=?").get(Number(p[2]));

@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.127";
+const APP_VERSION = "2.0.128";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -518,6 +518,12 @@ const cfg: any = {
       "status",
       "order_date",
       "expected_date",
+      "supplier_invoice_code",
+      "invoice_date",
+      "payment_terms_snapshot",
+      "payment_due_date",
+      "payment_status",
+      "payment_reference",
       "amount",
       "notes",
     ],
@@ -527,6 +533,12 @@ const cfg: any = {
       "Estado",
       "Fecha pedido",
       "Fecha prevista",
+      "Nº factura proveedor",
+      "Fecha factura",
+      "Condiciones de pago",
+      "Vencimiento pago",
+      "Estado de pago",
+      "Referencia del pago",
       "Importe",
       "Notas",
     ],
@@ -2668,6 +2680,56 @@ function BusinessRelatedPanels({ active, rows, lookups, onNavigate }: { active: 
   </section>;
 }
 
+function SupplierPayablesPanel({ rows, suppliers, actor, onReload }: { rows: any[]; suppliers: any[]; actor: string; onReload?: () => void }) {
+  const [showPaid, setShowPaid] = useState(false);
+  const [savingId, setSavingId] = useState<number | null>(null);
+  const [message, setMessage] = useState("");
+  const supplierName = (row: any) => row.supplier_name || suppliers.find((item: any) => Number(item.id) === Number(row.supplier_id))?.name || "Proveedor no indicado";
+  const pendingRows = rows.filter((row: any) => String(row.payment_status || "Pendiente") !== "Pagada" && String(row.payment_status || "Pendiente") !== "Anulada");
+  const visibleRows = [...rows].filter((row: any) => showPaid || String(row.payment_status || "Pendiente") !== "Pagada").sort((a: any, b: any) => String(a.payment_due_date || "9999-12-31").localeCompare(String(b.payment_due_date || "9999-12-31")) || Number(a.id) - Number(b.id));
+  const overdueCount = pendingRows.filter((row: any) => row.payment_due_state === "Vencida").length;
+  const nextSevenCount = pendingRows.filter((row: any) => ["Vence hoy", "Próxima"].includes(row.payment_due_state)).length;
+  const pendingAmount = pendingRows.reduce((total: number, row: any) => total + Number(row.amount || 0), 0);
+  async function markPaid(row: any) {
+    setSavingId(Number(row.id));
+    setMessage("");
+    try {
+      const response = await fetch("/api/purchase_orders/" + row.id, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "X-Actor": actor },
+        body: JSON.stringify({ payment_status: "Pagada", payment_paid_at: new Date().toISOString() }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "No se pudo registrar el pago.");
+      setMessage("Pago registrado: " + (row.supplier_invoice_code || row.code) + ".");
+      onReload?.();
+    } catch (error: any) {
+      setMessage(error?.message || "No se pudo registrar el pago.");
+    } finally {
+      setSavingId(null);
+    }
+  }
+  return <section className="supplier-payables-panel panel" aria-label="Vencimientos de proveedores">
+    <div className="supplier-payables-head">
+      <div><p className="eyebrow">TESORERÍA · PROVEEDORES</p><h3>Vencimientos de facturas de proveedores</h3><p className="muted">Calculados con la fecha de factura y las condiciones de pago de cada proveedor.</p></div>
+      <label className="supplier-payables-toggle"><input type="checkbox" checked={showPaid} onChange={(event) => setShowPaid(event.target.checked)} /> Mostrar pagadas</label>
+    </div>
+    <div className="supplier-payables-summary"><span><b>{pendingRows.length}</b><small>pendientes</small></span><span className={overdueCount ? "is-alert" : ""}><b>{overdueCount}</b><small>vencidas</small></span><span><b>{nextSevenCount}</b><small>próximos 7 días</small></span><span><b>{pendingAmount.toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</b><small>importe pendiente</small></span></div>
+    {message && <p className="supplier-payables-message" role="status">{message}</p>}
+    {visibleRows.length ? <div className="supplier-payables-list">
+      <div className="supplier-payables-list-head"><span>Proveedor / factura</span><span>Condiciones</span><span>Vencimiento</span><span>Importe</span><span>Estado</span><span>Acción</span></div>
+      {visibleRows.map((row: any) => <article className={"supplier-payable-row " + (row.payment_due_state === "Vencida" ? "is-overdue" : "")} key={row.id}>
+        <div><b>{supplierName(row)}</b><small>{row.supplier_invoice_code || row.code} · {row.invoice_date ? "Factura " + formatSpanishDateValue(row.invoice_date, false) : "Fecha de factura no indicada"}</small></div>
+        <span>{row.payment_terms_display || row.payment_terms_snapshot || "30 días"}</span>
+        <strong>{row.payment_due_date ? formatSpanishDateValue(row.payment_due_date, false) : "Sin vencimiento"}</strong>
+        <b>{Number(row.amount || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</b>
+        <em className={"supplier-payment-state state-" + String(row.payment_due_state || row.payment_status || "Pendiente").toLocaleLowerCase().replaceAll(" ", "-")}>{row.payment_due_state || row.payment_status || "Pendiente"}</em>
+        {row.payment_status === "Pagada" ? <span className="supplier-paid-date">{row.payment_paid_at ? "Pagada " + formatSpanishDateValue(row.payment_paid_at, false) : "Pagada"}</span> : <button type="button" className="button primary" disabled={savingId === Number(row.id)} onClick={() => void markPaid(row)}>{savingId === Number(row.id) ? "Guardando…" : "Marcar pagada"}</button>}
+      </article>)}
+    </div> : <p className="empty-state">No hay facturas de proveedores pendientes de pago.</p>}
+  </section>;
+}
+
 function OrderWorkflowPanel({ order, shipment, billingStatus, paymentStatus, invoice, onOpenPayment, onNavigate }: { order: any; shipment: any; billingStatus: string; paymentStatus: string; invoice: any; onOpenPayment: () => void; onNavigate?: (module: string) => void }) {
   const shippingStatus = String(shipment?.status || order?.status || "Pendiente");
   const deliverySignatureStatus = String(shipment?.delivery_signature_status || "Pendiente");
@@ -3289,6 +3351,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadedListKey, setLoadedListKey] = useState("");
+  const [listRefreshKey, setListRefreshKey] = useState(0);
   const [lookups, setLookups] = useState<any>({
     clients: [],
     products: [],
@@ -3428,7 +3491,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         );
       })
       .finally(() => setLoading(false));
-  }, [active, showDeleted, showInactive]);
+  }, [active, showDeleted, showInactive, listRefreshKey]);
   useEffect(() => {
     const lookupResourcesByActive: Record<string, string[]> = {
       Productos: ["suppliers", "warehouses", "product_lots"],
@@ -5709,6 +5772,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         <select aria-label={c.labels[i]} value={String(form[f] ?? "0")} onChange={(e) => handleFormChange(f, e.target.value)}><option value="0">No</option><option value="1">Sí</option></select>
       ) : active === "Notas" && ["important", "completed"].includes(f) ? (
         <input type="checkbox" aria-label={c.labels[i]} checked={Boolean(Number(form[f] || 0))} onChange={(e) => handleFormChange(f, e.target.checked ? "1" : "0")} />
+      ) : f === "payment_status" ? (
+        <select aria-label={c.labels[i]} value={form[f] ?? "Pendiente"} onChange={(e) => handleFormChange(f, e.target.value)}><option>Pendiente</option><option>Pagada</option><option>Anulada</option></select>
       ) : f === "status" ? (
         <select aria-label={c.labels[i]} value={form[f] ?? (active === "Pedidos" ? "Nuevo" : "Pendiente")} onChange={(e) => handleFormChange(f, e.target.value)}>
           {(active === "Facturas" ? ["Proforma", "Pendiente", "Parcial", "Cobrada", "Vencida", "Anulada"] : [...(active === "Documentos" ? ["Activa", "Borrador", "Archivada"] : []), ...(active === "Pedidos" ? ["Nuevo"] : []), "Pendiente", "Confirmado", "Preparando", "Preparado", "Enviado", "Entregado", "Cancelado", "Cobrada"]).map((s) => <option key={s}>{s}</option>)}
@@ -5726,7 +5791,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             : active === "Productos"
             ? f === "name"
             : !["phone", "email", "address", "notes", "opening_time", "closing_time", "weekly_closed_day", "delivery_window_start", "delivery_window_end", "attachment_name", "sent_by", "delivered_by"].includes(f) && !(c.api === "expenses" && f === "code")}
-          type={["amount", "stock", "stock_reserved", "quantity", "unit_price", "box_price", "pack4_price", "pack6_price", "pallet_price", "client_id", "product_id", "order_id", "invoice_id", "stock_min", "stock_target", "stock_safety", "units_per_case", "cases_per_pallet", "units_per_pallet", "weight_kg", "volume_m3", "picking_order", "target_margin_percent", "min_margin_percent", "freight_cost", "handling_cost", "real_cost", "tax_surcharge_percent", "extra_tax_percent", "cost_price", "last_direct_cost", "markup_percent"].includes(f) ? "number" : timeFields.has(f) ? "time" : ["movement_date", "return_date", "reviewed_at", "authorized_at"].includes(f) ? "datetime-local" : ["expense_date", "delivery_date", "preparation_date", "shipping_date", "created_at"].includes(f) ? "date" : "text"}
+          type={["amount", "stock", "stock_reserved", "quantity", "unit_price", "box_price", "pack4_price", "pack6_price", "pallet_price", "client_id", "product_id", "order_id", "invoice_id", "stock_min", "stock_target", "stock_safety", "units_per_case", "cases_per_pallet", "units_per_pallet", "weight_kg", "volume_m3", "picking_order", "target_margin_percent", "min_margin_percent", "freight_cost", "handling_cost", "real_cost", "tax_surcharge_percent", "extra_tax_percent", "cost_price", "last_direct_cost", "markup_percent"].includes(f) ? "number" : timeFields.has(f) ? "time" : ["movement_date", "return_date", "reviewed_at", "authorized_at"].includes(f) ? "datetime-local" : ["expense_date", "invoice_date", "payment_due_date", "delivery_date", "preparation_date", "shipping_date", "created_at"].includes(f) ? "date" : "text"}
           step={["unit_price", "cost_price", "last_direct_cost", "markup_percent"].includes(f) ? "0.01" : undefined}
           value={form[f] ?? ""}
           readOnly={f === "created_by" || f === "category_code" || (f === "code" && isOrderForm && !editing)}
@@ -5813,7 +5878,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                   : active === "Gastos y tickets"
                     ? { expense_date: tabletTodayInput(), category: "Otros", vat: "21", payment_method: "Tarjeta" }
                   : isPurchaseForm
-                    ? { code: `COM-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`, status: "Pendiente", order_date: tabletTodayInput(), expected_date: "", amount: 0 }
+                    ? { code: `COM-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`, status: "Pendiente", order_date: tabletTodayInput(), invoice_date: tabletTodayInput(), payment_status: "Pendiente", expected_date: "", amount: 0 }
                   : isOrderForm || active === "Pedidos"
                     ? (() => { const defaultOrderDate = nextOrderWorkingDate(); return { code: nextOrderCode(), status: "Nuevo", created_by: user?.username || "Usuario local", preparation_date: defaultOrderDate, shipping_date: defaultOrderDate, delivery_date: defaultOrderDate }; })()
                     : {}
@@ -5871,6 +5936,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       {error && <div className="error-message" role="alert">{error}</div>}
       {productSaveMessage && active === "Productos" && <div className="success-message" role="status">{productSaveMessage}</div>}
       {!isLoadPreparation && active !== "Pedidos" && <BusinessRelatedPanels active={active} rows={rows} lookups={lookups} onNavigate={onNavigate} />}
+      {active === "Compras" && <SupplierPayablesPanel rows={rows} suppliers={lookups.suppliers || []} actor={user?.username || "Usuario local"} onReload={() => setListRefreshKey((current) => current + 1)} />}
       {isLoadPreparation && <div className="prep-export-row"><button type="button" className="button secondary icon-action" onClick={download} aria-label="Descargar Excel/CSV" title="Descargar Excel/CSV"><ToolbarIcon name="download" /><span className="icon-action-label">Descargar Excel/CSV</span></button></div>}
       {isLoadPreparation && <PreparationDayCards rows={preparationRows} lookups={lookups} dateFilter={preparationDateFilter} onDateFilterChange={setPreparationDateFilter} onOpen={(row) => void openPreparationRow(row)} onOpenCollective={() => setCollectiveLoadOpen(true)} />}
       {active === "Gastos y tickets" && (
