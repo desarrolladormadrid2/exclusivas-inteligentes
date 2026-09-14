@@ -85,8 +85,9 @@ const migrationsByTable = {
     ["table", "CREATE TABLE IF NOT EXISTS delivery_routes(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,route_date TEXT NOT NULL,driver TEXT,vehicle TEXT,status TEXT DEFAULT 'Planificada',radius_meters REAL DEFAULT 150,origin_address TEXT,origin_latitude REAL,origin_longitude REAL,notes TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT)"],
   ],
   delivery_route_stops: [
-    ["table", "CREATE TABLE IF NOT EXISTS delivery_route_stops(id INTEGER PRIMARY KEY AUTOINCREMENT,route_id INTEGER NOT NULL,position INTEGER NOT NULL,shipment_id INTEGER,client_id INTEGER,collection_point_id INTEGER,client_name TEXT,address TEXT,city TEXT,latitude REAL,longitude REAL,distance_km REAL DEFAULT 0,status TEXT DEFAULT 'Pendiente',notes TEXT,driver_notes TEXT,created_at TEXT,updated_at TEXT)"],
+    ["table", "CREATE TABLE IF NOT EXISTS delivery_route_stops(id INTEGER PRIMARY KEY AUTOINCREMENT,route_id INTEGER NOT NULL,position INTEGER NOT NULL,shipment_id INTEGER,client_id INTEGER,collection_point_id INTEGER,client_name TEXT,address TEXT,city TEXT,latitude REAL,longitude REAL,distance_km REAL DEFAULT 0,status TEXT DEFAULT 'Pendiente',notes TEXT,driver_notes TEXT,invoice_delivery_method TEXT,created_at TEXT,updated_at TEXT)"],
     ["driver_notes", "ALTER TABLE delivery_route_stops ADD COLUMN driver_notes TEXT"],
+    ["invoice_delivery_method", "ALTER TABLE delivery_route_stops ADD COLUMN invoice_delivery_method TEXT"],
   ],
   order_lines: [
     ["order_line_lots_table", "CREATE TABLE IF NOT EXISTS order_line_lots(id INTEGER PRIMARY KEY AUTOINCREMENT,order_line_id INTEGER NOT NULL,lot_id INTEGER,lot_code TEXT,expiry_date TEXT,quantity REAL DEFAULT 0,created_at TEXT,updated_at TEXT)"],
@@ -168,6 +169,7 @@ const migrationsByTable = {
     ["portal_access_enabled", "ALTER TABLE suppliers ADD COLUMN portal_access_enabled INTEGER DEFAULT 0"],
   ],
   clients: [
+    ["invoice_delivery_method", "ALTER TABLE clients ADD COLUMN invoice_delivery_method TEXT"],
     ["city", "ALTER TABLE clients ADD COLUMN city TEXT"],
     ["external_code", "ALTER TABLE clients ADD COLUMN external_code TEXT"],
     ["source_system", "ALTER TABLE clients ADD COLUMN source_system TEXT"],
@@ -249,6 +251,7 @@ const migrationsByTable = {
     ["geocoding_status", "ALTER TABLE collection_points ADD COLUMN geocoding_status TEXT DEFAULT 'Pendiente'"],
   ],
   shipments: [
+    ["invoice_delivery_method", "ALTER TABLE shipments ADD COLUMN invoice_delivery_method TEXT"],
     ["deleted", "ALTER TABLE shipments ADD COLUMN deleted INTEGER DEFAULT 0"],
     ["deleted_at", "ALTER TABLE shipments ADD COLUMN deleted_at TEXT"],
     ["deleted_by", "ALTER TABLE shipments ADD COLUMN deleted_by TEXT"],

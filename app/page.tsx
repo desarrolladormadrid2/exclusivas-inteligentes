@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.124";
+const APP_VERSION = "2.0.125";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -347,6 +347,7 @@ const cfg: any = {
       "contact",
       "phone",
       "email",
+      "invoice_delivery_method",
       "address",
       "city",
       "opening_time",
@@ -368,6 +369,7 @@ const cfg: any = {
       "Contacto",
       "Teléfono",
       "Email",
+      "Entrega de factura",
       "Dirección de entrega",
       "Ciudad de entrega",
       "Recepción desde",
@@ -1290,6 +1292,7 @@ function VehicleLoadManager({ user }: { user: any }) {
             client_name: client?.name || "Cliente sin nombre",
             address: item.address || point?.address || client?.address || "",
             city: item.delivery_city || point?.city || client?.city || "",
+            invoice_delivery_method: item.invoice_delivery_method || client?.invoice_delivery_method || "Pendiente de indicar",
             latitude: located ? latitude : null,
             longitude: located ? longitude : null,
             distance_km: located ? Number(haversineKm(nextOrigin.latitude, nextOrigin.longitude, latitude, longitude).toFixed(1)) : null,
@@ -1365,7 +1368,7 @@ function VehicleLoadManager({ user }: { user: any }) {
             <label className="vehicle-load-check"><input type="checkbox" checked={isSelected} disabled={Boolean(route)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, Number(item.id)] : current.filter((id) => id !== Number(item.id)))} aria-label={`Seleccionar ${item.code}`} /></label>
             <div className="vehicle-load-distance"><b>{item.distance_km === null ? "—" : `${String(item.distance_km).replace(".", ",")} km`}</b><small>{item.distance_km === null ? "Sin coordenadas" : "desde almacén"}</small></div>
             <div className="vehicle-load-main"><b>{item.code}</b><strong>{item.client_name}</strong><span>{[item.address, item.city].filter(Boolean).join(" · ") || "Dirección no indicada"}</span><small>{item.packages || 1} bultos · Estado: {item.status}</small></div>
-            <div className="vehicle-load-notes"><span><b>Nota de carga</b>{item.notes || "Sin indicaciones"}</span><span><b>Nota del repartidor</b>{item.driver_notes || "Sin indicaciones"}</span></div>
+            <div className="vehicle-load-notes"><span><b>Nota de carga</b>{item.notes || "Sin indicaciones"}</span><span><b>Nota del repartidor</b>{item.driver_notes || "Sin indicaciones"}</span><span><b>Factura</b>{item.invoice_delivery_method || "Pendiente de indicar"}</span></div>
             <div className="vehicle-load-assignment">{route ? <><b>Asignado</b><span>{route.vehicle || "Sin camión"}</span><small>{route.driver || "Sin conductor"} · {route.code}</small></> : <span className="vehicle-load-pending">Pendiente de asignar</span>}</div>
           </article>;
         }) : <p className="empty-state">No hay pedidos preparados para el {formatSpanishDateValue(routeDate, false)}.</p>}
@@ -5494,6 +5497,12 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         <select aria-label={c.labels[i]} value={form[f] ?? ""} onChange={(event) => handleFormChange(f, event.target.value)}>
           <option value="">Sin día de cierre</option>
           {WEEKDAY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+      ) : active === "Clientes" && f === "invoice_delivery_method" ? (
+        <select aria-label={c.labels[i]} value={form[f] ?? "Pendiente de indicar"} onChange={(event) => handleFormChange(f, event.target.value)}>
+          <option value="Pendiente de indicar">Pendiente de indicar</option>
+          <option value="Física">Factura física</option>
+          <option value="Email">Por email</option>
         </select>
       ) : active === "Productos" && f === "barcode" ? (
         <div className="product-barcode-field">
