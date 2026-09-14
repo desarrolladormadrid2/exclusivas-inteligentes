@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.123";
+const APP_VERSION = "2.0.124";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -74,6 +74,7 @@ const initialModules = [
   "Almacenes",
   "Preparación de pedidos",
   "Lugares de recogida",
+  "Carga de vehículos",
   "Rutas",
   "Entradas",
   "Salidas",
@@ -766,6 +767,8 @@ const cfg: any = {
       "preparation_date",
       "shipping_date",
       "urgent",
+      "loading_notes",
+      "driver_notes",
       "notes",
       "prepared_by",
       "shipped_by",
@@ -790,6 +793,8 @@ const cfg: any = {
       "Día de preparación",
       "Día de envío",
       "Urgente",
+      "Nota de carga",
+      "Nota del repartidor",
       "Notas",
       "Preparado por",
       "Enviado por",
@@ -981,6 +986,7 @@ const sidebarGroups = [
       "Stock",
       "Almacenes",
       "Lugares de recogida",
+      "Carga de vehículos",
       "Rutas",
       "Entradas",
       "Salidas",
@@ -999,7 +1005,7 @@ const sidebarGroups = [
 const routeModuleScopes: Record<string, string[]> = {
   crm: initialModules,
   comercial: ["Pedidos", "Clientes", "Contactos", "Presupuestos", "Albaranes", "Facturas", "Cobros", "Envíos"],
-  almacen: ["Preparación de pedidos", "Stock", "Productos", "Almacenes", "Rutas", "Entradas", "Salidas", "Devoluciones", "Envíos", "Pedidos", "Notas"],
+  almacen: ["Preparación de pedidos", "Carga de vehículos", "Stock", "Productos", "Almacenes", "Rutas", "Entradas", "Salidas", "Devoluciones", "Envíos", "Pedidos", "Notas"],
   web: ["Inicio", "Pedidos", "Clientes", "Productos"],
   ocr: ["OCR inteligente"],
 };
@@ -1229,6 +1235,143 @@ function RoutesManager({ user }: { user: any }) {
     finally { setSaving(false); }
   }
  return <section className="routes-manager"><div className="manager-head"><div><p className="eyebrow">LOGÍSTICA · PLANIFICACIÓN</p><h2>Rutas de reparto</h2><p className="muted">Agrupa entregas geolocalizadas y prioriza las franjas de apertura para preparar la ruta.</p></div><button type="button" className="button secondary" onClick={() => void load()}>Actualizar</button></div><div className="routes-toolbar"><label>Fecha de entrega<input type="date" value={routeDate} onChange={(event) => { setRouteDate(event.target.value); setSelected([]); setActiveRoute(null); setRouteDraft(null); }} /></label><label>Radio operativo (m)<input type="number" min="50" max="5000" step="50" value={radius} onChange={(event) => setRadius(Math.max(50, Number(event.target.value) || 150))} /></label><label>Repartidor<input value={driver} onChange={(event) => setDriver(event.target.value)} placeholder="Nombre" /></label><label>Vehículo<input value={vehicle} onChange={(event) => setVehicle(event.target.value)} placeholder="Matrícula o referencia" /></label></div>{message && <p className="routes-message" role="status">{message}</p>}<div className="routes-layout"><div className="routes-shipments panel"><div className="panel-head"><div><h3>Entregas disponibles</h3><p className="muted">{dayShipments.length} envíos para el {routeDate}</p></div><button type="button" className="button primary" disabled={saving || !selected.length} onClick={() => void createRoute()}>{saving ? "Planificando…" : `Crear ruta (${selected.length})`}</button></div>{loading ? <div className="data-loading" role="status">Cargando entregas…</div> : <div className="route-shipment-list">{dayShipments.length ? dayShipments.map((item) => { const located = Number.isFinite(Number(item.latitude)) && Number.isFinite(Number(item.longitude)); return <label className={`route-shipment${selected.includes(Number(item.id)) ? " selected" : ""}`} key={item.id}><input type="checkbox" checked={selected.includes(Number(item.id))} onChange={(event) => setSelected((current) => event.target.checked ? [...current, Number(item.id)] : current.filter((id) => id !== Number(item.id)))} /><span><b>{item.code}</b><strong>{item.client_name}</strong><small>{[item.address, item.city].filter(Boolean).join(" · ") || "Sin dirección"}</small><small>{item.opening_time && item.closing_time ? `Horario del cliente: ${item.opening_time}–${item.closing_time}` : "Horario pendiente de indicar"}</small></span><em className={located ? "located" : "not-located"}>{located ? "Geolocalizado" : "Sin coordenadas"}</em></label>; }) : <p className="empty-state">No hay envíos para esta fecha.</p>}</div>}</div><div className="routes-existing panel"><div className="panel-head"><div><h3>Rutas planificadas</h3><p className="muted">Histórico y seguimiento de paradas.</p></div></div>{routes.length ? routes.map((route) => <button type="button" className={`route-card${activeRoute?.id === route.id ? " active" : ""}`} key={route.id} onClick={() => { setActiveRoute(route); setRouteDraft(null); }}><span><b>{route.code}</b><small>{route.route_date} · {route.driver || "Sin repartidor"} · {route.status || "Planificada"}</small></span><strong>{route.stops?.length || 0}</strong></button>) : <p className="empty-state">Todavía no hay rutas.</p>}</div></div>{activeRoute && <div className="route-detail panel"><div className="panel-head"><div><p className="eyebrow">{activeRoute.code}</p><h3>Orden de ruta · {activeRoute.route_date}</h3><p className="muted">{activeRoute.driver || "Sin repartidor"} · {activeRoute.vehicle || "Sin vehículo"} · Radio {activeRoute.radius_meters || 150} m</p></div><div className="route-detail-actions">{activeRoute.maps_url && <a className="button primary" href={activeRoute.maps_url} target="_blank" rel="noreferrer">Navegar con Google Maps</a>}<button type="button" className="button secondary" onClick={() => setRouteDraft({ driver: activeRoute.driver || "", vehicle: activeRoute.vehicle || "", status: activeRoute.status || "Planificada", radius_meters: activeRoute.radius_meters || 150, notes: activeRoute.notes || "" })}>Editar ruta</button></div></div>{routeDraft && <div className="route-edit-panel"><div><b>Editar planificación</b><small>Los cambios se guardan también para la vista del repartidor.</small></div><div className="route-edit-fields"><label>Repartidor<input value={routeDraft.driver} onChange={(event) => setRouteDraft((current: any) => ({ ...current, driver: event.target.value }))} /></label><label>Vehículo<input value={routeDraft.vehicle} onChange={(event) => setRouteDraft((current: any) => ({ ...current, vehicle: event.target.value }))} /></label><label>Estado<select value={routeDraft.status} onChange={(event) => setRouteDraft((current: any) => ({ ...current, status: event.target.value }))}><option>Planificada</option><option>En curso</option><option>Completada</option><option>Cancelada</option></select></label><label>Radio operativo (m)<input type="number" min="50" max="5000" value={routeDraft.radius_meters} onChange={(event) => setRouteDraft((current: any) => ({ ...current, radius_meters: event.target.value }))} /></label><label className="route-edit-wide">Notas<textarea rows={2} value={routeDraft.notes} onChange={(event) => setRouteDraft((current: any) => ({ ...current, notes: event.target.value }))} placeholder="Ej. cargar primero las entregas con apertura a las 09:00…" /></label></div><div className="route-edit-actions"><button type="button" className="button secondary" onClick={() => setRouteDraft(null)}>Cancelar</button><button type="button" className="button primary" disabled={saving} onClick={() => void saveRouteEdit()}>{saving ? "Guardando…" : "Guardar cambios"}</button></div></div>}<div className="route-metrics"><div><b>{Number(activeRoute.total_distance_km || 0).toLocaleString("es-ES", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} km</b><span>distancia estimada</span></div><div><b>{Math.floor(Number(activeRoute.estimated_minutes || 0) / 60)} h {Number(activeRoute.estimated_minutes || 0) % 60} min</b><span>tiempo con paradas</span></div><div><b>{activeRoute.stops?.length || 0}</b><span>entregas</span></div></div>{(activeRoute.time_window_warnings || []).length > 0 && <div className="route-time-warnings" role="alert"><b>Revisar horarios</b>{activeRoute.time_window_warnings.map((warning: any) => <span key={`${warning.stop_id}-${warning.message}`}>Parada {warning.position} · {warning.client_name}: {warning.message}</span>)}</div>}<IntegratedMap locations={activeRoute.stops || selectedLocations} radiusMeters={Number(activeRoute.radius_meters || 150)} /><ol className="route-stop-list">{(activeRoute.stops || []).map((stop: any) => <li key={stop.id}><b>{stop.position}. {stop.client_name}</b><span>{[stop.address, stop.city].filter(Boolean).join(" · ")}</span><small>{stop.opening_time && stop.closing_time ? `Horario ${stop.opening_time}–${stop.closing_time} · ` : "Horario pendiente · "}{stop.distance_km ? `${stop.distance_km} km desde la parada anterior` : "Salida"}</small></li>)}</ol></div>}</section>;
+}
+
+function VehicleLoadManager({ user }: { user: any }) {
+  const [shipments, setShipments] = useState<any[]>([]);
+  const [routes, setRoutes] = useState<any[]>([]);
+  const [routeDate, setRouteDate] = useState(() => tabletTodayInput());
+  const [selected, setSelected] = useState<number[]>([]);
+  const [driver, setDriver] = useState(user?.username || "");
+  const [vehicle, setVehicle] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [origin, setOrigin] = useState({ latitude: 40.4168, longitude: -3.7038, label: "Madrid (estimación)" });
+
+  async function load() {
+    setLoading(true);
+    setError("");
+    try {
+      const [shipmentResponse, clientsResponse, pointsResponse, warehousesResponse, routesResponse] = await Promise.all([
+        fetch("/api/shipments"),
+        fetch("/api/clients?view=lookup&limit=500"),
+        fetch("/api/collection_points?view=lookup&limit=500"),
+        fetch("/api/warehouses?limit=500"),
+        fetch("/api/routes"),
+      ]);
+      const shipmentRows = shipmentResponse.ok ? await shipmentResponse.json() : [];
+      const clients = clientsResponse.ok ? await clientsResponse.json() : [];
+      const points = pointsResponse.ok ? await pointsResponse.json() : [];
+      const warehouses = warehousesResponse.ok ? await warehousesResponse.json() : [];
+      const routeRows = routesResponse.ok ? await routesResponse.json() : [];
+      const warehouse = (Array.isArray(warehouses) ? warehouses : []).find((item: any) => Number.isFinite(Number(item.latitude)) && Number.isFinite(Number(item.longitude)) && Number(item.latitude) !== 0 && Number(item.longitude) !== 0)
+        || (Array.isArray(warehouses) ? warehouses : []).find((item: any) => /principal/i.test(String(item.name || "")))
+        || (Array.isArray(warehouses) ? warehouses : [])[0];
+      const warehouseLatitude = Number(warehouse?.latitude);
+      const warehouseLongitude = Number(warehouse?.longitude);
+      const warehouseHasCoordinates = Number.isFinite(warehouseLatitude) && Number.isFinite(warehouseLongitude) && warehouseLatitude !== 0 && warehouseLongitude !== 0;
+      const nextOrigin = warehouseHasCoordinates
+        ? { latitude: warehouseLatitude, longitude: warehouseLongitude, label: warehouse.name || "Almacén" }
+        : /getafe/i.test(String(warehouse?.address || warehouse?.name || ""))
+          ? { latitude: 40.3083, longitude: -3.7327, label: "Getafe (estimación)" }
+          : { latitude: 40.4168, longitude: -3.7038, label: "Madrid (estimación)" };
+      const prepared = (Array.isArray(shipmentRows) ? shipmentRows : [])
+        .filter((item: any) => ["Preparado", "Preparado con incidencia"].includes(String(item.status || "")))
+        .map((item: any) => {
+          const point = (Array.isArray(points) ? points : []).find((row: any) => Number(row.id) === Number(item.collection_point_id));
+          const client = (Array.isArray(clients) ? clients : []).find((row: any) => Number(row.id) === Number(item.client_id));
+          const latitude = Number(item.latitude ?? point?.latitude ?? client?.latitude);
+          const longitude = Number(item.longitude ?? point?.longitude ?? client?.longitude);
+          const located = Number.isFinite(latitude) && Number.isFinite(longitude) && latitude !== 0 && longitude !== 0;
+          return {
+            ...item,
+            client_name: client?.name || "Cliente sin nombre",
+            address: item.address || point?.address || client?.address || "",
+            city: item.delivery_city || point?.city || client?.city || "",
+            latitude: located ? latitude : null,
+            longitude: located ? longitude : null,
+            distance_km: located ? Number(haversineKm(nextOrigin.latitude, nextOrigin.longitude, latitude, longitude).toFixed(1)) : null,
+          };
+        });
+      setOrigin(nextOrigin);
+      setShipments(prepared);
+      setRoutes(Array.isArray(routeRows) ? routeRows : []);
+      setSelected([]);
+    } catch {
+      setError("No se han podido cargar los envíos preparados.");
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => { void load(); }, []);
+
+  const assignedByShipment = new Map<number, any>();
+  routes.forEach((route: any) => {
+    if (String(route.status || "") === "Cancelada") return;
+    (route.stops || []).forEach((stop: any) => assignedByShipment.set(Number(stop.shipment_id), route));
+  });
+  const dayShipments = shipments
+    .filter((item) => String(item.expected_delivery_at || item.delivery_date || item.preparation_date || "").slice(0, 10) === routeDate)
+    .sort((a, b) => (Number(b.distance_km ?? -1) - Number(a.distance_km ?? -1)) || String(a.address || "").localeCompare(String(b.address || ""), "es", { numeric: true }));
+  const unassigned = dayShipments.filter((item) => !assignedByShipment.has(Number(item.id)));
+
+  async function createVehicleLoad() {
+    if (!selected.length) { setError("Selecciona al menos un envío preparado."); return; }
+    if (!String(vehicle).trim()) { setError("Indica el camión o matrícula."); return; }
+    if (!String(driver).trim()) { setError("Indica el conductor."); return; }
+    setSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch("/api/routes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Usuario local" },
+        body: JSON.stringify({ route_date: routeDate, shipment_ids: selected, driver: driver.trim(), vehicle: vehicle.trim(), origin_latitude: origin.latitude, origin_longitude: origin.longitude, origin_address: origin.label }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "No se ha podido asignar la carga.");
+      setRoutes((current) => [body, ...current]);
+      setSelected([]);
+      setMessage(`Carga ${body.code} asignada a ${vehicle.trim()} · ${driver.trim()}.`);
+    } catch (reason: any) {
+      setError(reason?.message || "No se ha podido asignar la carga.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <section className="vehicle-load-manager">
+    <div className="manager-head">
+      <div><p className="eyebrow">LOGÍSTICA · SALIDA</p><h2>Carga de vehículos</h2><p className="muted">Asigna los pedidos preparados a un camión y un conductor antes de salir.</p></div>
+      <button type="button" className="button secondary" onClick={() => void load()}>Actualizar</button>
+    </div>
+    <div className="vehicle-load-toolbar">
+      <label>Fecha de salida<input type="date" value={routeDate} onChange={(event) => { setRouteDate(event.target.value); setSelected([]); }} /></label>
+      <label>Camión / matrícula<input value={vehicle} onChange={(event) => setVehicle(event.target.value)} placeholder="Ej. 1234-ABC" /></label>
+      <label>Conductor<input value={driver} onChange={(event) => setDriver(event.target.value)} placeholder="Nombre del conductor" /></label>
+      <div className="vehicle-load-origin"><span>Ordenado desde</span><b>{origin.label}</b><small>Distancias estimadas en línea recta</small></div>
+    </div>
+    {error && <p className="error-message" role="alert">{error}</p>}
+    {message && <p className="success-message" role="status">{message}</p>}
+    <section className="vehicle-load-panel panel">
+      <div className="panel-head"><div><h3>Pedidos preparados</h3><p className="muted">{dayShipments.length} envíos · {unassigned.length} sin asignar · más lejanos primero</p></div><button type="button" className="button primary" disabled={saving || !selected.length} onClick={() => void createVehicleLoad()}>{saving ? "Asignando…" : `Asignar seleccionados (${selected.length})`}</button></div>
+      {loading ? <div className="data-loading" role="status"><LoadingIndicator label="Cargando pedidos preparados…" /></div> : <div className="vehicle-load-list">
+        {dayShipments.length ? dayShipments.map((item: any) => {
+          const route = assignedByShipment.get(Number(item.id));
+          const isSelected = selected.includes(Number(item.id));
+          return <article className={`vehicle-load-row${route ? " is-assigned" : ""}${isSelected ? " is-selected" : ""}`} key={item.id}>
+            <label className="vehicle-load-check"><input type="checkbox" checked={isSelected} disabled={Boolean(route)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, Number(item.id)] : current.filter((id) => id !== Number(item.id)))} aria-label={`Seleccionar ${item.code}`} /></label>
+            <div className="vehicle-load-distance"><b>{item.distance_km === null ? "—" : `${String(item.distance_km).replace(".", ",")} km`}</b><small>{item.distance_km === null ? "Sin coordenadas" : "desde almacén"}</small></div>
+            <div className="vehicle-load-main"><b>{item.code}</b><strong>{item.client_name}</strong><span>{[item.address, item.city].filter(Boolean).join(" · ") || "Dirección no indicada"}</span><small>{item.packages || 1} bultos · Estado: {item.status}</small></div>
+            <div className="vehicle-load-notes"><span><b>Nota de carga</b>{item.notes || "Sin indicaciones"}</span><span><b>Nota del repartidor</b>{item.driver_notes || "Sin indicaciones"}</span></div>
+            <div className="vehicle-load-assignment">{route ? <><b>Asignado</b><span>{route.vehicle || "Sin camión"}</span><small>{route.driver || "Sin conductor"} · {route.code}</small></> : <span className="vehicle-load-pending">Pendiente de asignar</span>}</div>
+          </article>;
+        }) : <p className="empty-state">No hay pedidos preparados para el {formatSpanishDateValue(routeDate, false)}.</p>}
+      </div>}
+    </section>
+  </section>;
 }
 
 function BackupsManager({ user }: { user: any }) {
@@ -3726,7 +3869,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         delivery_window_start: row.delivery_window_start || point?.opening_time || client?.opening_time || null,
         delivery_window_end: row.delivery_window_end || point?.closing_time || client?.closing_time || null,
         prepared_by: "",
-        notes: row.notes || "Nota de carga creada desde el pedido.",
+        notes: row.loading_notes || row.notes || "Nota de carga creada desde el pedido.",
+        driver_notes: row.driver_notes || "",
         urgent: Number(row.urgent || 0),
       }),
     });
@@ -5430,8 +5574,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         <select aria-label={c.labels[i]} value={form[f] ?? (active === "Pedidos" ? "Nuevo" : "Pendiente")} onChange={(e) => handleFormChange(f, e.target.value)}>
           {(active === "Facturas" ? ["Proforma", "Pendiente", "Parcial", "Cobrada", "Vencida", "Anulada"] : [...(active === "Documentos" ? ["Activa", "Borrador", "Archivada"] : []), ...(active === "Pedidos" ? ["Nuevo"] : []), "Pendiente", "Confirmado", "Preparando", "Preparado", "Enviado", "Entregado", "Cancelado", "Cobrada"]).map((s) => <option key={s}>{s}</option>)}
         </select>
-      ) : ["content", "description"].includes(f) || (active === "Pedidos" && f === "notes") ? (
-        <textarea aria-label={c.labels[i]} required={active === "Productos" && f === "description" ? true : !['description', 'notes'].includes(f)} value={form[f] ?? ""} onChange={(e) => handleFormChange(f, e.target.value)} />
+      ) : ["content", "description"].includes(f) || (active === "Pedidos" && ["loading_notes", "driver_notes", "notes"].includes(f)) ? (
+        <textarea aria-label={c.labels[i]} required={active === "Productos" && f === "description" ? true : !["description", "notes", "loading_notes", "driver_notes"].includes(f)} value={form[f] ?? ""} onChange={(e) => handleFormChange(f, e.target.value)} />
       ) : (
         <input
           required={active === "Productos"
@@ -5670,7 +5814,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             <details className="order-general-accordion" open>
               <summary><b>Datos generales del pedido</b><span><em className="order-created-date">Fecha del pedido: {formatSpanishDateValue(String(form.created_at || tabletTodayInput()).slice(0, 10), false)}</em> · {orderGeneralComplete ? <em className="accordion-complete" title="Campos obligatorios completos">✓ Completo</em> : <em className="accordion-pending">Pendiente de completar</em>} · Mostrar más/menos</span></summary>
               <div className="order-general-fields">
-                {c.fields.filter((f: string) => !["product_id", "quantity", "unit_price", "discount", "amount", "billing_status", "payment_status", "shipping_status", "prepared_by", "shipped_by", "delivered_by", "delivery_date", ...orderScheduleFields].includes(f)).map((f: string) => renderFormField(f, c.fields.indexOf(f)))}
+                {c.fields.filter((f: string) => !["product_id", "quantity", "unit_price", "discount", "amount", "billing_status", "payment_status", "shipping_status", "prepared_by", "shipped_by", "delivered_by", "delivery_date", "notes", ...orderScheduleFields].includes(f)).map((f: string) => renderFormField(f, c.fields.indexOf(f)))}
               </div>
             </details>
             <section className="order-schedule-panel" aria-labelledby="order-schedule-title">
@@ -11446,6 +11590,8 @@ function CrmHome({ routeMode = "crm" }: { routeMode?: keyof typeof routeModuleSc
             <TrashManager user={currentUser} />
           ) : active === "Rutas" ? (
             <RoutesManager user={currentUser} />
+          ) : active === "Carga de vehículos" ? (
+            <VehicleLoadManager user={currentUser} />
           ) : active === "Copias de seguridad" ? (
             <BackupsManager user={currentUser} />
           ) : (

@@ -85,7 +85,8 @@ const migrationsByTable = {
     ["table", "CREATE TABLE IF NOT EXISTS delivery_routes(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,route_date TEXT NOT NULL,driver TEXT,vehicle TEXT,status TEXT DEFAULT 'Planificada',radius_meters REAL DEFAULT 150,origin_address TEXT,origin_latitude REAL,origin_longitude REAL,notes TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT)"],
   ],
   delivery_route_stops: [
-    ["table", "CREATE TABLE IF NOT EXISTS delivery_route_stops(id INTEGER PRIMARY KEY AUTOINCREMENT,route_id INTEGER NOT NULL,position INTEGER NOT NULL,shipment_id INTEGER,client_id INTEGER,collection_point_id INTEGER,client_name TEXT,address TEXT,city TEXT,latitude REAL,longitude REAL,distance_km REAL DEFAULT 0,status TEXT DEFAULT 'Pendiente',notes TEXT,created_at TEXT,updated_at TEXT)"],
+    ["table", "CREATE TABLE IF NOT EXISTS delivery_route_stops(id INTEGER PRIMARY KEY AUTOINCREMENT,route_id INTEGER NOT NULL,position INTEGER NOT NULL,shipment_id INTEGER,client_id INTEGER,collection_point_id INTEGER,client_name TEXT,address TEXT,city TEXT,latitude REAL,longitude REAL,distance_km REAL DEFAULT 0,status TEXT DEFAULT 'Pendiente',notes TEXT,driver_notes TEXT,created_at TEXT,updated_at TEXT)"],
+    ["driver_notes", "ALTER TABLE delivery_route_stops ADD COLUMN driver_notes TEXT"],
   ],
   order_lines: [
     ["order_line_lots_table", "CREATE TABLE IF NOT EXISTS order_line_lots(id INTEGER PRIMARY KEY AUTOINCREMENT,order_line_id INTEGER NOT NULL,lot_id INTEGER,lot_code TEXT,expiry_date TEXT,quantity REAL DEFAULT 0,created_at TEXT,updated_at TEXT)"],
@@ -109,6 +110,8 @@ const migrationsByTable = {
     ["discount", "ALTER TABLE orders ADD COLUMN discount REAL DEFAULT 0"],
     ["vat", "ALTER TABLE orders ADD COLUMN vat REAL DEFAULT 21"],
     ["notes", "ALTER TABLE orders ADD COLUMN notes TEXT"],
+    ["loading_notes", "ALTER TABLE orders ADD COLUMN loading_notes TEXT"],
+    ["driver_notes", "ALTER TABLE orders ADD COLUMN driver_notes TEXT"],
     ["delivery_date", "ALTER TABLE orders ADD COLUMN delivery_date TEXT"],
     ["address", "ALTER TABLE orders ADD COLUMN address TEXT"],
     ["collection_point_id", "ALTER TABLE orders ADD COLUMN collection_point_id INTEGER"],
@@ -255,6 +258,7 @@ const migrationsByTable = {
     ["delivery_window_start", "ALTER TABLE shipments ADD COLUMN delivery_window_start TEXT"],
     ["delivery_window_end", "ALTER TABLE shipments ADD COLUMN delivery_window_end TEXT"],
     ["notes", "ALTER TABLE shipments ADD COLUMN notes TEXT"],
+    ["driver_notes", "ALTER TABLE shipments ADD COLUMN driver_notes TEXT"],
     ["preparation_started_at", "ALTER TABLE shipments ADD COLUMN preparation_started_at TEXT"],
     ["preparation_started_by", "ALTER TABLE shipments ADD COLUMN preparation_started_by TEXT"],
     ["stock_released_at", "ALTER TABLE shipments ADD COLUMN stock_released_at TEXT"],
@@ -337,6 +341,7 @@ for (const sql of [
   "CREATE INDEX IF NOT EXISTS idx_web_promotions_status_dates ON web_promotions(status, start_at, end_at)",
 ]) await client.execute(sql);
 await client.execute("INSERT OR IGNORE INTO invoice_orders(invoice_id,order_id) SELECT id,order_id FROM invoices WHERE order_id IS NOT NULL");
+await client.execute("UPDATE orders SET loading_notes=notes WHERE loading_notes IS NULL AND TRIM(COALESCE(notes,''))<>''");
 const shipmentRows = await client.execute("SELECT id,public_tracking_token FROM shipments WHERE public_tracking_token IS NULL OR TRIM(public_tracking_token)='' LIMIT 5000");
 for (const row of shipmentRows.rows) {
   const token = randomBytes(24).toString("base64url");
