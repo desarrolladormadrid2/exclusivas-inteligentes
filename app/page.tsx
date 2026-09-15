@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.131";
+const APP_VERSION = "2.0.132";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -2342,6 +2342,7 @@ export function SupplierOfferPortal() {
 function PreparationDayCards({ rows, lookups, onOpen, onOpenCollective, dateFilter, onDateFilterChange }: { rows: any[]; lookups: any; onOpen: (row: any) => void; onOpenCollective: () => void; dateFilter: string; onDateFilterChange: (value: string) => void }) {
   const today = tabletTodayInput();
   const tomorrow = tabletDateOffset(1);
+  const collectiveDateAllowed = dateFilter === today || dateFilter === tomorrow;
   const getClient = (id: any) => (lookups.clients || []).find((item: any) => Number(item.id) === Number(id));
   const items = rows.filter((row) => !dateFilter || String(row.preparation_date || "").slice(0, 10) === dateFilter).sort((a, b) => Number(b.urgent || 0) - Number(a.urgent || 0) || String(a.address || "").localeCompare(String(b.address || ""), "es", { numeric: true }));
   const groups = [
@@ -2352,14 +2353,13 @@ function PreparationDayCards({ rows, lookups, onOpen, onOpenCollective, dateFilt
     { key: "paused", title: "Bloqueados / pospuestos", hint: "Fuera del circuito", match: (row: any) => ["Bloqueado", "Pospuesto"].includes(row.status || "") },
   ];
   const renderCard = (row: any) => { const client = getClient(row.client_id); const clientLabel = lookups.clients ? (client?.name || "Cliente no identificado") : "Cargando cliente…"; const address = typeof row.address === "string" ? row.address : row.address?.address || row.address?.name || "Dirección no indicada"; const progress = row.preparation_progress; return <button type="button" key={row.id} className={`prep-order-card${Number(row.urgent) === 1 ? " is-urgent" : ""}${row.status === "Preparado" ? " is-completed" : ""}${row.status === "Preparado con incidencia" ? " has-incident" : ""}`} onClick={() => onOpen(row)}><span className="prep-card-top"><b>{row.code}</b><em>{Number(row.urgent) === 1 ? "URGENTE" : row.status || "Pendiente"}</em></span><strong>{clientLabel}</strong><span>{address}</span><span className="prep-card-meta">Entrega: {formatSpanishDateValue(row.delivery_date || row.expected_delivery_at, false)}{row.packages ? ` · ${row.packages} bultos` : ""}</span>{progress ? <span className="prep-card-prepared"><b>Preparadas</b> {progress.preparedLines}/{progress.totalLines} líneas · {progress.preparedQuantity}/{progress.requestedQuantity} uds.</span> : <span className="prep-card-prepared is-loading"><b>Preparadas</b> calculando…</span>}<small>{row.notes || "Sin observaciones"}</small><i>▶ Abrir comanda</i></button>; };
-  return <section className="prep-command-board" aria-label="Comandas de preparación"><div className="prep-command-toolbar"><div className="prep-command-toolbar-title"><b>Pedidos para preparar</b><span>{dateFilter ? `Preparación del ${formatSpanishDateValue(dateFilter, false)}` : "Todas las preparaciones"}</span></div><div className="prep-command-filters"><label>Preparar el día<input type="date" value={dateFilter} onChange={(event) => onDateFilterChange(event.target.value)} /></label><button type="button" className={`button ${dateFilter === today ? "primary" : "secondary"}`} aria-pressed={dateFilter === today} onClick={() => onDateFilterChange(today)}>Hoy</button><button type="button" className={`button ${dateFilter === tomorrow ? "primary" : "secondary"}`} aria-pressed={dateFilter === tomorrow} onClick={() => onDateFilterChange(tomorrow)}>Mañana</button><button type="button" className={`button ${dateFilter === "" ? "primary" : "secondary"}`} aria-pressed={dateFilter === ""} onClick={() => onDateFilterChange("")}>Todos</button><button type="button" className="button primary prep-collective-button" onClick={onOpenCollective}>Orden de carga colectiva</button></div></div><div className="prep-command-summary"><span><b>{items.length}</b> pedidos</span><span><b>{items.filter((row) => Number(row.urgent) === 1).length}</b> urgentes</span><span><b>{items.filter((row) => row.status === "Preparado con incidencia").length}</b> con incidencia</span><span className="prep-command-summary-hint">Pulsa una comanda para revisar sus líneas</span></div>{!items.length ? <div className="prep-command-empty"><b>{dateFilter ? "No hay pedidos para esta fecha" : "No hay pedidos pendientes"}</b><span>{dateFilter ? "Prueba otra fecha o pulsa “Todos”." : "Cuando se creen preparaciones aparecerán aquí."}</span></div> : <div className="prep-command-columns">{groups.map((group) => { const groupItems = items.filter(group.match); return <section className={`prep-command-column prep-command-${group.key}`} key={group.key}><header><div><b>{group.title}</b><small>{group.hint}</small></div><strong>{groupItems.length}</strong></header><div>{groupItems.map(renderCard)}{!groupItems.length && <p className="prep-command-none">Sin pedidos</p>}</div></section>; })}</div>}</section>;
+  return <section className="prep-command-board" aria-label="Comandas de preparación"><div className="prep-command-toolbar"><div className="prep-command-toolbar-title"><b>Pedidos para preparar</b><span>{dateFilter ? `Preparación del ${formatSpanishDateValue(dateFilter, false)}` : "Todas las preparaciones"}</span></div><div className="prep-command-filters"><label>Preparar el día<input type="date" value={dateFilter} onChange={(event) => onDateFilterChange(event.target.value)} /></label><button type="button" className={`button ${dateFilter === today ? "primary" : "secondary"}`} aria-pressed={dateFilter === today} onClick={() => onDateFilterChange(today)}>Hoy</button><button type="button" className={`button ${dateFilter === tomorrow ? "primary" : "secondary"}`} aria-pressed={dateFilter === tomorrow} onClick={() => onDateFilterChange(tomorrow)}>Mañana</button><button type="button" className={`button ${dateFilter === "" ? "primary" : "secondary"}`} aria-pressed={dateFilter === ""} onClick={() => onDateFilterChange("")}>Todos</button><button type="button" className="button primary prep-collective-button" disabled={!collectiveDateAllowed} title={collectiveDateAllowed ? "Preparar la carga del día seleccionado" : "La carga colectiva sólo puede ser de hoy o de mañana"} onClick={onOpenCollective}>Orden de carga colectiva</button></div></div><div className="prep-command-summary"><span><b>{items.length}</b> pedidos</span><span><b>{items.filter((row) => Number(row.urgent) === 1).length}</b> urgentes</span><span><b>{items.filter((row) => row.status === "Preparado con incidencia").length}</b> con incidencia</span><span className="prep-command-summary-hint">Pulsa una comanda para revisar sus líneas</span></div>{!items.length ? <div className="prep-command-empty"><b>{dateFilter ? "No hay pedidos para esta fecha" : "No hay pedidos pendientes"}</b><span>{dateFilter ? "Prueba otra fecha o pulsa “Todos”." : "Cuando se creen preparaciones aparecerán aquí."}</span></div> : <div className="prep-command-columns">{groups.map((group) => { const groupItems = items.filter(group.match); return <section className={`prep-command-column prep-command-${group.key}`} key={group.key}><header><div><b>{group.title}</b><small>{group.hint}</small></div><strong>{groupItems.length}</strong></header><div>{groupItems.map(renderCard)}{!groupItems.length && <p className="prep-command-none">Sin pedidos</p>}</div></section>; })}</div>}</section>;
 }
 
 function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { rows: any[]; lookups: any; dateFilter: string; actor: string; onClose: () => void }) {
   const [sourceLines, setSourceLines] = useState<any[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [barcodeDrafts, setBarcodeDrafts] = useState<Record<string, string>>({});
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [editingLineIds, setEditingLineIds] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<number | null>(null);
@@ -2369,10 +2369,10 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
   const [incidentSaving, setIncidentSaving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [selectedGroups, setSelectedGroups] = useState<Record<string, boolean>>({});
   const items = rows
     .filter((row) => !dateFilter || String(row.preparation_date || row.delivery_date || row.expected_delivery_at || "").slice(0, 10) === dateFilter)
     .filter((row) => !["Cancelado", "Anulado"].includes(String(row.status || "")));
+  const collectiveDateAllowed = dateFilter === tabletTodayInput() || dateFilter === tabletDateOffset(1);
   const orderIds = Array.from(new Set(items.map((row) => Number(row.order_id || row._source_order_id || 0)).filter(Boolean)));
   const orderKey = orderIds.join(",");
   const getProduct = (line: any) => (lookups.products || []).find((product: any) => Number(product.id) === Number(line.product_id));
@@ -2450,6 +2450,10 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
 
   async function closeCollectiveLoad() {
     if (!readyToClose || closing) return;
+    if (!collectiveDateAllowed) {
+      setError("La carga colectiva sólo puede hacerse para hoy o mañana. Selecciona una fecha válida.");
+      return;
+    }
     const targets = Array.from(new Map(items.map((item) => [Number(item.id), item])).values());
     if (!targets.length) {
       setError("No hay pedidos preparados para cerrar en esta fecha.");
@@ -2580,30 +2584,27 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
 
   return <div className="collective-load-overlay" role="dialog" aria-modal="true" aria-label="Orden de carga colectiva" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section className="collective-load-modal" onClick={(event) => event.stopPropagation()}>
-      <header className="collective-load-header"><div><p className="eyebrow">LOGÍSTICA · PREPARACIÓN</p><h2>Orden de carga colectiva</h2><small>{dateFilter ? `Preparación del ${formatSpanishDateValue(dateFilter, false)}` : "Todas las preparaciones"} · artículos ordenados por ubicación</small></div><button type="button" className="preview-close collective-load-close" aria-label="Cerrar" onClick={onClose}>×</button></header>
-      <div className="collective-load-summary"><span><b>{items.length}</b> pedidos</span><span><b>{groups.length}</b> referencias</span><span><b>{sourceLines.filter(lineIsValidated).length}/{sourceLines.length}</b> líneas validadas</span><span><b>{groups.filter((group: any) => selectedGroups[String(group.key)]).length}</b> artículos seleccionados</span><span><b>{Math.max(0, groups.reduce((total: number, group: any) => total + group.requested - group.prepared, 0))}</b> unidades pendientes</span></div>
-      <div className="collective-load-note"><b>Edición segura</b><span>La cantidad y la validación se guardan en la línea del pedido original. Si un artículo aparece en varios pedidos, despliega su registro para trabajar cada pedido por separado.</span></div>
+      <header className="collective-load-header"><div><p className="eyebrow">LOGÍSTICA · PREPARACIÓN</p><h2>Orden de carga colectiva</h2><small>Día de preparación: {dateFilter ? formatSpanishDateValue(dateFilter, false) : "Sin fecha"} · artículos ordenados por ubicación</small></div><button type="button" className="preview-close collective-load-close" aria-label="Cerrar" onClick={onClose}>×</button></header>
+      <div className="collective-load-summary"><span><b>{items.length}</b> pedidos</span><span><b>{groups.length}</b> referencias</span><span><b>{sourceLines.filter(lineIsValidated).length}/{sourceLines.length}</b> líneas validadas</span><span><b>{Math.max(0, groups.reduce((total: number, group: any) => total + group.requested - group.prepared, 0))}</b> unidades pendientes</span></div>
+      <div className="collective-load-note"><b>Validación por línea</b><span>Cada pedido aparece ya separado. Escanea el código de barras o escríbelo y comprueba la cantidad antes de validar.</span></div>
       {error && <p className="collective-load-feedback error-message" role="alert">{error}</p>}
       {message && <p className="collective-load-feedback success-message" role="status">{message}</p>}
       {loading ? <div className="collective-load-empty"><span className="loading-spinner" /><p>Cargando artículos de los pedidos…</p></div> : !groups.length ? <div className="collective-load-empty"><b>No hay artículos para esta fecha</b><span>Prueba otra fecha o vuelve a “Todos”.</span></div> : (
         <div className="collective-load-list">
-          <div className="collective-load-grid collective-load-grid-head"><b aria-hidden="true" /><b>Ubicación</b><b>Artículo</b><b>Pedidos</b><b>Cantidad</b><b>Preparada</b><b>Estado</b></div>
+          <div className="collective-load-grid collective-load-grid-head"><b>Ubicación</b><b>Artículo</b><b>Pedidos</b><b>Cantidad</b><b>Preparada</b><b>Estado</b></div>
           {groups.map((group: any) => {
             const complete = group.lines.length > 0 && group.lines.every(lineIsValidated);
             const groupKey = String(group.key);
-            const selected = Boolean(selectedGroups[groupKey]);
-            const toggleGroup = () => setExpanded((current) => ({ ...current, [groupKey]: !current[groupKey] }));
-            return <article className={`collective-load-record${complete ? " is-validated" : " is-pending"}${selected ? " is-selected" : ""}`} key={groupKey}>
+            return <article className={`collective-load-record${complete ? " is-validated" : " is-pending"}`} key={groupKey}>
               <div className="collective-load-grid collective-load-record-main">
-                <label className="collective-load-select"><input type="checkbox" checked={selected} onChange={(event) => setSelectedGroups((current) => ({ ...current, [groupKey]: event.target.checked }))} aria-label={`Seleccionar ${group.product?.name || "artículo"}`} /><span>Seleccionar</span></label>
                  <strong className="collective-load-group-location">{group.location}</strong>
-                 <div className="collective-load-article-toggle collective-load-group-article" role="button" tabIndex={0} aria-expanded={Boolean(expanded[groupKey])} title="Abrir o cerrar los envíos de este artículo" onClick={toggleGroup} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggleGroup(); } }}><b>{group.product?.sku || "Sin SKU"}</b><span>{group.product?.name || `Producto #${group.lines[0]?.product_id || "—"}`}</span></div>
+                 <div className="collective-load-group-article"><b>{group.product?.sku || "Sin SKU"}</b><span>{group.product?.name || `Producto #${group.lines[0]?.product_id || "—"}`}</span></div>
                  <span className="collective-load-group-orders">{group.lines.length} {group.lines.length === 1 ? "pedido" : "pedidos"}</span>
                  <strong className="collective-load-group-quantity">{group.requested} {quantityUnitLabel(group.lines[0]?.quantity_unit || group.product?.unit)}</strong>
                  <strong className="collective-load-group-prepared">{group.prepared} / {group.requested}</strong>
                  <span className={`collective-load-status collective-load-group-status${complete ? " valid" : " pending"}`}>{complete ? "Artículo completo" : "Pendiente"}</span>
               </div>
-              {expanded[groupKey] && <div className="collective-load-source-lines">
+              <div className="collective-load-source-lines">
                 <div className="collective-load-source-head"><b>Pedido</b><b>Ubicación</b><b>Lote / caducidad</b><b>Código de barras</b><b>Preparada</b><b>Estado</b><b>Acciones</b></div>
                 {group.lines.map((line: any) => {
                  const product = getProduct(line);
@@ -2626,7 +2627,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
                      <div className="collective-load-source-actions">{validated && !editing ? <button type="button" className="row-action workflow" disabled={savingId !== null || incidentSaving} onClick={() => setEditingLineIds((current) => ({ ...current, [String(line.id)]: true }))}>Editar línea</button> : Number(drafts[String(line.id)] ?? defaultDraftQuantity(line)) < requestedQuantity(line) ? <button type="button" className="row-action danger" disabled={incidentSaving || savingId !== null} onClick={() => { setIncidentLineId(Number(line.id)); setIncidentText(""); setError(""); }}>{incident ? "Revisar incidencia" : "Registrar incidencia"}</button> : <button type="button" className="row-action workflow" disabled={savingId !== null || incidentSaving} onClick={() => void saveLine(line)}>{savingId === line.id ? "Guardando…" : editing ? "Guardar cambios" : "Validar"}</button>}</div>
                    </div>;
                  })}
-              </div>}
+              </div>
             </article>;
           })}
         </div>
@@ -10782,12 +10783,11 @@ function WarehouseIncidentManager({ user }: { user: any }) {
 function WarehouseTabletApp() {
   const [currentUser, setCurrentUser] = useState<any>(() => ({ id: 0, username: "Luis", role: "admin", permissions: "*" }));
   const [active, setActive] = useState(() => {
-    if (typeof window === "undefined") return "Preparación de pedidos";
-    try { return localStorage.getItem("excluvas.warehouse-section") || "Preparación de pedidos"; } catch { return "Preparación de pedidos"; }
+    return "Preparación de pedidos";
   });
   const sections = [
     { id: "Preparación de pedidos", short: "Preparación", icon: "preparation", hint: "Prepara y valida las líneas" },
-    { id: "Carga de vehículos", short: "Carga vehículo", icon: "warehouse", hint: "Asigna pedidos al camión" },
+    { id: "Carga de vehículos", short: "Carga", icon: "warehouse", hint: "Asigna pedidos al camión" },
     { id: "Entradas", short: "Entradas", icon: "upload", hint: "Recepciona mercancía" },
     { id: "Crear incidencia", short: "Incidencia", icon: "template", hint: "Registra un problema" },
   ] as const;
@@ -10802,7 +10802,6 @@ function WarehouseTabletApp() {
   }, []);
   useEffect(() => {
     if (!sections.some((section) => section.id === active)) setActive("Preparación de pedidos");
-    try { localStorage.setItem("excluvas.warehouse-section", active); } catch {}
   }, [active]);
   function logout() {
     localStorage.removeItem("excluvas.session");
@@ -10832,7 +10831,7 @@ function WarehouseTabletApp() {
       <a className="warehouse-tablet-brand" href="/almacen" aria-label="Vista almacén"><span className="warehouse-brand-mark">E</span><span><b>Exclusivas</b><small>Almacén operativo</small></span></a>
       <div className="warehouse-tablet-header-actions"><span><b>{currentUser.username}</b><small>{currentUser.role === "admin" ? "Administrador" : "Almacén"}</small></span><div className="warehouse-tablet-quick-actions" aria-label="Acciones de la vista"><button type="button" className="warehouse-tablet-icon-button" onClick={printWarehouseView} aria-label="Imprimir vista" title="Imprimir vista"><ToolbarIcon name="print" /></button><button type="button" className="warehouse-tablet-icon-button" onClick={downloadWarehouseExcel} aria-label="Descargar Excel" title="Descargar Excel"><ToolbarIcon name="download" /></button></div><a href="/crm" className="button secondary">CRM completo</a><button type="button" className="button secondary" onClick={logout}>Salir</button></div>
     </header>
-    <nav className="warehouse-tablet-nav" aria-label="Secciones de almacén">{sections.map((section) => <button type="button" key={section.id} className={active === section.id ? "is-active" : ""} aria-pressed={active === section.id} onClick={() => setActive(section.id)}><span className="warehouse-nav-icon"><ToolbarIcon name={section.icon} /></span><span><b>{section.short}</b><small>{section.hint}</small></span></button>)}</nav>
+    <nav className="warehouse-tablet-nav" aria-label="Secciones de almacén">{sections.map((section) => <button type="button" key={section.id} className={active === section.id ? "is-active" : ""} aria-pressed={active === section.id} onClick={() => setActive(section.id)}><b>{section.short}</b></button>)}</nav>
     <section className="warehouse-tablet-content">
       {active === "Preparación de pedidos" && <Manager active="Preparación de pedidos" user={currentUser} onNavigate={setActive} />}
       {active === "Carga de vehículos" && <VehicleLoadManager user={currentUser} />}
