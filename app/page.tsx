@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.135";
+const APP_VERSION = "2.0.136";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -2594,6 +2594,15 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
 
   const today = tabletTodayInput();
   const tomorrow = tabletDateOffset(1);
+  const displayLines = [...sourceLines].sort((a: any, b: any) => {
+    const productA = getProduct(a);
+    const productB = getProduct(b);
+    const locationA = warehouseLocationLabel(productA?.warehouse_location || a.warehouse_location);
+    const locationB = warehouseLocationLabel(productB?.warehouse_location || b.warehouse_location);
+    const orderA = String(items.find((item) => Number(item.order_id || item._source_order_id) === Number(a.order_id))?.code || a.order_id || "");
+    const orderB = String(items.find((item) => Number(item.order_id || item._source_order_id) === Number(b.order_id))?.code || b.order_id || "");
+    return String(locationA).localeCompare(String(locationB), "es", { numeric: true }) || String(productA?.name || "").localeCompare(String(productB?.name || ""), "es") || orderA.localeCompare(orderB, "es", { numeric: true });
+  });
   return <div className={`collective-load-overlay${embedded ? " is-embedded" : ""}`} role={embedded ? undefined : "dialog"} aria-modal={embedded ? undefined : true} aria-label="Orden de carga colectiva" onMouseDown={(event) => !embedded && event.target === event.currentTarget && onClose()}>
     <section className="collective-load-modal" onClick={(event) => event.stopPropagation()}>
       <header className="collective-load-header"><div><p className="eyebrow">LOGÍSTICA · PREPARACIÓN</p><h2>Orden de carga colectiva</h2><small>Día de preparación: {dateFilter ? formatSpanishDateValue(dateFilter, false) : "Sin fecha"} · artículos ordenados por ubicación</small></div>{!embedded && <button type="button" className="preview-close collective-load-close" aria-label="Cerrar" onClick={onClose}>×</button>}<div className="collective-load-date-toolbar" aria-label="Cambiar día de preparación"><label>Fecha<input type="date" value={dateFilter} onChange={(event) => onDateFilterChange?.(event.target.value)} /></label><button type="button" className={`button ${dateFilter === today ? "primary" : "secondary"}`} aria-pressed={dateFilter === today} onClick={() => onDateFilterChange?.(today)}>Hoy</button><button type="button" className={`button ${dateFilter === tomorrow ? "primary" : "secondary"}`} aria-pressed={dateFilter === tomorrow} onClick={() => onDateFilterChange?.(tomorrow)}>Mañana</button></div></header>
@@ -2602,7 +2611,32 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
       {error && <p className="collective-load-feedback error-message" role="alert">{error} <button type="button" className="collective-load-retry" onClick={() => setLoadAttempt((current) => current + 1)}>Reintentar</button></p>}
       {message && <p className="collective-load-feedback success-message" role="status">{message}</p>}
       {loading ? <div className="collective-load-empty"><span className="loading-spinner" /><p>Cargando artículos de los pedidos…</p></div> : !groups.length ? <div className="collective-load-empty"><b>No hay artículos para esta fecha</b><span>Prueba otra fecha o vuelve a “Todos”.</span></div> : (
-        <div className="collective-load-list">
+        <>
+          <div className="collective-load-list collective-load-simple-list">
+            <div className="collective-load-simple-head"><b>Pedido</b><b>Producto</b><b>Ubicación</b><b>Lote</b><b>Código de barras</b><b>Cantidad</b><b>Acción</b></div>
+            {displayLines.map((line: any) => {
+              const product = getProduct(line);
+              const validated = lineIsValidated(line);
+              const editing = Boolean(editingLineIds[String(line.id)]);
+              const incident = String(line.preparation_status || "") === "Incidencia";
+              const scannedCode = barcodeDraft(line);
+              const scannedStatus = barcodeCheck(line, scannedCode);
+              const barcodeMismatch = scannedStatus === "mismatch";
+              const order = items.find((item) => Number(item.order_id || item._source_order_id) === Number(line.order_id));
+              const lots = preparationLotAllocations(line).filter((lot: any) => lot.lot_code || lot.expiry_date || Number(lot.quantity) > 0);
+              const lineStateClass = barcodeMismatch ? " is-barcode-mismatch" : validated && !editing ? " is-validated" : incident ? " is-incident" : " is-pending";
+              return <article className={`collective-load-simple-row${lineStateClass}`} key={line.id}>
+                <div className="collective-load-simple-order"><b>{order?.code || `Pedido #${line.order_id}`}</b><span>{requestedQuantity(line)} {quantityUnitLabel(line.quantity_unit || product?.unit)}</span></div>
+                <div className="collective-load-simple-product"><b>{product?.name || `Producto #${line.product_id}`}</b><span>{product?.sku || "Sin SKU"}</span></div>
+                <div className="collective-load-simple-location"><b>Ubicación</b><span>{product?.warehouse_location ? warehouseLocationLabel(product.warehouse_location) : "Sin ubicación"}</span></div>
+                <div className="collective-load-simple-lot"><b>Lote</b><span>{lots.length ? lots.map((lot: any) => `${lot.lot_code || "Sin lote"}${lot.expiry_date ? ` · ${formatSpanishDateValue(lot.expiry_date, false)}` : ""}`).join(" · ") : "Sin lote"}</span></div>
+                <label className={`collective-load-simple-barcode collective-load-barcode-field barcode-${scannedStatus}`}><span>{expectedBarcode(line) ? `Esperado: ${expectedBarcode(line)}` : "Código de barras"}</span><input aria-label={`Código de barras de ${order?.code || `pedido ${line.order_id}`}`} value={scannedCode} placeholder={expectedBarcode(line) || "Escanea o escribe el código"} disabled={validated && !editing} onChange={(event) => setBarcodeDrafts((current) => ({ ...current, [String(line.id)]: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }} /><small>{scannedStatus === "match" ? "Código correcto" : scannedStatus === "mismatch" ? "Código no coincide" : scannedStatus === "no-expected" ? "Sin código esperado" : "Pendiente de escanear"}</small></label>
+                <label className="collective-load-simple-quantity">Cantidad<input type="number" min="0" max={requestedQuantity(line)} step="any" value={drafts[String(line.id)] ?? String(defaultDraftQuantity(line))} disabled={validated && !editing} onChange={(event) => setDrafts((current) => ({ ...current, [String(line.id)]: event.target.value }))} /></label>
+                <div className="collective-load-simple-action"><span className={`collective-load-status${validated && !editing ? " valid" : incident ? " incident" : " pending"}`}>{editing ? "Editando" : validated ? "Validada" : incident ? "Incidencia" : "Pendiente"}</span>{validated && !editing ? <button type="button" className="row-action workflow" disabled={savingId !== null || incidentSaving} onClick={() => setEditingLineIds((current) => ({ ...current, [String(line.id)]: true }))}>Editar</button> : Number(drafts[String(line.id)] ?? defaultDraftQuantity(line)) < requestedQuantity(line) ? <button type="button" className="row-action danger" disabled={incidentSaving || savingId !== null} onClick={() => { setIncidentLineId(Number(line.id)); setIncidentText(""); setError(""); }}>{incident ? "Revisar" : "Incidencia"}</button> : <button type="button" className="row-action workflow" disabled={savingId !== null || incidentSaving} onClick={() => void saveLine(line)}>{savingId === line.id ? "Guardando…" : editing ? "Guardar" : "Validar"}</button>}</div>
+              </article>;
+            })}
+          </div>
+          <div className="collective-load-list collective-load-legacy-list">
           <div className="collective-load-grid collective-load-grid-head"><b>Ubicación</b><b>Artículo</b><b>Pedidos</b><b>Cantidad</b><b>Preparada</b><b>Estado</b></div>
           {groups.map((group: any) => {
             const complete = group.lines.length > 0 && group.lines.every(lineIsValidated);
@@ -2643,6 +2677,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
             </article>;
           })}
         </div>
+        </>
       )}
        <footer className="collective-load-actions"><button type="button" className="button secondary collective-load-print" onClick={() => window.print()}>Imprimir listado</button><button type="button" className="button primary collective-load-close-action" disabled={!readyToClose || closing} onClick={() => void closeCollectiveLoad()}>{closing ? "Cerrando…" : readyToClose ? "Cerrar y pasar a vehículos" : "Completa las líneas para cerrar"}</button>{!embedded && <button type="button" className="button secondary" disabled={closing} onClick={onClose}>Cerrar</button>}</footer>
        {incidentLineId !== null && (() => { const incidentLine = sourceLines.find((line) => Number(line.id) === incidentLineId); if (!incidentLine) return null; const product = getProduct(incidentLine); const requested = requestedQuantity(incidentLine); const quantity = Math.max(0, Number(drafts[String(incidentLine.id)] ?? defaultDraftQuantity(incidentLine)) || 0); const missing = Math.max(0, requested - quantity); const order = items.find((item) => Number(item.order_id || item._source_order_id) === Number(incidentLine.order_id)); return <div className="collective-load-incident-overlay" role="dialog" aria-modal="true" aria-label="Registrar incidencia" onMouseDown={(event) => event.target === event.currentTarget && !incidentSaving && setIncidentLineId(null)}><section className="collective-load-incident-modal" onClick={(event) => event.stopPropagation()}><header><div><p className="eyebrow">PREPARACIÓN · INCIDENCIA</p><h3>Registrar incidencia</h3><small>{order?.code || `Pedido #${incidentLine.order_id}`} · {product?.name || `Producto #${incidentLine.product_id}`}</small></div><button type="button" className="preview-close" aria-label="Cerrar" disabled={incidentSaving} onClick={() => setIncidentLineId(null)}>×</button></header><div className="collective-load-incident-summary"><b>Preparadas: {quantity} de {requested}</b><span>Faltan {missing} {quantityUnitLabel(incidentLine.quantity_unit || product?.unit)}</span></div><label className="collective-load-incident-text">Qué ha ocurrido<textarea value={incidentText} onChange={(event) => setIncidentText(event.target.value)} placeholder={`Ej.: solo hay ${quantity} unidades disponibles.`} rows={4} autoFocus /></label><p className="collective-load-incident-help">La incidencia quedará vinculada al pedido y la línea seguirá marcada en rojo hasta resolverla.</p>{error && <p className="collective-load-feedback error-message" role="alert">{error}</p>}<footer><button type="button" className="button secondary" disabled={incidentSaving} onClick={() => setIncidentLineId(null)}>Cancelar</button><button type="button" className="button danger" disabled={incidentSaving} onClick={() => void registerLineIncident(incidentLine)}>{incidentSaving ? "Registrando…" : "Confirmar incidencia"}</button></footer></section></div>; })()}

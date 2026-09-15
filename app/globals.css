@@ -5775,3 +5775,153 @@ body:has(.warehouse-tablet-app) .settings-panel {
   font-size: 10px;
   font-weight: 700;
 }
+
+/* Hoja plana para el trabajo diario: una línea visible por pedido y producto. */
+.collective-load-overlay.is-embedded .collective-load-legacy-list {
+  display: none;
+}
+.collective-load-simple-list {
+  overflow: hidden;
+}
+.collective-load-simple-head,
+.collective-load-simple-row {
+  display: grid;
+  grid-template-columns: minmax(145px, 1.15fr) minmax(180px, 1.55fr) minmax(78px, .65fr) minmax(95px, .8fr) minmax(190px, 1.55fr) minmax(86px, .7fr) minmax(125px, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+.collective-load-simple-head {
+  padding: 8px 10px;
+  background: #f1f5f6;
+  color: #60737d;
+  font-size: 9px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.collective-load-simple-row {
+  min-height: 68px;
+  padding: 8px 10px;
+  border-top: 1px solid #dfe6e9;
+  border-left: 4px solid #d99a2b;
+  background: #fff;
+  color: #26343d;
+  font-size: 10px;
+}
+.collective-load-simple-row:first-of-type {
+  border-top: 0;
+}
+.collective-load-simple-row.is-validated {
+  border-left-color: #198754;
+  background: #f7fdf9;
+}
+.collective-load-simple-row.is-incident,
+.collective-load-simple-row.is-barcode-mismatch {
+  border-left-color: #b91c1c;
+  background: #fff8f8;
+}
+.collective-load-simple-row > div,
+.collective-load-simple-row > label {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+.collective-load-simple-order b,
+.collective-load-simple-product b {
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+.collective-load-simple-order span,
+.collective-load-simple-product span,
+.collective-load-simple-location span,
+.collective-load-simple-lot span {
+  overflow-wrap: anywhere;
+  color: #60737d;
+  font-size: 9px;
+}
+.collective-load-simple-location b,
+.collective-load-simple-lot b,
+.collective-load-simple-quantity,
+.collective-load-simple-barcode > span {
+  color: #60737d;
+  font-size: 9px;
+  font-weight: 700;
+}
+.collective-load-simple-barcode input,
+.collective-load-simple-quantity input {
+  width: 100%;
+  min-height: 32px;
+  box-sizing: border-box;
+  padding: 5px 7px;
+  border: 1px solid #b8cbd2;
+  background: #fff;
+  color: #26343d;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+}
+.collective-load-simple-barcode input:focus,
+.collective-load-simple-quantity input:focus {
+  border-color: #b91c1c;
+  outline: 2px solid #f3b4b8;
+  outline-offset: 1px;
+}
+.collective-load-simple-barcode > span,
+.collective-load-simple-barcode > small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.collective-load-simple-barcode > span {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 8px;
+}
+.collective-load-simple-barcode > small {
+  color: #71818a;
+  font-size: 8px;
+}
+.collective-load-simple-barcode.barcode-match > small { color: #087f5b; }
+.collective-load-simple-barcode.barcode-mismatch > small { color: #b91c1c; }
+.collective-load-simple-barcode.barcode-no-expected > small { color: #8a5a00; }
+.collective-load-simple-barcode.barcode-match input { border-color: #42a875; background: #f0fbf4; color: #087f5b; }
+.collective-load-simple-barcode.barcode-mismatch input { border-color: #d64545; background: #fff0f0; color: #b91c1c; }
+.collective-load-simple-barcode.barcode-no-expected input { border-color: #d9a441; background: #fffaf0; }
+.collective-load-simple-action {
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 5px !important;
+}
+.collective-load-simple-action .collective-load-status {
+  min-height: 22px;
+  padding: 2px 7px;
+  font-size: 9px;
+}
+.collective-load-simple-action .row-action {
+  min-height: 30px;
+  padding: 5px 8px;
+  white-space: nowrap;
+}
+@media (max-width: 850px) {
+  .collective-load-simple-head { display: none; }
+  .collective-load-simple-row {
+    grid-template-columns: minmax(0, 1.2fr) minmax(100px, .8fr);
+    grid-template-areas:
+      "order product"
+      "location lot"
+      "barcode barcode"
+      "quantity action";
+    gap: 7px 9px;
+    min-height: 0;
+    padding: 9px;
+  }
+  .collective-load-simple-order { grid-area: order; }
+  .collective-load-simple-product { grid-area: product; }
+  .collective-load-simple-location { grid-area: location; }
+  .collective-load-simple-lot { grid-area: lot; }
+  .collective-load-simple-barcode { grid-area: barcode; }
+  .collective-load-simple-quantity { grid-area: quantity; }
+  .collective-load-simple-action { grid-area: action; }
+  .collective-load-simple-action .collective-load-status,
+  .collective-load-simple-action .row-action { width: 100%; }
+}
