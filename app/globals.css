@@ -5902,26 +5902,53 @@ body:has(.warehouse-tablet-app) .settings-panel {
   padding: 5px 8px;
   white-space: nowrap;
 }
+/* Presentación definitiva: datos esenciales arriba y comprobación debajo. */
+.collective-load-simple-row {
+  display: block;
+  padding: 8px 10px;
+}
+.collective-load-simple-main {
+  display: grid !important;
+  grid-template-columns: minmax(78px, .55fr) minmax(0, 2fr) minmax(90px, .7fr);
+  gap: 8px;
+  align-items: center;
+}
+.collective-load-simple-main > .collective-load-simple-location {
+  color: #26343d;
+  font-size: 12px;
+  font-weight: 800;
+}
+.collective-load-simple-main > .collective-load-simple-product b {
+  color: #26343d;
+  font-size: 12px;
+}
+.collective-load-simple-main > .collective-load-simple-quantity {
+  display: grid !important;
+  gap: 3px;
+}
+.collective-load-simple-check {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 128px;
+  gap: 8px;
+  align-items: end;
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid #e5ecee;
+}
+.collective-load-simple-action {
+  min-width: 0;
+  justify-content: stretch;
+}
+.collective-load-simple-action .row-action {
+  width: 100%;
+}
 @media (max-width: 850px) {
   .collective-load-simple-head { display: none; }
   .collective-load-simple-row {
-    grid-template-columns: minmax(0, 1.2fr) minmax(100px, .8fr);
-    grid-template-areas:
-      "order product"
-      "location lot"
-      "barcode barcode"
-      "quantity action";
     gap: 7px 9px;
     min-height: 0;
     padding: 9px;
   }
-  .collective-load-simple-order { grid-area: order; }
-  .collective-load-simple-product { grid-area: product; }
-  .collective-load-simple-location { grid-area: location; }
-  .collective-load-simple-lot { grid-area: lot; }
-  .collective-load-simple-barcode { grid-area: barcode; }
-  .collective-load-simple-quantity { grid-area: quantity; }
-  .collective-load-simple-action { grid-area: action; }
-  .collective-load-simple-action .collective-load-status,
-  .collective-load-simple-action .row-action { width: 100%; }
+  .collective-load-simple-main { grid-template-columns: 72px minmax(0, 1fr) 92px; gap: 7px; }
+  .collective-load-simple-check { grid-template-columns: minmax(0, 1fr) 120px; gap: 7px; }
 }
