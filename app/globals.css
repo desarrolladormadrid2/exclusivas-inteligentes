@@ -5929,11 +5929,18 @@ body:has(.warehouse-tablet-app) .settings-panel {
 .collective-load-simple-check {
   display: grid !important;
   grid-template-columns: minmax(0, 1fr) 128px;
+  grid-template-areas: "barcode action";
   gap: 8px;
   align-items: end;
   margin-top: 7px;
   padding-top: 7px;
   border-top: 1px solid #e5ecee;
+}
+.collective-load-simple-check > .collective-load-simple-barcode {
+  grid-area: barcode !important;
+}
+.collective-load-simple-check > .collective-load-simple-action {
+  grid-area: action !important;
 }
 .collective-load-simple-action {
   min-width: 0;
