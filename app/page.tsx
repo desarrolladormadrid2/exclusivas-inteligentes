@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.128";
+const APP_VERSION = "2.0.129";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -10656,6 +10656,128 @@ export function OcrIntelligent({ user = { username: "Usuario local" } }: { user?
   return <section className="ocr-page"><div className="ocr-page-head"><div><p className="eyebrow">AUTOMATIZACIÓN DOCUMENTAL</p><h2>OCR inteligente</h2><p className="muted">Sube un documento para identificarlo y preparar sus datos para el CRM.</p></div></div><div className="ocr-tabs"><b>Nuevo documento</b><span>Historial {history.length}</span></div><div className={`ocr-dropzone${dragging ? " is-dragging" : ""}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); void selectFile(event.dataTransfer.files?.[0]); }}><span className="ocr-upload-icon">↑</span><h3>Arrastra tu documento aquí</h3><p className="muted">o selecciona un archivo desde tu dispositivo</p><label className="button primary">Subir archivo<input type="file" hidden onChange={(event) => void selectFile(event.target.files?.[0])} /></label><small>PDF, imágenes, Word, Excel, XML, CSV y cualquier otro formato · Máx. 25 MB</small></div>{loading && <div className="ocr-feedback" role="status">Analizando documento…</div>}{data && !loading && <div className="ocr-review"><div className="panel-head"><div><h3>Datos extraídos</h3><p className="muted">Revisa la clasificación antes de guardar.</p></div><span className="scanner-state ready">{data.document_type}</span></div><div className="ocr-fields"><label>Tipo de documento<select value={data.document_type} onChange={(event) => setData({ ...data, document_type: event.target.value })}><option>Factura</option><option>Presupuesto</option><option>Otro</option></select></label><label>Correo detectado<input value={data.email} onChange={(event) => setData({ ...data, email: event.target.value })} placeholder="No detectado" /></label><label>Importe / total<input value={data.total} onChange={(event) => setData({ ...data, total: event.target.value })} placeholder="No detectado" /></label></div><div className="ocr-actions"><button className="button primary" disabled={saving} onClick={() => void save()}>{saving ? "Guardando…" : "Guardar en el historial"}</button><button className="button secondary" onClick={() => { setFile(null); setData(null); }}>Descartar</button></div></div>}{message && <p className="ocr-message" role="status">{message}</p>}<div className="ocr-history"><div className="panel-head"><div><h3>Historial de documentos</h3><p className="muted">Documentos guardados y clasificados.</p></div></div>{history.length ? history.map((item) => <div className="ocr-history-row" key={item.id}><span className="file-icon">▤</span><div><b>{item.file_name}</b><small>{item.created_at ? formatSpanishDateValue(item.created_at, true) : "—"} · {item.created_by || "Usuario local"}</small></div><span className="scanner-state ready">{item.document_type || "Otro"}</span></div>) : <p className="muted empty-row">Aún no hay documentos procesados.</p>}</div></section>;
 }
 
+function WarehouseIncidentManager({ user }: { user: any }) {
+  const actor = user?.username || "Usuario local";
+  const [draft, setDraft] = useState({ area: "Preparación de pedidos", priority: "Urgente", reference: "", title: "", content: "" });
+  const [recent, setRecent] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  async function load() {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/notes");
+      const data = response.ok ? await response.json() : [];
+      setRecent((Array.isArray(data) ? data : []).filter((item: any) => ["Preparación de pedidos", "Carga de vehículos", "Entradas", "Stock", "Almacén"].includes(String(item.module || "")) && Number(item.deleted || 0) !== 1).slice(0, 8));
+    } catch {
+      setError("No se han podido cargar las incidencias recientes.");
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => { void load(); }, []);
+
+  async function createIncident(event: FormEvent) {
+    event.preventDefault();
+    if (!draft.title.trim() || !draft.content.trim()) {
+      setError("Indica un título y describe lo ocurrido.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      const content = [draft.reference.trim() ? `Referencia: ${draft.reference.trim()}` : "", draft.content.trim(), `Registrada por: ${actor}`].filter(Boolean).join("\n\n");
+      const response = await fetch("/api/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Actor": actor },
+        body: JSON.stringify({ title: `Incidencia · ${draft.title.trim()}`, content, priority: draft.priority, module: draft.area, important: 1, completed: 0, created_by: actor }),
+      });
+      const created = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(created.error || "No se pudo registrar la incidencia.");
+      setRecent((current) => [created, ...current].slice(0, 8));
+      setDraft((current) => ({ ...current, reference: "", title: "", content: "" }));
+      setMessage("Incidencia registrada y visible en el CRM.");
+    } catch (caught: any) {
+      setError(caught?.message || "No se pudo registrar la incidencia.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <section className="warehouse-incident-page">
+    <div className="warehouse-section-intro"><div><p className="eyebrow">ALMACÉN · AVISOS</p><h2>Crear incidencia</h2><p className="muted">Deja constancia de faltantes, daños, errores de ubicación o cualquier problema operativo.</p></div><span className="warehouse-section-counter">{recent.length} recientes</span></div>
+    <div className="warehouse-incident-layout">
+      <form className="warehouse-incident-form panel" onSubmit={createIncident}>
+        <div className="panel-head"><div><h3>Nueva incidencia</h3><p className="muted">Se guardará como nota pendiente para su revisión.</p></div></div>
+        <div className="warehouse-incident-fields">
+          <label>Área<select value={draft.area} onChange={(event) => setDraft({ ...draft, area: event.target.value })}><option>Preparación de pedidos</option><option>Carga de vehículos</option><option>Entradas</option><option>Stock</option></select></label>
+          <label>Prioridad<select value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: event.target.value })}><option>Urgente</option><option>Alta</option><option>Normal</option></select></label>
+          <label className="warehouse-incident-wide">Pedido, entrada o referencia<input value={draft.reference} onChange={(event) => setDraft({ ...draft, reference: event.target.value })} placeholder="Ej. ENV-2026-000123 · A-101" /></label>
+          <label className="warehouse-incident-wide">Título<input required value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Ej. Faltan 2 cajas de cerveza" /></label>
+          <label className="warehouse-incident-wide">Qué ha ocurrido<textarea required rows={6} value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.target.value })} placeholder="Describe el problema y cualquier dato que deba revisar el responsable…" /></label>
+        </div>
+        {error && <p className="error-message" role="alert">{error}</p>}
+        {message && <p className="success-message" role="status">{message}</p>}
+        <footer className="warehouse-incident-actions"><button type="submit" className="button primary" disabled={saving}>{saving ? "Registrando…" : "Registrar incidencia"}</button></footer>
+      </form>
+      <section className="warehouse-recent-incidents panel">
+        <div className="panel-head"><div><h3>Incidencias recientes</h3><p className="muted">Las más recientes de la operativa de almacén.</p></div><button type="button" className="button secondary" onClick={() => void load()} disabled={loading}>Actualizar</button></div>
+        {loading ? <div className="data-loading" role="status">Cargando incidencias…</div> : recent.length ? <div className="warehouse-recent-list">{recent.map((item: any) => <article key={item.id} className={`warehouse-recent-item${item.completed ? " is-complete" : ""}`}><div><b>{item.title}</b><small>{item.module || "Almacén"} · {item.priority || "Normal"} · {item.created_at ? formatSpanishDateValue(item.created_at, true) : "Sin fecha"}</small><p>{String(item.content || "").split("\n")[0]}</p></div><span>{item.completed ? "Resuelta" : "Pendiente"}</span></article>)}</div> : <p className="empty-state">Todavía no hay incidencias de almacén.</p>}
+      </section>
+    </div>
+  </section>;
+}
+
+function WarehouseTabletApp() {
+  const [currentUser, setCurrentUser] = useState<any>(() => ({ id: 0, username: "Luis", role: "admin", permissions: "*" }));
+  const [active, setActive] = useState(() => {
+    if (typeof window === "undefined") return "Preparación de pedidos";
+    try { return localStorage.getItem("excluvas.warehouse-section") || "Preparación de pedidos"; } catch { return "Preparación de pedidos"; }
+  });
+  const sections = [
+    { id: "Preparación de pedidos", short: "Preparación", icon: "preparation", hint: "Prepara y valida las líneas" },
+    { id: "Carga de vehículos", short: "Carga vehículo", icon: "warehouse", hint: "Asigna pedidos al camión" },
+    { id: "Entradas", short: "Entradas", icon: "upload", hint: "Recepciona mercancía" },
+    { id: "Crear incidencia", short: "Incidencia", icon: "template", hint: "Registra un problema" },
+  ] as const;
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("excluvas.session") || sessionStorage.getItem("excluvas.session");
+      if (raw) {
+        const session = JSON.parse(raw);
+        setCurrentUser({ id: 0, permissions: "*", ...session, ...(["Luis", "Jose"].includes(session.username) ? { role: "admin" } : {}) });
+      }
+    } catch {}
+  }, []);
+  useEffect(() => {
+    if (!sections.some((section) => section.id === active)) setActive("Preparación de pedidos");
+    try { localStorage.setItem("excluvas.warehouse-section", active); } catch {}
+  }, [active]);
+  function logout() {
+    localStorage.removeItem("excluvas.session");
+    sessionStorage.removeItem("excluvas.session");
+    window.location.reload();
+  }
+  return <main className="warehouse-tablet-app">
+    <header className="warehouse-tablet-header">
+      <a className="warehouse-tablet-brand" href="/almacen" aria-label="Vista almacén"><span className="warehouse-brand-mark">E</span><span><b>Exclusivas</b><small>Almacén operativo</small></span></a>
+      <div className="warehouse-tablet-header-actions"><span><b>{currentUser.username}</b><small>{currentUser.role === "admin" ? "Administrador" : "Almacén"}</small></span><a href="/crm" className="button secondary">CRM completo</a><button type="button" className="button secondary" onClick={logout}>Salir</button></div>
+    </header>
+    <section className="warehouse-tablet-heading"><div><p className="eyebrow">OPERATIVA DE ALMACÉN</p><h1>Vista almacén</h1><p>Todo lo necesario para preparar, cargar, recepcionar y comunicar incidencias.</p></div><span className="warehouse-tablet-date">{new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}</span></section>
+    <nav className="warehouse-tablet-nav" aria-label="Secciones de almacén">{sections.map((section) => <button type="button" key={section.id} className={active === section.id ? "is-active" : ""} aria-pressed={active === section.id} onClick={() => setActive(section.id)}><span className="warehouse-nav-icon"><ToolbarIcon name={section.icon} /></span><span><b>{section.short}</b><small>{section.hint}</small></span></button>)}</nav>
+    <section className="warehouse-tablet-content">
+      {active === "Preparación de pedidos" && <Manager active="Preparación de pedidos" user={currentUser} onNavigate={setActive} />}
+      {active === "Carga de vehículos" && <VehicleLoadManager user={currentUser} />}
+      {active === "Entradas" && <Manager active="Entradas" user={currentUser} onNavigate={setActive} />}
+      {active === "Crear incidencia" && <WarehouseIncidentManager user={currentUser} />}
+    </section>
+    <footer className="warehouse-tablet-footer"><span>Vista almacén · {APP_VERSION}</span><span>Base de datos sincronizada</span></footer>
+  </main>;
+}
+
 function CrmHome({ routeMode = "crm" }: { routeMode?: keyof typeof routeModuleScopes }) {
   const routePath = typeof window !== "undefined" ? window.location.pathname.replace(/\/$/, "") : "";
   const resolvedRouteMode = routePath === "/ocr" ? "ocr" : routePath === "/almacen" ? "almacen" : routeMode;
@@ -11836,5 +11958,7 @@ function CrmHome({ routeMode = "crm" }: { routeMode?: keyof typeof routeModuleSc
 
 export default function Home({ routeMode = "crm" }: { routeMode?: keyof typeof routeModuleScopes }) {
   const path = typeof window !== "undefined" ? window.location.pathname.replace(/\/$/, "") : "";
-  return path === "/portal-ofertas" ? <SupplierOfferPortal /> : <CrmHome routeMode={routeMode} />;
+  if (path === "/portal-ofertas") return <SupplierOfferPortal />;
+  if (path === "/almacen") return <WarehouseTabletApp />;
+  return <CrmHome routeMode={routeMode} />;
 }
