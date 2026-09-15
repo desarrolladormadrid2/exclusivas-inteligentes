@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.129";
+const APP_VERSION = "2.0.130";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -1334,13 +1334,15 @@ function VehicleLoadManager({ user }: { user: any }) {
     setLoading(true);
     setError("");
     try {
-      const [shipmentResponse, clientsResponse, pointsResponse, warehousesResponse, routesResponse, vehiclesResponse] = await Promise.all([
+      const [shipmentResponse, clientsResponse, pointsResponse, warehousesResponse, routesResponse, vehiclesResponse, orderLinesResponse, productsResponse] = await Promise.all([
         fetch("/api/shipments"),
         fetch("/api/clients?view=lookup&limit=500"),
         fetch("/api/collection_points?view=lookup&limit=500"),
         fetch("/api/warehouses?limit=500"),
         fetch("/api/routes"),
         fetch("/api/vehicles"),
+        fetch("/api/order_lines"),
+        fetch("/api/products?view=lookup&limit=2000"),
       ]);
       const shipmentRows = shipmentResponse.ok ? await shipmentResponse.json() : [];
       const clients = clientsResponse.ok ? await clientsResponse.json() : [];
@@ -1348,6 +1350,8 @@ function VehicleLoadManager({ user }: { user: any }) {
       const warehouses = warehousesResponse.ok ? await warehousesResponse.json() : [];
       const routeRows = routesResponse.ok ? await routesResponse.json() : [];
       const vehicleRows = vehiclesResponse.ok ? await vehiclesResponse.json() : [];
+      const orderLines = orderLinesResponse.ok ? await orderLinesResponse.json() : [];
+      const products = productsResponse.ok ? await productsResponse.json() : [];
       setVehicles(Array.isArray(vehicleRows) ? vehicleRows : []);
       const warehouse = (Array.isArray(warehouses) ? warehouses : []).find((item: any) => Number.isFinite(Number(item.latitude)) && Number.isFinite(Number(item.longitude)) && Number(item.latitude) !== 0 && Number(item.longitude) !== 0)
         || (Array.isArray(warehouses) ? warehouses : []).find((item: any) => /principal/i.test(String(item.name || "")))
@@ -1361,13 +1365,20 @@ function VehicleLoadManager({ user }: { user: any }) {
           ? { latitude: 40.3083, longitude: -3.7327, label: "Getafe (estimación)" }
           : { latitude: 40.4168, longitude: -3.7038, label: "Madrid (estimación)" };
       const prepared = (Array.isArray(shipmentRows) ? shipmentRows : [])
-        .filter((item: any) => ["Preparado", "Preparado con incidencia"].includes(String(item.status || "")))
+        .filter((item: any) => ["Preparado", "Preparado con incidencia"].includes(String(item.status || "")) && Boolean(String(item.preparation_closed_at || "").trim()))
         .map((item: any) => {
           const point = (Array.isArray(points) ? points : []).find((row: any) => Number(row.id) === Number(item.collection_point_id));
           const client = (Array.isArray(clients) ? clients : []).find((row: any) => Number(row.id) === Number(item.client_id));
           const latitude = Number(item.latitude ?? point?.latitude ?? client?.latitude);
           const longitude = Number(item.longitude ?? point?.longitude ?? client?.longitude);
           const located = Number.isFinite(latitude) && Number.isFinite(longitude) && latitude !== 0 && longitude !== 0;
+          const loadLines = (Array.isArray(orderLines) ? orderLines : [])
+            .filter((line: any) => Number(line.order_id) === Number(item.order_id))
+            .map((line: any) => {
+              const product = (Array.isArray(products) ? products : []).find((row: any) => Number(row.id) === Number(line.product_id));
+              const quantity = Number(line.prepared_quantity || 0) > 0 ? Number(line.prepared_quantity) : Number(line.quantity || 0);
+              return { ...line, product_name: product?.name || `Producto #${line.product_id}`, product_sku: product?.sku || "", quantity_to_load: quantity };
+            });
           return {
             ...item,
             client_name: client?.name || "Cliente sin nombre",
@@ -1377,6 +1388,7 @@ function VehicleLoadManager({ user }: { user: any }) {
             latitude: located ? latitude : null,
             longitude: located ? longitude : null,
             distance_km: located ? Number(haversineKm(nextOrigin.latitude, nextOrigin.longitude, latitude, longitude).toFixed(1)) : null,
+            load_lines: loadLines,
           };
         });
       setOrigin(nextOrigin);
@@ -1448,7 +1460,7 @@ function VehicleLoadManager({ user }: { user: any }) {
           return <article className={`vehicle-load-row${route ? " is-assigned" : ""}${isSelected ? " is-selected" : ""}`} key={item.id}>
             <label className="vehicle-load-check"><input type="checkbox" checked={isSelected} disabled={Boolean(route)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, Number(item.id)] : current.filter((id) => id !== Number(item.id)))} aria-label={`Seleccionar ${item.code}`} /></label>
             <div className="vehicle-load-distance"><b>{item.distance_km === null ? "—" : `${String(item.distance_km).replace(".", ",")} km`}</b><small>{item.distance_km === null ? "Sin coordenadas" : "desde almacén"}</small></div>
-            <div className="vehicle-load-main"><b>{item.code}</b><strong>{item.client_name}</strong><span>{[item.address, item.city].filter(Boolean).join(" · ") || "Dirección no indicada"}</span><small>{item.packages || 1} bultos · Estado: {item.status}</small></div>
+            <div className="vehicle-load-main"><b>{item.code}</b><strong>{item.client_name}</strong><span>{[item.address, item.city].filter(Boolean).join(" · ") || "Dirección no indicada"}</span><small>{item.packages || 1} bultos · Estado: {item.status}</small><div className="vehicle-load-items"><b>Material</b>{item.load_lines?.length ? item.load_lines.map((line: any) => <span key={line.id}>{line.quantity_to_load} {quantityUnitLabel(line.quantity_unit)} · {line.product_name}{line.product_sku ? ` · ${line.product_sku}` : ""}</span>) : <span>Detalle de productos pendiente</span>}</div></div>
             <div className="vehicle-load-notes"><span><b>Nota de carga</b>{item.notes || "Sin indicaciones"}</span><span><b>Nota del repartidor</b>{item.driver_notes || "Sin indicaciones"}</span><span><b>Factura</b>{item.invoice_delivery_method || "Pendiente de indicar"}</span></div>
             <div className="vehicle-load-assignment">{route ? <><b>Asignado</b><span>{route.vehicle || "Sin camión"}</span><small>{route.driver || "Sin conductor"} · {route.code}</small></> : <span className="vehicle-load-pending">Pendiente de asignar</span>}</div>
           </article>;
@@ -2350,6 +2362,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
   const [editingLineIds, setEditingLineIds] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [closing, setClosing] = useState(false);
   const [incidentLineId, setIncidentLineId] = useState<number | null>(null);
   const [incidentText, setIncidentText] = useState("");
   const [incidentSaving, setIncidentSaving] = useState(false);
@@ -2427,9 +2440,43 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
     const response = await fetch(`/api/shipments/${shipment.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", "X-Actor": actor },
-      body: JSON.stringify({ status: nextStatus, prepared_by: actor }),
+      body: JSON.stringify({ status: nextStatus, prepared_by: actor, preparation_closed_at: null, preparation_closed_by: null }),
     });
     if (!response.ok) throw new Error("La línea se guardó, pero no se pudo actualizar el estado de la nota de carga.");
+  }
+
+  const readyToClose = sourceLines.length > 0 && sourceLines.every((line) => lineIsValidated(line) || String(line.preparation_status || "") === "Incidencia");
+
+  async function closeCollectiveLoad() {
+    if (!readyToClose || closing) return;
+    const targets = Array.from(new Map(items.map((item) => [Number(item.id), item])).values());
+    if (!targets.length) {
+      setError("No hay pedidos preparados para cerrar en esta fecha.");
+      return;
+    }
+    setClosing(true);
+    setError("");
+    setMessage("");
+    try {
+      const closedAt = new Date().toISOString();
+      const responses = await Promise.all(targets.map(async (shipment: any) => {
+        const lines = sourceLines.filter((line) => Number(line.order_id) === Number(shipment.order_id));
+        const hasIncident = lines.some((line) => String(line.preparation_status || "") === "Incidencia");
+        const response = await fetch(`/api/shipments/${shipment.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", "X-Actor": actor },
+          body: JSON.stringify({ status: hasIncident ? "Preparado con incidencia" : "Preparado", prepared_at: closedAt, prepared_by: actor, preparation_closed_at: closedAt, preparation_closed_by: actor }),
+        });
+        return response.ok;
+      }));
+      if (responses.some((ok) => !ok)) throw new Error("No se pudo cerrar uno de los pedidos preparados.");
+      setMessage("Carga colectiva cerrada. Los pedidos ya están disponibles en Carga de vehículos.");
+      window.setTimeout(onClose, 650);
+    } catch (reason: any) {
+      setError(reason?.message || "No se pudo cerrar la carga colectiva.");
+    } finally {
+      setClosing(false);
+    }
   }
 
   async function saveLine(line: any) {
@@ -2583,7 +2630,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose }: { ro
           })}
         </div>
       )}
-       <footer className="collective-load-actions"><button type="button" className="button secondary collective-load-print" onClick={() => window.print()}>Imprimir listado</button><button type="button" className="button secondary" onClick={onClose}>Cerrar</button></footer>
+       <footer className="collective-load-actions"><button type="button" className="button secondary collective-load-print" onClick={() => window.print()}>Imprimir listado</button><button type="button" className="button primary collective-load-close-action" disabled={!readyToClose || closing} onClick={() => void closeCollectiveLoad()}>{closing ? "Cerrando…" : readyToClose ? "Cerrar y pasar a vehículos" : "Completa las líneas para cerrar"}</button><button type="button" className="button secondary" disabled={closing} onClick={onClose}>Cerrar</button></footer>
        {incidentLineId !== null && (() => { const incidentLine = sourceLines.find((line) => Number(line.id) === incidentLineId); if (!incidentLine) return null; const product = getProduct(incidentLine); const requested = requestedQuantity(incidentLine); const quantity = Math.max(0, Number(drafts[String(incidentLine.id)] ?? defaultDraftQuantity(incidentLine)) || 0); const missing = Math.max(0, requested - quantity); const order = items.find((item) => Number(item.order_id || item._source_order_id) === Number(incidentLine.order_id)); return <div className="collective-load-incident-overlay" role="dialog" aria-modal="true" aria-label="Registrar incidencia" onMouseDown={(event) => event.target === event.currentTarget && !incidentSaving && setIncidentLineId(null)}><section className="collective-load-incident-modal" onClick={(event) => event.stopPropagation()}><header><div><p className="eyebrow">PREPARACIÓN · INCIDENCIA</p><h3>Registrar incidencia</h3><small>{order?.code || `Pedido #${incidentLine.order_id}`} · {product?.name || `Producto #${incidentLine.product_id}`}</small></div><button type="button" className="preview-close" aria-label="Cerrar" disabled={incidentSaving} onClick={() => setIncidentLineId(null)}>×</button></header><div className="collective-load-incident-summary"><b>Preparadas: {quantity} de {requested}</b><span>Faltan {missing} {quantityUnitLabel(incidentLine.quantity_unit || product?.unit)}</span></div><label className="collective-load-incident-text">Qué ha ocurrido<textarea value={incidentText} onChange={(event) => setIncidentText(event.target.value)} placeholder={`Ej.: solo hay ${quantity} unidades disponibles.`} rows={4} autoFocus /></label><p className="collective-load-incident-help">La incidencia quedará vinculada al pedido y la línea seguirá marcada en rojo hasta resolverla.</p>{error && <p className="collective-load-feedback error-message" role="alert">{error}</p>}<footer><button type="button" className="button secondary" disabled={incidentSaving} onClick={() => setIncidentLineId(null)}>Cancelar</button><button type="button" className="button danger" disabled={incidentSaving} onClick={() => void registerLineIncident(incidentLine)}>{incidentSaving ? "Registrando…" : "Confirmar incidencia"}</button></footer></section></div>; })()}
     </section>
   </div>;
@@ -4841,7 +4888,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       const response = await fetch(`/api/order_lines/${line.id}`, { method: "PUT", headers: actorHeaders, body: JSON.stringify(next) });
       if (!response.ok) throw new Error("No se pudo actualizar la línea de preparación.");
       if (preview?.id && active === "Preparación de pedidos") {
-        const shipmentResponse = await fetch(`/api/shipments/${preview.id}`, { method: "PUT", headers: actorHeaders, body: JSON.stringify({ ...preview, status: nextShipmentStatus, prepared_by: user?.username || "Usuario local" }) });
+        const shipmentResponse = await fetch(`/api/shipments/${preview.id}`, { method: "PUT", headers: actorHeaders, body: JSON.stringify({ ...preview, status: nextShipmentStatus, prepared_by: user?.username || "Usuario local", preparation_closed_at: null, preparation_closed_by: null }) });
         if (!shipmentResponse.ok) throw new Error("No se pudo actualizar el estado de la preparación.");
       }
       return true;

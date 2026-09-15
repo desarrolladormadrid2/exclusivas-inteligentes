@@ -271,6 +271,8 @@ const migrationsByTable = {
     ["geocoding_status", "ALTER TABLE collection_points ADD COLUMN geocoding_status TEXT DEFAULT 'Pendiente'"],
   ],
   shipments: [
+    ["preparation_closed_at", "ALTER TABLE shipments ADD COLUMN preparation_closed_at TEXT"],
+    ["preparation_closed_by", "ALTER TABLE shipments ADD COLUMN preparation_closed_by TEXT"],
     ["invoice_delivery_method", "ALTER TABLE shipments ADD COLUMN invoice_delivery_method TEXT"],
     ["deleted", "ALTER TABLE shipments ADD COLUMN deleted INTEGER DEFAULT 0"],
     ["deleted_at", "ALTER TABLE shipments ADD COLUMN deleted_at TEXT"],

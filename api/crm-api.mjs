@@ -639,20 +639,20 @@ for (const statement of [
   try { db.exec(statement); } catch {}
 }
 db.exec(
-  `CREATE TABLE IF NOT EXISTS shipments(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,order_id INTEGER,delivery_note_id INTEGER,client_id INTEGER,carrier TEXT,status TEXT DEFAULT 'Preparando',prepared_at TEXT,shipped_at TEXT,expected_delivery_at TEXT,delivered_at TEXT,address TEXT,tracking TEXT,packages INTEGER DEFAULT 1,incidents TEXT,invoice_delivery_method TEXT);`,
+  `CREATE TABLE IF NOT EXISTS shipments(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,order_id INTEGER,delivery_note_id INTEGER,client_id INTEGER,carrier TEXT,status TEXT DEFAULT 'Preparando',prepared_at TEXT,preparation_closed_at TEXT,preparation_closed_by TEXT,shipped_at TEXT,expected_delivery_at TEXT,delivered_at TEXT,address TEXT,tracking TEXT,packages INTEGER DEFAULT 1,incidents TEXT,invoice_delivery_method TEXT);`,
 );
-for (const column of ["deleted INTEGER DEFAULT 0", "deleted_at TEXT", "deleted_by TEXT", "collection_point_id INTEGER", "prepared_by TEXT", "shipped_by TEXT", "delivered_by TEXT", "delivery_city TEXT", "preparation_date TEXT", "urgent INTEGER DEFAULT 0", "public_tracking_token TEXT"]) {
+for (const column of ["deleted INTEGER DEFAULT 0", "deleted_at TEXT", "deleted_by TEXT", "collection_point_id INTEGER", "prepared_by TEXT", "preparation_closed_at TEXT", "preparation_closed_by TEXT", "shipped_by TEXT", "delivered_by TEXT", "delivery_city TEXT", "preparation_date TEXT", "urgent INTEGER DEFAULT 0", "public_tracking_token TEXT"]) {
   try { db.exec(`ALTER TABLE shipments ADD COLUMN ${column}`); } catch {}
 }
 if (remoteMode && process.env.RUN_REMOTE_MIGRATIONS === "1") {
-  for (const column of ["deleted INTEGER DEFAULT 0", "deleted_at TEXT", "deleted_by TEXT", "collection_point_id INTEGER", "prepared_by TEXT", "shipped_by TEXT", "delivered_by TEXT", "delivery_city TEXT", "preparation_date TEXT", "urgent INTEGER DEFAULT 0", "public_tracking_token TEXT"]) {
+  for (const column of ["deleted INTEGER DEFAULT 0", "deleted_at TEXT", "deleted_by TEXT", "collection_point_id INTEGER", "prepared_by TEXT", "preparation_closed_at TEXT", "preparation_closed_by TEXT", "shipped_by TEXT", "delivered_by TEXT", "delivery_city TEXT", "preparation_date TEXT", "urgent INTEGER DEFAULT 0", "public_tracking_token TEXT"]) {
     try { db.prepare(`ALTER TABLE shipments ADD COLUMN ${column}`).run(); } catch {}
   }
-  for (const column of ["origin_address TEXT", "departure_at TEXT", "delivery_window_start TEXT", "delivery_window_end TEXT", "notes TEXT", "driver_notes TEXT", "preparation_started_at TEXT", "preparation_started_by TEXT", "stock_released_at TEXT", "stock_released_by TEXT", "delivery_signature_data TEXT", "delivery_recipient_name TEXT", "delivery_signature_status TEXT", "delivery_signature_at TEXT", "delivery_signature_by TEXT", "delivery_signature_note TEXT", "delivery_attachments_json TEXT", "payment_received_status TEXT", "payment_received_amount REAL DEFAULT 0", "payment_received_method TEXT", "payment_received_reference TEXT", "payment_received_note TEXT", "payment_received_at TEXT", "payment_received_by TEXT", "payment_received_attachments_json TEXT"]) {
+  for (const column of ["origin_address TEXT", "departure_at TEXT", "delivery_window_start TEXT", "delivery_window_end TEXT", "notes TEXT", "driver_notes TEXT", "preparation_started_at TEXT", "preparation_started_by TEXT", "preparation_closed_at TEXT", "preparation_closed_by TEXT", "stock_released_at TEXT", "stock_released_by TEXT", "delivery_signature_data TEXT", "delivery_recipient_name TEXT", "delivery_signature_status TEXT", "delivery_signature_at TEXT", "delivery_signature_by TEXT", "delivery_signature_note TEXT", "delivery_attachments_json TEXT", "payment_received_status TEXT", "payment_received_amount REAL DEFAULT 0", "payment_received_method TEXT", "payment_received_reference TEXT", "payment_received_note TEXT", "payment_received_at TEXT", "payment_received_by TEXT", "payment_received_attachments_json TEXT"]) {
     try { db.prepare(`ALTER TABLE shipments ADD COLUMN ${column}`).run(); } catch {}
   }
 }
-for (const column of ["origin_address", "departure_at", "delivery_window_start", "delivery_window_end", "notes", "driver_notes", "invoice_delivery_method", "preparation_started_at", "preparation_started_by", "stock_released_at", "stock_released_by", "delivery_signature_data", "delivery_recipient_name", "delivery_signature_status", "delivery_signature_at", "delivery_signature_by", "delivery_signature_note", "delivery_attachments_json", "payment_received_status", "payment_received_amount", "payment_received_method", "payment_received_reference", "payment_received_note", "payment_received_at", "payment_received_by", "payment_received_attachments_json"]) {
+for (const column of ["origin_address", "departure_at", "delivery_window_start", "delivery_window_end", "notes", "driver_notes", "invoice_delivery_method", "preparation_started_at", "preparation_started_by", "preparation_closed_at", "preparation_closed_by", "stock_released_at", "stock_released_by", "delivery_signature_data", "delivery_recipient_name", "delivery_signature_status", "delivery_signature_at", "delivery_signature_by", "delivery_signature_note", "delivery_attachments_json", "payment_received_status", "payment_received_amount", "payment_received_method", "payment_received_reference", "payment_received_note", "payment_received_at", "payment_received_by", "payment_received_attachments_json"]) {
   try { db.exec(`ALTER TABLE shipments ADD COLUMN ${column} TEXT`); } catch {}
 }
 try { db.exec("ALTER TABLE shipments ADD COLUMN urgent INTEGER DEFAULT 0"); } catch {}
@@ -748,6 +748,9 @@ for (const [table, columns] of [["clients", ["opening_time TEXT", "closing_time 
     for (const column of columns) { try { db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column}`).run(); } catch {} }
   }
 }
+// Los pedidos que ya estaban preparados antes de implantar el cierre explícito
+// se consideran cerrados para no desaparecer de la carga de vehículos.
+try { db.prepare("UPDATE shipments SET preparation_closed_at=COALESCE(preparation_closed_at,prepared_at,updated_at),preparation_closed_by=COALESCE(preparation_closed_by,prepared_by,'Migración') WHERE status IN ('Preparado','Preparado con incidencia') AND preparation_closed_at IS NULL").run(); } catch {}
 for (const column of ["quantity_requested", "quantity_unit", "units_factor"]) { try { db.exec(`ALTER TABLE order_lines ADD COLUMN ${column} TEXT`); } catch {} }
 for (const column of ["lot_id INTEGER", "lot_code TEXT", "expiry_date TEXT"]) { try { db.exec(`ALTER TABLE order_lines ADD COLUMN ${column}`); } catch {} }
 try { db.exec("ALTER TABLE order_lines ADD COLUMN prepared INTEGER DEFAULT 0"); } catch {}
@@ -894,20 +897,31 @@ function optimizeStops(stops, originLat, originLon) {
   const remaining = [...stops];
   const ordered = [];
   let currentLat = Number(originLat), currentLon = Number(originLon);
+  const originLatitude = Number(originLat), originLongitude = Number(originLon);
+  const openingMinutes = (value) => {
+    const match = String(value || "").match(/(?:T|^|\s)(\d{1,2}):(\d{2})/);
+    return match ? Number(match[1]) * 60 + Number(match[2]) : Number.POSITIVE_INFINITY;
+  };
   while (remaining.length) {
     let nextIndex = 0;
     if (Number.isFinite(currentLat) && Number.isFinite(currentLon)) {
-      const openingMinutes = (value) => {
-        const match = String(value || "").match(/(?:T|^|\s)(\d{1,2}):(\d{2})/);
-        return match ? Number(match[1]) * 60 + Number(match[2]) : Number.POSITIVE_INFINITY;
-      };
-      remaining.forEach((stop, index) => {
+      const elapsedBeforeTravel = ordered.reduce((total, stop) => total + Number(stop.distance_km || 0) * 2 + 15, 0);
+      const departureMinutes = 8 * 60;
+      const candidates = remaining.map((stop, index) => {
         const distance = haversineKm(currentLat, currentLon, stop.latitude, stop.longitude);
-        const candidateOpening = openingMinutes(stop.opening_time);
-        const selectedOpening = openingMinutes(remaining[nextIndex].opening_time);
-        const selectedDistance = haversineKm(currentLat, currentLon, remaining[nextIndex].latitude, remaining[nextIndex].longitude);
-        if (candidateOpening < selectedOpening || (candidateOpening === selectedOpening && distance < selectedDistance)) nextIndex = index;
+        const originDistance = haversineKm(originLatitude, originLongitude, stop.latitude, stop.longitude);
+        const arrival = departureMinutes + elapsedBeforeTravel + distance * 2;
+        const opening = openingMinutes(stop.opening_time);
+        const closing = openingMinutes(stop.closing_time);
+        const lateMinutes = closing !== Number.POSITIVE_INFINITY ? Math.max(0, arrival - closing) : 0;
+        const waitingMinutes = opening !== Number.POSITIVE_INFINITY ? Math.max(0, opening - arrival) : 0;
+        return { index, distance, originDistance, lateMinutes, waitingMinutes, opening };
       });
+      const onTime = candidates.filter((candidate) => candidate.lateMinutes === 0);
+      const ready = onTime.filter((candidate) => candidate.waitingMinutes === 0);
+      const pool = ready.length ? ready : onTime.length ? onTime : candidates;
+      pool.sort((a, b) => (a.lateMinutes - b.lateMinutes) || (b.originDistance - a.originDistance) || (b.distance - a.distance) || (a.opening - b.opening));
+      nextIndex = pool[0].index;
     }
     const next = remaining.splice(nextIndex, 1)[0];
     next.distance_km = Number.isFinite(currentLat) && Number.isFinite(currentLon) ? Number(haversineKm(currentLat, currentLon, next.latitude, next.longitude).toFixed(2)) : 0;
@@ -1117,7 +1131,7 @@ const lookupFields = {
   collection_points: ["id", "code", "name", "client_id", "address", "city", "contact", "phone", "email", "opening_hours", "opening_time", "closing_time", "geocoding_status", "latitude", "longitude"],
   products: ["id", "name", "sku", "unit", "unit_price", "box_price", "pack4_price", "pack6_price", "pallet_price", "vat", "stock", "stock_reserved", "min_stock", "stock_min", "category", "brand", "format", "active", "product_status", "warehouse_id", "supplier_id", "primary_supplier_id", "warehouse_location", "cost_price", "photo_url", "photo_thumbnail_url", "photo_web_url"],
   orders: ["id", "code", "client_id", "status", "amount", "created_at", "updated_at", "delivery_date", "preparation_date", "shipping_date", "address", "delivery_city", "collection_point_id", "urgent", "stock_alert", "loading_notes", "driver_notes"],
-  shipments: ["id", "code", "order_id", "client_id", "collection_point_id", "status", "expected_delivery_at", "preparation_date", "address", "delivery_city", "delivery_window_start", "delivery_window_end", "carrier", "packages", "incidents", "notes", "driver_notes", "invoice_delivery_method", "prepared_at", "prepared_by", "shipped_at", "shipped_by", "departure_at", "delivered_at", "delivered_by", "delivery_signature_status", "delivery_recipient_name", "delivery_signature_at", "delivery_signature_by", "delivery_signature_note", "payment_received_status", "payment_received_amount", "payment_received_method", "payment_received_reference", "payment_received_note", "payment_received_at", "payment_received_by", "public_tracking_token"],
+  shipments: ["id", "code", "order_id", "client_id", "collection_point_id", "status", "expected_delivery_at", "preparation_date", "address", "delivery_city", "delivery_window_start", "delivery_window_end", "carrier", "packages", "incidents", "notes", "driver_notes", "invoice_delivery_method", "prepared_at", "prepared_by", "preparation_closed_at", "preparation_closed_by", "shipped_at", "shipped_by", "departure_at", "delivered_at", "delivered_by", "delivery_signature_status", "delivery_recipient_name", "delivery_signature_at", "delivery_signature_by", "delivery_signature_note", "payment_received_status", "payment_received_amount", "payment_received_method", "payment_received_reference", "payment_received_note", "payment_received_at", "payment_received_by", "public_tracking_token"],
   order_lines: ["id", "order_id", "product_id", "quantity", "quantity_requested", "quantity_unit", "prepared", "prepared_quantity", "preparation_status", "incident_resolution"],
   invoices: ["id", "code", "order_id", "client_id", "amount", "status", "created_at", "issue_date", "due_date"],
   purchase_orders: ["id", "code", "supplier_id", "status", "order_date", "expected_date", "amount", "validation_status", "supplier_invoice_code", "invoice_date", "payment_terms_snapshot", "payment_due_date", "payment_status", "payment_paid_at", "payment_reference"],
@@ -3514,7 +3528,7 @@ export async function crmApiHandler(req, res) {
         if (t === "orders" && (reopenPreparation || ["Bloqueado", "Pospuesto", "Cancelado"].includes(String(d.status || "")))) {
           const linked = db.prepare("SELECT id,status FROM shipments WHERE order_id=? ORDER BY id DESC LIMIT 1").get(p[2]);
           if (linked && reopenPreparation) {
-            db.prepare("UPDATE shipments SET status='Pendiente',prepared_at=NULL,prepared_by=NULL,incidents='',updated_at=? WHERE id=?").run(new Date().toISOString(), linked.id);
+            db.prepare("UPDATE shipments SET status='Pendiente',prepared_at=NULL,prepared_by=NULL,preparation_closed_at=NULL,preparation_closed_by=NULL,incidents='',updated_at=? WHERE id=?").run(new Date().toISOString(), linked.id);
             db.prepare("UPDATE order_lines SET prepared=0,prepared_quantity=0,preparation_status='Pendiente',updated_at=? WHERE order_id=?").run(new Date().toISOString(), p[2]);
           } else if (linked && ["Bloqueado", "Pospuesto", "Cancelado"].includes(String(d.status || ""))) {
             db.prepare("UPDATE shipments SET status=?,updated_at=? WHERE id=?").run(d.status, new Date().toISOString(), linked.id);
