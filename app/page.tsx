@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.130";
+const APP_VERSION = "2.0.131";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -963,10 +963,11 @@ const icon = (m: string) =>
     Documentos: "▤",
   })[m] || "•";
 
-type ToolbarIconName = "download" | "upload" | "template" | "preparation" | "stock" | "order" | "expense" | "backup" | "map" | "commercial" | "warehouse" | "web";
+type ToolbarIconName = "download" | "print" | "upload" | "template" | "preparation" | "stock" | "order" | "expense" | "backup" | "map" | "commercial" | "warehouse" | "web";
 function ToolbarIcon({ name }: { name: ToolbarIconName }) {
   const paths: Record<ToolbarIconName, ReactNode> = {
     download: <><path d="M12 3v11" /><path d="m7.5 10.5 4.5 4.5 4.5-4.5" /><path d="M4 20h16" /></>,
+    print: <><path d="M7 9V4h10v5" /><path d="M7 17H5a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-2" /><path d="M7 14h10v7H7z" /><path d="M17 12h.01" /></>,
     upload: <><path d="M12 21V10" /><path d="m7.5 13.5 4.5-4.5 4.5 4.5" /><path d="M4 4h16" /></>,
     template: <><path d="M6 3.5h8l4 4V20.5H6z" /><path d="M14 3.5v4h4" /><path d="M9 12h6" /><path d="M9 15.5h6" /></>,
     preparation: <><rect x="5" y="4" width="14" height="16" rx="1" /><path d="M8 8h8M8 12h8M8 16h5" /></>,
@@ -10808,12 +10809,29 @@ function WarehouseTabletApp() {
     sessionStorage.removeItem("excluvas.session");
     window.location.reload();
   }
+  function printWarehouseView() {
+    window.print();
+  }
+  function downloadWarehouseExcel() {
+    const content = document.querySelector(".warehouse-tablet-content");
+    const nodes = Array.from(content?.querySelectorAll("tr, .prep-order-card, .vehicle-load-row, .warehouse-recent-item, .collective-load-record") || []);
+    const records = nodes
+      .map((node) => String((node as HTMLElement).innerText || node.textContent || "").replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    const rows = [["Sección", "Información"], ...((records.length ? records : ["Sin datos visibles"]).map((detail) => [active, detail]))];
+    const csv = "\\ufeff" + rows.map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(";")).join("\\r\\n");
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    link.download = `almacen-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    window.setTimeout(() => { URL.revokeObjectURL(link.href); link.remove(); }, 1000);
+  }
   return <main className="warehouse-tablet-app">
     <header className="warehouse-tablet-header">
       <a className="warehouse-tablet-brand" href="/almacen" aria-label="Vista almacén"><span className="warehouse-brand-mark">E</span><span><b>Exclusivas</b><small>Almacén operativo</small></span></a>
-      <div className="warehouse-tablet-header-actions"><span><b>{currentUser.username}</b><small>{currentUser.role === "admin" ? "Administrador" : "Almacén"}</small></span><a href="/crm" className="button secondary">CRM completo</a><button type="button" className="button secondary" onClick={logout}>Salir</button></div>
+      <div className="warehouse-tablet-header-actions"><span><b>{currentUser.username}</b><small>{currentUser.role === "admin" ? "Administrador" : "Almacén"}</small></span><div className="warehouse-tablet-quick-actions" aria-label="Acciones de la vista"><button type="button" className="warehouse-tablet-icon-button" onClick={printWarehouseView} aria-label="Imprimir vista" title="Imprimir vista"><ToolbarIcon name="print" /></button><button type="button" className="warehouse-tablet-icon-button" onClick={downloadWarehouseExcel} aria-label="Descargar Excel" title="Descargar Excel"><ToolbarIcon name="download" /></button></div><a href="/crm" className="button secondary">CRM completo</a><button type="button" className="button secondary" onClick={logout}>Salir</button></div>
     </header>
-    <section className="warehouse-tablet-heading"><div><p className="eyebrow">OPERATIVA DE ALMACÉN</p><h1>Vista almacén</h1><p>Todo lo necesario para preparar, cargar, recepcionar y comunicar incidencias.</p></div><span className="warehouse-tablet-date">{new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}</span></section>
     <nav className="warehouse-tablet-nav" aria-label="Secciones de almacén">{sections.map((section) => <button type="button" key={section.id} className={active === section.id ? "is-active" : ""} aria-pressed={active === section.id} onClick={() => setActive(section.id)}><span className="warehouse-nav-icon"><ToolbarIcon name={section.icon} /></span><span><b>{section.short}</b><small>{section.hint}</small></span></button>)}</nav>
     <section className="warehouse-tablet-content">
       {active === "Preparación de pedidos" && <Manager active="Preparación de pedidos" user={currentUser} onNavigate={setActive} />}
