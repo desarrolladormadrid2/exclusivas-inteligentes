@@ -5923,8 +5923,19 @@ body:has(.warehouse-tablet-app) .settings-panel {
   font-size: 12px;
 }
 .collective-load-simple-main > .collective-load-simple-quantity {
-  display: grid !important;
-  gap: 3px;
+  display: flex !important;
+  align-items: center;
+  gap: 5px;
+}
+.collective-load-simple-main > .collective-load-simple-quantity > span {
+  flex: 0 0 auto;
+  color: #60737d;
+  font-size: 9px;
+  font-weight: 700;
+}
+.collective-load-simple-main > .collective-load-simple-quantity > input {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .collective-load-simple-check {
   display: grid !important;
