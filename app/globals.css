@@ -5741,3 +5741,26 @@ body:has(.warehouse-tablet-app) .settings-panel {
 .warehouse-tablet-nav button.is-active:hover {
   background: #991b1b;
 }
+
+/* En la preparación integrada dejamos sólo el selector del día y la hoja de trabajo. */
+.collective-load-overlay.is-embedded .collective-load-header {
+  display: block;
+  padding: 8px 12px;
+}
+.collective-load-overlay.is-embedded .collective-load-header > div:first-child,
+.collective-load-overlay.is-embedded .collective-load-summary,
+.collective-load-overlay.is-embedded .collective-load-note {
+  display: none;
+}
+.collective-load-overlay.is-embedded .collective-load-date-toolbar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 100%;
+  gap: 5px;
+  align-items: end;
+}
+.collective-load-overlay.is-embedded .collective-load-date-toolbar input,
+.collective-load-overlay.is-embedded .collective-load-date-toolbar .button {
+  width: 100%;
+  box-sizing: border-box;
+}
