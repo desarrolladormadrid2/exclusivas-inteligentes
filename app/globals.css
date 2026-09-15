@@ -5764,3 +5764,14 @@ body:has(.warehouse-tablet-app) .settings-panel {
   width: 100%;
   box-sizing: border-box;
 }
+.collective-load-retry {
+  margin-left: 6px;
+  padding: 3px 7px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+}

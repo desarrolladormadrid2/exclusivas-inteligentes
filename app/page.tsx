@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.134";
+const APP_VERSION = "2.0.135";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -2369,6 +2369,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
   const [incidentSaving, setIncidentSaving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const items = rows
     .filter((row) => !dateFilter || String(row.preparation_date || row.delivery_date || row.expected_delivery_at || "").slice(0, 10) === dateFilter)
     .filter((row) => !["Cancelado", "Anulado"].includes(String(row.status || "")));
@@ -2402,9 +2403,18 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 12000);
     setLoading(true);
     setError("");
-    fetch("/api/order_lines", { headers: { "X-Actor": actor } })
+    if (!orderIds.length) {
+      setSourceLines([]);
+      setDrafts({});
+      setBarcodeDrafts({});
+      setLoading(false);
+      return () => { cancelled = true; controller.abort(); window.clearTimeout(timeout); };
+    }
+    fetch("/api/order_lines", { headers: { "X-Actor": actor }, signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error("No se han podido cargar las líneas de los pedidos.")))
       .then((payload) => {
         if (cancelled) return;
@@ -2413,10 +2423,10 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
         setDrafts(Object.fromEntries(lines.map((line: any) => [String(line.id), String(defaultDraftQuantity(line))])));
         setBarcodeDrafts(Object.fromEntries(lines.map((line: any) => [String(line.id), String(line.barcode_scanned_code || "")])));
       })
-      .catch((reason: any) => { if (!cancelled) setError(reason?.message || "No se han podido cargar las líneas de los pedidos."); })
+      .catch((reason: any) => { if (!cancelled) setError(reason?.name === "AbortError" ? "La consulta está tardando demasiado. Puedes volver a intentarlo." : reason?.message || "No se han podido cargar las líneas de los pedidos."); })
       .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [orderKey, actor]);
+    return () => { cancelled = true; controller.abort(); window.clearTimeout(timeout); };
+  }, [orderKey, actor, loadAttempt]);
 
   const groups = Array.from(sourceLines.reduce((map: Map<string, any>, line: any) => {
     const product = getProduct(line);
@@ -2589,7 +2599,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
       <header className="collective-load-header"><div><p className="eyebrow">LOGÍSTICA · PREPARACIÓN</p><h2>Orden de carga colectiva</h2><small>Día de preparación: {dateFilter ? formatSpanishDateValue(dateFilter, false) : "Sin fecha"} · artículos ordenados por ubicación</small></div>{!embedded && <button type="button" className="preview-close collective-load-close" aria-label="Cerrar" onClick={onClose}>×</button>}<div className="collective-load-date-toolbar" aria-label="Cambiar día de preparación"><label>Fecha<input type="date" value={dateFilter} onChange={(event) => onDateFilterChange?.(event.target.value)} /></label><button type="button" className={`button ${dateFilter === today ? "primary" : "secondary"}`} aria-pressed={dateFilter === today} onClick={() => onDateFilterChange?.(today)}>Hoy</button><button type="button" className={`button ${dateFilter === tomorrow ? "primary" : "secondary"}`} aria-pressed={dateFilter === tomorrow} onClick={() => onDateFilterChange?.(tomorrow)}>Mañana</button></div></header>
       <div className="collective-load-summary"><span><b>{items.length}</b> pedidos</span><span><b>{groups.length}</b> referencias</span><span><b>{sourceLines.filter(lineIsValidated).length}/{sourceLines.length}</b> líneas validadas</span><span><b>{Math.max(0, groups.reduce((total: number, group: any) => total + group.requested - group.prepared, 0))}</b> unidades pendientes</span></div>
       <div className="collective-load-note"><b>Validación por línea</b><span>Cada pedido aparece ya separado. Escanea el código de barras o escríbelo y comprueba la cantidad antes de validar.</span></div>
-      {error && <p className="collective-load-feedback error-message" role="alert">{error}</p>}
+      {error && <p className="collective-load-feedback error-message" role="alert">{error} <button type="button" className="collective-load-retry" onClick={() => setLoadAttempt((current) => current + 1)}>Reintentar</button></p>}
       {message && <p className="collective-load-feedback success-message" role="status">{message}</p>}
       {loading ? <div className="collective-load-empty"><span className="loading-spinner" /><p>Cargando artículos de los pedidos…</p></div> : !groups.length ? <div className="collective-load-empty"><b>No hay artículos para esta fecha</b><span>Prueba otra fecha o vuelve a “Todos”.</span></div> : (
         <div className="collective-load-list">
