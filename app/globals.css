@@ -5701,3 +5701,43 @@ body:has(.reparto-page) .assistant-global{display:none !important}
   .warehouse-tablet-content .prep-command-summary-hint{flex-basis:100%;font-size:9px}
   .warehouse-tablet-content .prep-command-empty{padding:14px 10px;font-size:10px}
 }
+
+/* Preparación es la hoja de trabajo diaria: se muestra directamente, sin modal. */
+.collective-load-overlay.is-embedded{position:static;inset:auto;z-index:auto;display:block;padding:0;background:transparent}
+.collective-load-overlay.is-embedded .collective-load-modal{width:100%;max-height:none;overflow:visible;border:1px solid #cbd7dc;box-shadow:none}
+.collective-load-overlay.is-embedded .collective-load-header{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;padding:9px 12px}
+.collective-load-overlay.is-embedded .collective-load-header h2{font-size:17px}
+.collective-load-overlay.is-embedded .collective-load-header small{font-size:10px}
+.collective-load-date-toolbar{display:flex;align-items:end;gap:5px;white-space:nowrap}
+.collective-load-date-toolbar label{display:grid;gap:3px;color:#60737d;font-size:9px}
+.collective-load-date-toolbar input{box-sizing:border-box;height:30px;width:132px;padding:0 6px;border:1px solid #cbd7dc;background:#fff;color:#26343d;font:inherit;font-size:10px}
+.collective-load-date-toolbar .button{height:30px;padding:0 10px;font-size:10px}
+.collective-load-overlay.is-embedded .collective-load-summary{padding:6px 12px;gap:5px}
+.collective-load-overlay.is-embedded .collective-load-summary span{padding:4px 7px}
+.collective-load-overlay.is-embedded .collective-load-note{margin:7px 12px 3px;padding:6px 8px;font-size:10px}
+.collective-load-overlay.is-embedded .collective-load-list{margin:8px 12px 4px}
+.collective-load-overlay.is-embedded .collective-load-actions{padding:8px 12px}
+@media(max-width:700px){
+  .collective-load-overlay.is-embedded .collective-load-header{grid-template-columns:1fr;align-items:stretch}
+  .collective-load-date-toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:5px}
+  .collective-load-date-toolbar input{width:100%}
+  .collective-load-date-toolbar .button{padding:0 8px}
+}
+
+/* La vista de almacén debe ser directa: navegación clara y sin chat flotante. */
+body:has(.warehouse-tablet-app) .assistant-ball,
+body:has(.warehouse-tablet-app) .assistant-global {
+  display: none !important;
+}
+body:has(.warehouse-tablet-app) .settings-fab,
+body:has(.warehouse-tablet-app) .settings-panel {
+  display: none !important;
+}
+.warehouse-tablet-nav button.is-active {
+  background: #b91c1c;
+  color: #fff;
+  box-shadow: none;
+}
+.warehouse-tablet-nav button.is-active:hover {
+  background: #991b1b;
+}
