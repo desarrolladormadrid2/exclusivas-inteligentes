@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.144";
+const APP_VERSION = "2.0.145";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -1316,10 +1316,10 @@ function VehicleOperationsPanel({ user, routeDate, vehicles, onReload }: { user:
   </section>;
 }
 
-function VehicleLoadManager({ user }: { user: any }) {
+function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: string }) {
   const [shipments, setShipments] = useState<any[]>([]);
   const [routes, setRoutes] = useState<any[]>([]);
-  const [routeDate, setRouteDate] = useState(() => tabletTodayInput());
+  const [routeDate, setRouteDate] = useState(() => initialDate || tabletTodayInput());
   const [selected, setSelected] = useState<number[]>([]);
   const [driver, setDriver] = useState(user?.username || "");
   const [vehicle, setVehicle] = useState("");
@@ -1405,6 +1405,9 @@ function VehicleLoadManager({ user }: { user: any }) {
     }
   }
   useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    if (initialDate) setRouteDate(initialDate);
+  }, [initialDate]);
 
   const assignedByShipment = new Map<number, any>();
   routes.forEach((route: any) => {
@@ -1416,7 +1419,7 @@ function VehicleLoadManager({ user }: { user: any }) {
     return match ? Number(match[1]) * 60 + Number(match[2]) : -1;
   };
   const dayShipments = shipments
-    .filter((item) => String(item.expected_delivery_at || item.delivery_date || item.preparation_date || "").slice(0, 10) === routeDate)
+    .filter((item) => String(item.preparation_date || item.shipping_date || item.expected_delivery_at || item.delivery_date || "").slice(0, 10) === routeDate)
     .sort((a, b) => {
       const closingOrder = receptionMinutes(b.closing_time) - receptionMinutes(a.closing_time);
       const openingOrder = receptionMinutes(b.opening_time) - receptionMinutes(a.opening_time);
@@ -3183,7 +3186,7 @@ function ClientReceivablesPanel({ client, invoices, payments }: { client: any; i
   );
 }
 
-function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFormConsumed }: { active: string; user?: any; onNavigate?: (module: string) => void; assistantFormIntent?: any; onAssistantFormConsumed?: () => void }) {
+function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFormConsumed }: { active: string; user?: any; onNavigate?: (module: string, date?: string) => void; assistantFormIntent?: any; onAssistantFormConsumed?: () => void }) {
   const c = cfg[active];
   const actorHeaders = {
     "Content-Type": "application/json",
@@ -6037,7 +6040,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       {productSaveMessage && active === "Productos" && <div className="success-message" role="status">{productSaveMessage}</div>}
       {!isLoadPreparation && active !== "Pedidos" && <BusinessRelatedPanels active={active} rows={rows} lookups={lookups} onNavigate={onNavigate} />}
       {active === "Compras" && <SupplierPayablesPanel rows={rows} suppliers={lookups.suppliers || []} actor={user?.username || "Usuario local"} onReload={() => setListRefreshKey((current) => current + 1)} />}
-      {isLoadPreparation && <CollectiveLoadModal rows={preparationRows} lookups={lookups} dateFilter={preparationDateFilter} actor={user?.username || "Usuario local"} onClose={() => onNavigate?.("Carga de vehículos")} onDateFilterChange={setPreparationDateFilter} embedded />}
+      {isLoadPreparation && <CollectiveLoadModal rows={preparationRows} lookups={lookups} dateFilter={preparationDateFilter} actor={user?.username || "Usuario local"} onClose={() => onNavigate?.("Carga de vehículos", preparationDateFilter)} onDateFilterChange={setPreparationDateFilter} embedded />}
       {active === "Gastos y tickets" && (
         <ExpenseScanner
           clients={lookups.clients || []}
@@ -10834,6 +10837,7 @@ function WarehouseTabletApp() {
   const [active, setActive] = useState(() => {
     return "Preparación de pedidos";
   });
+  const [loadDate, setLoadDate] = useState(() => tabletTodayInput());
   const sections = [
     { id: "Preparación de pedidos", short: "Preparación", icon: "preparation", hint: "Prepara y valida las líneas" },
     { id: "Carga de vehículos", short: "Carga", icon: "warehouse", hint: "Asigna pedidos al camión" },
@@ -10882,9 +10886,9 @@ function WarehouseTabletApp() {
     </header>
     <nav className="warehouse-tablet-nav" aria-label="Secciones de almacén">{sections.map((section) => <button type="button" key={section.id} className={active === section.id ? "is-active" : ""} aria-pressed={active === section.id} onClick={() => setActive(section.id)}><b>{section.short}</b></button>)}</nav>
     <section className="warehouse-tablet-content">
-      {active === "Preparación de pedidos" && <Manager active="Preparación de pedidos" user={currentUser} onNavigate={setActive} />}
-      {active === "Carga de vehículos" && <VehicleLoadManager user={currentUser} />}
-      {active === "Entradas" && <Manager active="Entradas" user={currentUser} onNavigate={setActive} />}
+      {active === "Preparación de pedidos" && <Manager active="Preparación de pedidos" user={currentUser} onNavigate={(module, date) => { if (date) setLoadDate(date); setActive(module); }} />}
+      {active === "Carga de vehículos" && <VehicleLoadManager user={currentUser} initialDate={loadDate} />}
+      {active === "Entradas" && <Manager active="Entradas" user={currentUser} onNavigate={(module) => setActive(module)} />}
       {active === "Crear incidencia" && <WarehouseIncidentManager user={currentUser} />}
     </section>
     <footer className="warehouse-tablet-footer"><span>Vista almacén · {APP_VERSION}</span><span>Base de datos sincronizada</span></footer>
