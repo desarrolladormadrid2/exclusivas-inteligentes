@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.142";
+const APP_VERSION = "2.0.143";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -1385,6 +1385,8 @@ function VehicleLoadManager({ user }: { user: any }) {
             client_name: client?.name || "Cliente sin nombre",
             address: item.address || point?.address || client?.address || "",
             city: item.delivery_city || point?.city || client?.city || "",
+            opening_time: item.delivery_window_start || item.opening_time || point?.opening_time || client?.opening_time || "",
+            closing_time: item.delivery_window_end || item.closing_time || point?.closing_time || client?.closing_time || "",
             invoice_delivery_method: item.invoice_delivery_method || client?.invoice_delivery_method || "Pendiente de indicar",
             latitude: located ? latitude : null,
             longitude: located ? longitude : null,
@@ -1409,9 +1411,19 @@ function VehicleLoadManager({ user }: { user: any }) {
     if (String(route.status || "") === "Cancelada") return;
     (route.stops || []).forEach((stop: any) => assignedByShipment.set(Number(stop.shipment_id), route));
   });
+  const receptionMinutes = (value: any) => {
+    const match = String(value || "").match(/^(\d{1,2}):?(\d{2})/);
+    return match ? Number(match[1]) * 60 + Number(match[2]) : -1;
+  };
   const dayShipments = shipments
     .filter((item) => String(item.expected_delivery_at || item.delivery_date || item.preparation_date || "").slice(0, 10) === routeDate)
-    .sort((a, b) => (Number(b.distance_km ?? -1) - Number(a.distance_km ?? -1)) || String(a.address || "").localeCompare(String(b.address || ""), "es", { numeric: true }));
+    .sort((a, b) => {
+      const closingOrder = receptionMinutes(b.closing_time) - receptionMinutes(a.closing_time);
+      const openingOrder = receptionMinutes(b.opening_time) - receptionMinutes(a.opening_time);
+      const distanceOrder = Number(a.distance_km ?? Number.POSITIVE_INFINITY) - Number(b.distance_km ?? Number.POSITIVE_INFINITY);
+      return closingOrder || openingOrder || distanceOrder || String(a.address || "").localeCompare(String(b.address || ""), "es", { numeric: true });
+    })
+    .map((item, index) => ({ ...item, load_position: index + 1 }));
   const unassigned = dayShipments.filter((item) => !assignedByShipment.has(Number(item.id)));
 
   async function createVehicleLoad() {
@@ -1453,15 +1465,15 @@ function VehicleLoadManager({ user }: { user: any }) {
     {error && <p className="error-message" role="alert">{error}</p>}
     {message && <p className="success-message" role="status">{message}</p>}
     <section className="vehicle-load-panel panel">
-      <div className="panel-head"><div><h3>Pedidos preparados</h3><p className="muted">{dayShipments.length} envíos · {unassigned.length} sin asignar · más lejanos primero</p></div><button type="button" className="button primary" disabled={saving || !selected.length} onClick={() => void createVehicleLoad()}>{saving ? "Asignando…" : `Asignar seleccionados (${selected.length})`}</button></div>
+      <div className="panel-head"><div><h3>Pedidos preparados</h3><p className="muted">{dayShipments.length} envíos · {unassigned.length} sin asignar · orden de carga: última entrega primero</p></div><button type="button" className="button primary" disabled={saving || !selected.length} onClick={() => void createVehicleLoad()}>{saving ? "Asignando…" : `Asignar seleccionados (${selected.length})`}</button></div>
       {loading ? <div className="data-loading" role="status"><LoadingIndicator label="Cargando pedidos preparados…" /></div> : <div className="vehicle-load-list">
         {dayShipments.length ? dayShipments.map((item: any) => {
           const route = assignedByShipment.get(Number(item.id));
           const isSelected = selected.includes(Number(item.id));
           return <article className={`vehicle-load-row${route ? " is-assigned" : ""}${isSelected ? " is-selected" : ""}`} key={item.id}>
             <label className="vehicle-load-check"><input type="checkbox" checked={isSelected} disabled={Boolean(route)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, Number(item.id)] : current.filter((id) => id !== Number(item.id)))} aria-label={`Seleccionar ${item.code}`} /></label>
-            <div className="vehicle-load-distance"><b>{item.distance_km === null ? "—" : `${String(item.distance_km).replace(".", ",")} km`}</b><small>{item.distance_km === null ? "Sin coordenadas" : "desde almacén"}</small></div>
-            <div className="vehicle-load-main"><b>{item.code}</b><strong>{item.client_name}</strong><span>{[item.address, item.city].filter(Boolean).join(" · ") || "Dirección no indicada"}</span><small>{item.packages || 1} bultos · Estado: {item.status}</small><div className="vehicle-load-items"><b>Material</b>{item.load_lines?.length ? item.load_lines.map((line: any) => <span key={line.id}>{line.quantity_to_load} {quantityUnitLabel(line.quantity_unit)} · {line.product_name}{line.product_sku ? ` · ${line.product_sku}` : ""}</span>) : <span>Detalle de productos pendiente</span>}</div></div>
+            <div className="vehicle-load-distance"><b>{item.distance_km === null ? "—" : `${String(item.distance_km).replace(".", ",")} km`}</b><small>Carga {item.load_position} · {item.distance_km === null ? "Sin coordenadas" : "desde almacén"}</small></div>
+            <div className="vehicle-load-main"><b>{item.code}</b><strong>{item.client_name}</strong><span>{[item.address, item.city].filter(Boolean).join(" · ") || "Dirección no indicada"}</span><small>Recepción: {item.opening_time && item.closing_time ? `${item.opening_time}–${item.closing_time}` : "Horario pendiente"}</small><small>{item.packages || 1} bultos · Estado: {item.status}</small><div className="vehicle-load-items"><b>Material preparado</b>{item.load_lines?.length ? item.load_lines.map((line: any) => <span key={line.id}>{line.quantity_to_load} {quantityUnitLabel(line.quantity_unit)} · {line.product_name}{line.product_sku ? ` · ${line.product_sku}` : ""}</span>) : <span>Detalle de productos pendiente</span>}</div></div>
             <div className="vehicle-load-notes"><span><b>Nota de carga</b>{item.notes || "Sin indicaciones"}</span><span><b>Nota del repartidor</b>{item.driver_notes || "Sin indicaciones"}</span><span><b>Factura</b>{item.invoice_delivery_method || "Pendiente de indicar"}</span></div>
             <div className="vehicle-load-assignment">{route ? <><b>Asignado</b><span>{route.vehicle || "Sin camión"}</span><small>{route.driver || "Sin conductor"} · {route.code}</small></> : <span className="vehicle-load-pending">Pendiente de asignar</span>}</div>
           </article>;
@@ -6025,7 +6037,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       {productSaveMessage && active === "Productos" && <div className="success-message" role="status">{productSaveMessage}</div>}
       {!isLoadPreparation && active !== "Pedidos" && <BusinessRelatedPanels active={active} rows={rows} lookups={lookups} onNavigate={onNavigate} />}
       {active === "Compras" && <SupplierPayablesPanel rows={rows} suppliers={lookups.suppliers || []} actor={user?.username || "Usuario local"} onReload={() => setListRefreshKey((current) => current + 1)} />}
-      {isLoadPreparation && <CollectiveLoadModal rows={preparationRows} lookups={lookups} dateFilter={preparationDateFilter} actor={user?.username || "Usuario local"} onClose={() => undefined} onDateFilterChange={setPreparationDateFilter} embedded />}
+      {isLoadPreparation && <CollectiveLoadModal rows={preparationRows} lookups={lookups} dateFilter={preparationDateFilter} actor={user?.username || "Usuario local"} onClose={() => onNavigate?.("Carga de vehículos")} onDateFilterChange={setPreparationDateFilter} embedded />}
       {active === "Gastos y tickets" && (
         <ExpenseScanner
           clients={lookups.clients || []}
