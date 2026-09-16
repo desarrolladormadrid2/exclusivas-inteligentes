@@ -5909,7 +5909,7 @@ body:has(.warehouse-tablet-app) .settings-panel {
 }
 .collective-load-simple-main {
   display: grid !important;
-  grid-template-columns: minmax(78px, .55fr) minmax(0, 2fr) minmax(90px, .7fr);
+  grid-template-columns: minmax(78px, .55fr) minmax(0, 1fr);
   gap: 8px;
   align-items: center;
 }
@@ -5922,25 +5922,25 @@ body:has(.warehouse-tablet-app) .settings-panel {
   color: #26343d;
   font-size: 12px;
 }
-.collective-load-simple-main > .collective-load-simple-quantity {
+.collective-load-simple-quantity {
   display: flex !important;
   align-items: center;
   gap: 5px;
 }
-.collective-load-simple-main > .collective-load-simple-quantity > span {
+.collective-load-simple-quantity > span {
   flex: 0 0 auto;
   color: #60737d;
   font-size: 9px;
   font-weight: 700;
 }
-.collective-load-simple-main > .collective-load-simple-quantity > input {
+.collective-load-simple-quantity > input {
   flex: 1 1 auto;
   min-width: 0;
 }
 .collective-load-simple-check {
   display: grid !important;
-  grid-template-columns: minmax(0, 1fr) 128px;
-  grid-template-areas: "barcode action";
+  grid-template-columns: minmax(0, 1fr) 92px 128px;
+  grid-template-areas: "barcode quantity action";
   gap: 8px;
   align-items: end;
   margin-top: 7px;
@@ -5949,6 +5949,9 @@ body:has(.warehouse-tablet-app) .settings-panel {
 }
 .collective-load-simple-check > .collective-load-simple-barcode {
   grid-area: barcode !important;
+}
+.collective-load-simple-check > .collective-load-simple-quantity {
+  grid-area: quantity !important;
 }
 .collective-load-simple-check > .collective-load-simple-action {
   grid-area: action !important;
@@ -5967,6 +5970,6 @@ body:has(.warehouse-tablet-app) .settings-panel {
     min-height: 0;
     padding: 9px;
   }
-  .collective-load-simple-main { grid-template-columns: 72px minmax(0, 1fr) 92px; gap: 7px; }
-  .collective-load-simple-check { grid-template-columns: minmax(0, 1fr) 120px; gap: 7px; }
+  .collective-load-simple-main { grid-template-columns: 72px minmax(0, 1fr); gap: 7px; }
+  .collective-load-simple-check { grid-template-columns: minmax(0, 1fr) 78px 120px; grid-template-areas: "barcode quantity action"; gap: 7px; }
 }
