@@ -5930,8 +5930,9 @@ body:has(.warehouse-tablet-app) .settings-panel {
 .collective-load-simple-quantity > span {
   flex: 0 0 auto;
   color: #60737d;
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
+  white-space: nowrap;
 }
 .collective-load-simple-quantity > input {
   flex: 1 1 auto;
@@ -5939,7 +5940,7 @@ body:has(.warehouse-tablet-app) .settings-panel {
 }
 .collective-load-simple-check {
   display: grid !important;
-  grid-template-columns: minmax(0, 1fr) 92px 128px;
+  grid-template-columns: minmax(0, 1fr) 118px 128px;
   grid-template-areas: "barcode quantity action";
   gap: 8px;
   align-items: end;
@@ -5971,5 +5972,5 @@ body:has(.warehouse-tablet-app) .settings-panel {
     padding: 9px;
   }
   .collective-load-simple-main { grid-template-columns: 72px minmax(0, 1fr); gap: 7px; }
-  .collective-load-simple-check { grid-template-columns: minmax(0, 1fr) 78px 120px; grid-template-areas: "barcode quantity action"; gap: 7px; }
+  .collective-load-simple-check { grid-template-columns: minmax(0, 1fr) 118px 120px; grid-template-areas: "barcode quantity action"; gap: 7px; }
 }
