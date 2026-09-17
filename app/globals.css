@@ -6125,3 +6125,95 @@ body:has(.warehouse-tablet-app) .settings-panel {
 .preparation-order-edit-success{color:#087846}
 .preparation-order-edit-modal .preview-actions{display:flex;justify-content:flex-end;gap:8px;margin:0;padding-top:4px}
 @media(max-width:700px){.preparation-order-edit-modal{width:calc(100vw - 18px);max-height:calc(100vh - 18px);padding:14px}.preparation-order-edit-summary,.preparation-order-edit-grid,.preparation-order-edit-notes{grid-template-columns:1fr}.preparation-order-edit-check{align-self:start}.preparation-order-edit-modal .preview-actions{flex-wrap:wrap}.preparation-order-edit-modal .preview-actions .button{flex:1 1 130px}}
+
+/* El listado impreso es una hoja operativa compacta, no una copia vertical de la pantalla. */
+@media print {
+  @page { size: A4 landscape; margin: 6mm; }
+  body:has(.collective-load-overlay.is-embedded) .collective-load-header {
+    display: block;
+    padding: 0 0 4px;
+    border-bottom: 1px solid #cbd7dc;
+    background: #fff;
+  }
+  body:has(.collective-load-overlay.is-embedded) .collective-load-header > div:first-child {
+    display: block !important;
+  }
+  body:has(.collective-load-overlay.is-embedded) .collective-load-header h2 {
+    margin: 0;
+    font-size: 14px;
+  }
+  body:has(.collective-load-overlay.is-embedded) .collective-load-header small {
+    font-size: 8px;
+  }
+  body:has(.collective-load-overlay.is-embedded) .collective-load-date-toolbar,
+  body:has(.collective-load-overlay.is-embedded) .collective-load-summary,
+  body:has(.collective-load-overlay.is-embedded) .collective-load-note,
+  body:has(.collective-load-overlay.is-embedded) .collective-load-feedback,
+  body:has(.collective-load-overlay.is-embedded) .collective-load-actions {
+    display: none !important;
+  }
+  body:has(.collective-load-overlay.is-embedded) .collective-load-simple-list {
+    margin: 4px 0 0;
+    border: 1px solid #cbd7dc;
+  }
+  body:has(.collective-load-overlay.is-embedded) .collective-load-simple-head,
+  body:has(.collective-load-overlay.is-embedded) .collective-load-simple-row {
+    display: grid !important;
+    grid-template-columns: 78px minmax(0, 2.15fr) minmax(0, 1.25fr) 92px;
+    gap: 5px;
+    align-items: center;
+  }
+  body:has(.collective-load-overlay.is-embedded) .collective-load-simple-head {
+    min-height: 17px;
+    padding: 2px 6px;
+    font-size: 7px;
+  }
+  body:has(.collective-load-overlay.is-embedded) .collective-load-simple-row {
+    min-height: 0;
+    padding: 2px 6px;
+    border-left-width: 3px;
+    font-size: 8px;
+    break-inside: avoid;
+  }
+  body:has(.collective-load-overlay.is-embedded) .collective-load-simple-main,
+  body:has(.collective-load-overlay.is-embedded) .collective-load-simple-check {
+    display: contents !important;
+  }
+  body:has(.collective-load-overlay.is-embedded) .collective-load-simple-main > .collective-load-simple-location,
+  body:has(.collective-load-overlay.is-embedded) .collective-load-simple-product b {
+    overflow: hidden;
+    font-size: 8px;
+    line-height: 1.1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  body:has(.collective-load-overlay.is-embedded) .collective-load-simple-barcode {
+    display: block !important;
+  }
+  body:has(.collective-load-overlay.is-embedded) .collective-load-simple-barcode input,
+  body:has(.collective-load-overlay.is-embedded) .collective-load-simple-quantity input {
+    min-height: 19px;
+    height: 19px;
+    padding: 1px 4px;
+    border-color: #b8cbd2;
+    font-size: 8px;
+    line-height: 1;
+  }
+  body:has(.collective-load-overlay.is-embedded) .collective-load-simple-quantity {
+    display: flex !important;
+    align-items: center;
+    gap: 3px;
+    min-width: 0;
+  }
+  body:has(.collective-load-overlay.is-embedded) .collective-load-simple-quantity > span {
+    overflow: hidden;
+    max-width: 43px;
+    font-size: 7px;
+    line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  body:has(.collective-load-overlay.is-embedded) .collective-load-simple-action {
+    display: none !important;
+  }
+}
