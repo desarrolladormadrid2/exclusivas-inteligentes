@@ -2979,6 +2979,16 @@ export async function crmApiHandler(req, res) {
       }
       const reopenPreparation = Boolean(d.reopen_preparation);
       const updateClientAddress = Boolean(d.update_client_address);
+      // El pedido no tiene columnas propias para la franja de recepción:
+      // se guarda en su envío vinculado. Se extraen antes del UPDATE genérico
+      // de orders para que la edición operativa pueda enviarlas en una sola
+      // petición sin intentar crear columnas inexistentes en orders.
+      const orderDeliveryWindowStart = t === "orders" ? d.delivery_window_start : undefined;
+      const orderDeliveryWindowEnd = t === "orders" ? d.delivery_window_end : undefined;
+      if (t === "orders") {
+        delete d.delivery_window_start;
+        delete d.delivery_window_end;
+      }
       delete d.reopen_preparation;
       delete d.update_client_address;
       if (req.method === "POST") {
@@ -3551,25 +3561,27 @@ export async function crmApiHandler(req, res) {
         if (t === "orders") {
           const linkedShipment = db.prepare("SELECT id,delivery_window_start,delivery_window_end FROM shipments WHERE order_id=? ORDER BY id DESC LIMIT 1").get(p[2]);
           if (linkedShipment) {
-            const currentOrder = db.prepare("SELECT client_id,collection_point_id,address,delivery_date,preparation_date,shipping_date,urgent FROM orders WHERE id=?").get(p[2]);
+            const currentOrder = db.prepare("SELECT client_id,collection_point_id,address,delivery_city,delivery_date,preparation_date,shipping_date,urgent FROM orders WHERE id=?").get(p[2]);
             const clientId = d.client_id ?? currentOrder?.client_id ?? null;
             const collectionPointId = d.collection_point_id ?? currentOrder?.collection_point_id ?? null;
             const client = clientId
-              ? db.prepare("SELECT address,opening_time,closing_time,invoice_delivery_method FROM clients WHERE id=?").get(clientId)
+              ? db.prepare("SELECT address,city,opening_time,closing_time,invoice_delivery_method FROM clients WHERE id=?").get(clientId)
               : null;
             const shippingLocation = collectionPointId
               ? db.prepare("SELECT address,opening_time,closing_time FROM collection_points WHERE id=? AND (client_id=? OR client_id IS NULL)").get(Number(collectionPointId), Number(clientId || 0))
               : null;
-            const shipmentAddress = shippingLocation?.address || d.address || client?.address || currentOrder?.address || null;
-          db.prepare("UPDATE shipments SET client_id=?,collection_point_id=?,preparation_date=?,urgent=?,expected_delivery_at=?,address=?,delivery_window_start=?,delivery_window_end=?,notes=?,driver_notes=?,invoice_delivery_method=? WHERE id=?").run(
+            const shipmentAddress = d.address !== undefined ? String(d.address || "").trim() : shippingLocation?.address || client?.address || currentOrder?.address || null;
+            const shipmentCity = d.delivery_city !== undefined ? String(d.delivery_city || "").trim() : shippingLocation?.city || client?.city || currentOrder?.delivery_city || null;
+          db.prepare("UPDATE shipments SET client_id=?,collection_point_id=?,preparation_date=?,urgent=?,expected_delivery_at=?,address=?,delivery_city=?,delivery_window_start=?,delivery_window_end=?,notes=?,driver_notes=?,invoice_delivery_method=? WHERE id=?").run(
               clientId,
               collectionPointId,
               d.preparation_date ?? currentOrder?.preparation_date ?? null,
               Number(d.urgent ?? currentOrder?.urgent ?? 0),
               d.shipping_date ?? currentOrder?.shipping_date ?? d.delivery_date ?? currentOrder?.delivery_date ?? null,
               shipmentAddress,
-              d.delivery_window_start ?? shippingLocation?.opening_time ?? client?.opening_time ?? linkedShipment.delivery_window_start ?? null,
-              d.delivery_window_end ?? shippingLocation?.closing_time ?? client?.closing_time ?? linkedShipment.delivery_window_end ?? null,
+              shipmentCity,
+              orderDeliveryWindowStart ?? shippingLocation?.opening_time ?? client?.opening_time ?? linkedShipment.delivery_window_start ?? null,
+              orderDeliveryWindowEnd ?? shippingLocation?.closing_time ?? client?.closing_time ?? linkedShipment.delivery_window_end ?? null,
               d.loading_notes ?? d.notes ?? null,
               d.driver_notes ?? null,
               d.invoice_delivery_method ?? client?.invoice_delivery_method ?? "Pendiente de indicar",

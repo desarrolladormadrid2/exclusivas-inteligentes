@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.151";
+const APP_VERSION = "2.0.152";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -37,6 +37,28 @@ function nextOrderWorkingDate(closedDay?: unknown) {
   const closedWeekday = parseWeeklyClosedDay(closedDay);
   while (closedWeekday !== null && date.getDay() === closedWeekday) date.setDate(date.getDate() + 1);
   return dateInputFromLocalDate(date);
+}
+
+function weekdayLabelForDate(value: unknown) {
+  const match = String(value ?? "").slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return "";
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12);
+  if (Number.isNaN(date.getTime())) return "";
+  return WEEKDAY_OPTIONS.find((option) => Number(option.value) === date.getDay())?.label || "";
+}
+
+function clientClosedOnDate(client: any, value: unknown) {
+  const match = String(value ?? "").slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12);
+  const closedDay = parseWeeklyClosedDay(client?.weekly_closed_day);
+  return closedDay !== null && !Number.isNaN(date.getTime()) && date.getDay() === closedDay;
+}
+
+function formatReceptionWindow(start: unknown, end: unknown) {
+  const opening = String(start || "").slice(0, 5);
+  const closing = String(end || "").slice(0, 5);
+  return opening && closing ? `${opening}–${closing}` : opening || closing || "Horario pendiente";
 }
 
 function preparationLotAllocations(line: any) {
@@ -3257,6 +3279,12 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const [inlineDraft, setInlineDraft] = useState<any>({});
   const [search, setSearch] = useState("");
   const [preview, setPreview] = useState<any>(null);
+  const [preparationOrderEdit, setPreparationOrderEdit] = useState<any>(null);
+  const [preparationOrderEditLines, setPreparationOrderEditLines] = useState<any[]>([]);
+  const [preparationOrderEditLoading, setPreparationOrderEditLoading] = useState(false);
+  const [preparationOrderEditSaving, setPreparationOrderEditSaving] = useState(false);
+  const [preparationOrderEditError, setPreparationOrderEditError] = useState("");
+  const [preparationOrderEditMessage, setPreparationOrderEditMessage] = useState("");
   const [documentCreationNotice, setDocumentCreationNotice] = useState<any>(null);
   const [entryDetail, setEntryDetail] = useState<any>(null);
   const [entryEdit, setEntryEdit] = useState<any>(null);
@@ -4951,6 +4979,90 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     setLocationDrafts(Object.fromEntries(productRows.map((product: any) => [String(product.id), String(product.warehouse_location || "")] )));
     setPreviewLoading(false);
   }
+  async function openPreparationOrderEditor(row: any) {
+    const orderId = Number(row?.order_id || row?._source_order_id || row?.id);
+    if (!orderId) {
+      setError("Este registro no tiene un pedido vinculado que se pueda editar.");
+      return;
+    }
+    const client = getClient(row.client_id);
+    setPreparationOrderEditLoading(true);
+    setPreparationOrderEditError("");
+    setPreparationOrderEditMessage("");
+    setPreparationOrderEdit({ id: orderId, code: row.code || `Pedido #${orderId}`, client_id: row.client_id || "", client_name: row.client_name || client?.name || "Cliente no indicado", status: row.status || "Pendiente", _loading: true });
+    setPreparationOrderEditLines(previewLines.length ? previewLines : (lookups.order_lines || []).filter((line: any) => Number(line.order_id) === orderId));
+    setPreview(null);
+    try {
+      const response = await fetch(`/api/orders/${orderId}?refresh=${Date.now()}`, { cache: "no-store" });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "No se ha encontrado el pedido.");
+      const order = Array.isArray(body) ? body.find((item: any) => Number(item.id) === orderId) : body?.data || body;
+      if (!order) throw new Error("No se ha encontrado el pedido.");
+      const orderClient = getClient(order.client_id || row.client_id);
+      const orderLocation = (lookups.collection_points || []).find((item: any) => Number(item.id) === Number(order.collection_point_id || row.collection_point_id));
+      setPreparationOrderEdit({
+        id: orderId,
+        code: order.code || row.code || `Pedido #${orderId}`,
+        client_id: order.client_id || row.client_id || "",
+        client_name: order.client_name || row.client_name || orderClient?.name || "Cliente no indicado",
+        status: order.status || row.status || "Pendiente",
+        preparation_date: order.preparation_date || row.preparation_date || "",
+        shipping_date: order.shipping_date || row.shipping_date || "",
+        address: order.address || row.address || orderLocation?.address || orderClient?.address || "",
+        delivery_city: order.delivery_city || row.delivery_city || orderLocation?.city || orderClient?.city || "",
+        delivery_window_start: row.delivery_window_start || orderLocation?.opening_time || orderClient?.opening_time || "",
+        delivery_window_end: row.delivery_window_end || orderLocation?.closing_time || orderClient?.closing_time || "",
+        urgent: Number(order.urgent ?? row.urgent ?? 0),
+        loading_notes: order.loading_notes ?? row.notes ?? "",
+        driver_notes: order.driver_notes ?? row.driver_notes ?? "",
+        notes: order.notes || "",
+      });
+      setPreparationOrderEditLines((current) => current.length ? current : (lookups.order_lines || []).filter((line: any) => Number(line.order_id) === orderId));
+    } catch (reason: any) {
+      setPreparationOrderEditError(reason.message || "No se ha podido cargar el pedido.");
+    } finally {
+      setPreparationOrderEditLoading(false);
+    }
+  }
+  async function savePreparationOrderEdit(event: FormEvent) {
+    event.preventDefault();
+    if (!preparationOrderEdit?.id || preparationOrderEditSaving) return;
+    if (isOrderSent(preparationOrderEdit)) {
+      setPreparationOrderEditError("Este pedido ya se ha enviado o cerrado y no admite cambios.");
+      return;
+    }
+    setPreparationOrderEditSaving(true);
+    setPreparationOrderEditError("");
+    setPreparationOrderEditMessage("");
+    const draft = preparationOrderEdit;
+    const payload = {
+      address: String(draft.address || "").trim(),
+      delivery_city: String(draft.delivery_city || "").trim(),
+      preparation_date: draft.preparation_date || null,
+      shipping_date: draft.shipping_date || null,
+      delivery_date: draft.shipping_date || null,
+      delivery_window_start: draft.delivery_window_start || null,
+      delivery_window_end: draft.delivery_window_end || null,
+      urgent: Number(draft.urgent || 0) ? 1 : 0,
+      loading_notes: String(draft.loading_notes || ""),
+      driver_notes: String(draft.driver_notes || ""),
+      notes: String(draft.notes || ""),
+    };
+    try {
+      const response = await fetch(`/api/orders/${draft.id}`, { method: "PUT", headers: actorHeaders, body: JSON.stringify(payload) });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "No se ha podido guardar el pedido.");
+      const updatedOrder = { ...draft, ...payload, ...body, _loading: false };
+      setPreparationOrderEdit(updatedOrder);
+      setLookups((current: any) => ({ ...current, orders: (current.orders || []).map((item: any) => Number(item.id) === Number(draft.id) ? { ...item, ...updatedOrder } : item) }));
+      setRows((current) => current.map((item) => Number(item.order_id || item._source_order_id) === Number(draft.id) ? { ...item, address: payload.address, delivery_city: payload.delivery_city, preparation_date: payload.preparation_date, shipping_date: payload.shipping_date, delivery_window_start: payload.delivery_window_start, delivery_window_end: payload.delivery_window_end, urgent: payload.urgent, notes: payload.loading_notes, driver_notes: payload.driver_notes } : item));
+      setPreparationOrderEditMessage("Pedido actualizado. Los cambios ya están disponibles para almacén y reparto.");
+    } catch (reason: any) {
+      setPreparationOrderEditError(reason.message || "No se ha podido guardar el pedido.");
+    } finally {
+      setPreparationOrderEditSaving(false);
+    }
+  }
   async function loadBillingOrders() {
     setBillingLoading(true); setBillingError("");
     try {
@@ -5546,14 +5658,20 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const preparationAssigneeNames = new Set(preparationAssigneeOptions.map((candidate: any) => String(candidate.username || "")));
   const usesRecordModal = ["Clientes", "Proveedores", "Almacenes", "Lugares de recogida", "Productos", "Cobros"].includes(active);
   const previewLocation = preview ? (lookups.collection_points || []).find((item: any) => Number(item.id) === Number(preview.collection_point_id)) : null;
-  const previewLatValue = Number(previewLocation?.latitude ?? previewClient?.latitude);
-  const previewLonValue = Number(previewLocation?.longitude ?? previewClient?.longitude);
+  const effectivePreviewClient = previewClient || (preview ? getClient(preview.client_id) : null);
+  const previewReceptionDate = preview?.shipping_date || preview?.preparation_date || preparationDateFilter;
+  const previewReceptionStart = preview?.delivery_window_start || previewLocation?.opening_time || effectivePreviewClient?.opening_time || "";
+  const previewReceptionEnd = preview?.delivery_window_end || previewLocation?.closing_time || effectivePreviewClient?.closing_time || "";
+  const previewClosedOnDate = clientClosedOnDate(effectivePreviewClient, previewReceptionDate);
+  const previewWeekday = weekdayLabelForDate(previewReceptionDate);
+  const previewLatValue = Number(previewLocation?.latitude ?? effectivePreviewClient?.latitude);
+  const previewLonValue = Number(previewLocation?.longitude ?? effectivePreviewClient?.longitude);
   const previewLat = Number.isFinite(previewLatValue) ? previewLatValue : null;
   const previewLon = Number.isFinite(previewLonValue) ? previewLonValue : null;
   const hasPreviewCoordinates = Number.isFinite(previewLat) && Number.isFinite(previewLon);
-  const previewAddress = preview?.address || previewLocation?.address || previewClient?.address || "";
-  const previewCity = preview?.delivery_city || previewLocation?.city || previewClient?.city || preview?.city || "";
-  const previewMapQuery = [previewAddress, previewCity, previewLocation?.name, previewClient?.name, "España"].filter(Boolean).join(", ");
+  const previewAddress = preview?.address || previewLocation?.address || effectivePreviewClient?.address || "";
+  const previewCity = preview?.delivery_city || previewLocation?.city || effectivePreviewClient?.city || preview?.city || "";
+  const previewMapQuery = [previewAddress, previewCity, previewLocation?.name, effectivePreviewClient?.name, "España"].filter(Boolean).join(", ");
   const previewWarehouse = (lookups.warehouses || []).find((item: any) => Number(item.id) === Number(preview?.warehouse_id))
     || (lookups.warehouses || []).find((item: any) => /principal/i.test(String(item.name || "")))
     || (lookups.warehouses || [])[0]
@@ -6437,14 +6555,17 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                   {column.rows.length ? column.rows.map((row) => {
                     const client = preparationClient(row);
                     const date = row.preparation_date || row.shipping_date || row.expected_delivery_at;
-                    const deliveryWindow = row.delivery_window_start && row.delivery_window_end ? `${String(row.delivery_window_start).slice(0, 5)}–${String(row.delivery_window_end).slice(0, 5)}` : "Horario pendiente";
+                    const clientRecord = getClient(row.client_id);
+                    const receptionDate = row.shipping_date || row.preparation_date || date;
+                    const closed = clientClosedOnDate(clientRecord, receptionDate);
+                    const deliveryWindow = formatReceptionWindow(row.delivery_window_start || clientRecord?.opening_time, row.delivery_window_end || clientRecord?.closing_time);
                     return (
                       <button type="button" className="crm-preparation-card" key={row.id} onClick={() => void openPreview(row)}>
                         <span className="crm-preparation-card-top"><b>{row.code || `Envío #${row.id}`}</b><em>{row.status || "Pendiente"}</em></span>
                         <strong>{client}</strong>
                         <span>{preparationAddress(row)}</span>
                         <small>{date ? `Preparación ${String(date).slice(0, 10)}` : "Fecha pendiente"} · Envío {row.shipping_date ? String(row.shipping_date).slice(0, 10) : "pendiente"}</small>
-                        <small>{deliveryWindow}{Number(row.urgent) === 1 ? " · URGENTE" : ""}</small>
+                        <small className={closed ? "crm-preparation-closed" : "crm-preparation-reception"}>{closed ? `Cerrado el ${weekdayLabelForDate(receptionDate)}` : `Recepción ${deliveryWindow}`}{Number(row.urgent) === 1 ? " · URGENTE" : ""}</small>
                       </button>
                     );
                   }) : <p className="crm-preparation-empty">No hay pedidos en este estado.</p>}
@@ -6751,7 +6872,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
               <p>
                 <b>{active === "Compras" ? "Proveedor" : "Cliente"}</b>
                 <br />
-                {(active === "Compras" ? previewSupplier?.name : previewClient?.name) ||
+                {(active === "Compras" ? previewSupplier?.name : effectivePreviewClient?.name) ||
                   (previewLoading
                     ? active === "Compras" ? "Cargando proveedor…" : "Cargando cliente…"
                     : active === "Compras" ? "Proveedor no identificado" : "Cliente no identificado")}
@@ -6759,7 +6880,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                 {previewAddress || "Dirección no indicada"}
                 {previewCity && <><br />{previewCity}</>}
                 <br />
-                {previewClient?.tax_id || "NIF/CIF no indicado"}
+                {effectivePreviewClient?.tax_id || "NIF/CIF no indicado"}
               </p>
               <p>
                 <b>Fecha</b>
@@ -6773,6 +6894,10 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                 {isLoadPreparation && <><br /><b>Preparado por:</b> {preview.prepared_by || "Pendiente de asignar"}<br /><b>Horario de entrega:</b> {preview.delivery_window_start && preview.delivery_window_end ? `${String(preview.delivery_window_start).slice(0, 5)}–${String(preview.delivery_window_end).slice(0, 5)}` : "Pendiente de indicar"}</>}
               </p>
             </div>
+            {isCrmPreparation && <section className="crm-preparation-reception-panel" aria-label="Horario de recepción del cliente">
+              <div><b>Recepción del cliente</b><strong className={previewClosedOnDate ? "is-closed" : "is-open"}>{previewClosedOnDate ? `Cerrado el ${previewWeekday || "ese día"}` : `Abierto · ${formatReceptionWindow(previewReceptionStart, previewReceptionEnd)}`}</strong></div>
+              <small>{previewReceptionDate ? `Para el ${formatSpanishDateValue(previewReceptionDate, false)}${previewWeekday ? ` · ${previewWeekday}` : ""}` : "Día de recepción pendiente"}{effectivePreviewClient?.weekly_closed_day && !previewClosedOnDate ? ` · Cierre semanal: ${WEEKDAY_OPTIONS.find((option) => Number(option.value) === parseWeeklyClosedDay(effectivePreviewClient.weekly_closed_day))?.label || "indicado"}` : ""}</small>
+            </section>}
             {active === "Pedidos" && <OrderWorkflowPanel order={preview} shipment={getOrderShipment(preview)} billingStatus={getOrderBillingStatus(preview)} paymentStatus={getOrderPaymentStatus(preview)} invoice={previewInvoice || getOrderInvoice(preview)} onOpenPayment={() => openPaymentFromOrder(preview)} onNavigate={onNavigate} />}
             {(active === "Pedidos" || active === "Envíos") && (() => {
               const deliveryShipment = active === "Envíos" ? preview : getOrderShipment(preview);
@@ -7010,6 +7135,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             </div>}
             <div className="preview-document-actions">
               {(active === "Facturas" || active === "Albaranes") && <button className="button workflow" type="button" onClick={() => { const row = preview; setPreview(null); void openRecordModal(row); }}>Editar documento</button>}
+              {isCrmPreparation && <button className="button primary" type="button" onClick={() => void openPreparationOrderEditor(preview)}>Editar pedido y datos de reparto</button>}
               <button className="button secondary" disabled={previewLoading} onClick={() => window.print()}>
                 Imprimir / guardar PDF
               </button>
@@ -7024,6 +7150,29 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           </div>
         </div>
       )}
+      {preparationOrderEdit && <div className="preview-overlay preparation-order-edit-overlay" onClick={(event) => event.target === event.currentTarget && !preparationOrderEditSaving && setPreparationOrderEdit(null)}>
+        <form className="preparation-order-edit-modal" onSubmit={(event) => void savePreparationOrderEdit(event)} onClick={(event) => event.stopPropagation()}>
+          <header className="preview-header"><div><p className="eyebrow">CRM · PREPARACIÓN DE PEDIDOS</p><b>Editar pedido · {preparationOrderEdit.code}</b><small>Actualiza aquí las indicaciones que necesitan almacén y reparto.</small></div><button type="button" className="preview-close" aria-label="Cerrar" onClick={() => !preparationOrderEditSaving && setPreparationOrderEdit(null)}>×</button></header>
+          {preparationOrderEditLoading ? <div className="data-loading" role="status"><span className="loading-spinner" aria-hidden="true" />Cargando datos del pedido…</div> : <>
+            <div className="preparation-order-edit-summary"><div><span>Cliente</span><b>{preparationOrderEdit.client_name || "Cliente no indicado"}</b></div><div><span>Estado</span><b>{preparationOrderEdit.status || "Pendiente"}</b></div><div><span>Día de preparación</span><b>{preparationOrderEdit.preparation_date ? formatSpanishDateValue(preparationOrderEdit.preparation_date, false) : "No indicado"}</b></div></div>
+            <section className="crm-preparation-reception-panel preparation-order-edit-reception" aria-label="Estado de recepción del cliente"><div><b>Recepción del cliente</b><strong className={clientClosedOnDate(getClient(preparationOrderEdit.client_id), preparationOrderEdit.shipping_date || preparationOrderEdit.preparation_date) ? "is-closed" : "is-open"}>{clientClosedOnDate(getClient(preparationOrderEdit.client_id), preparationOrderEdit.shipping_date || preparationOrderEdit.preparation_date) ? `Cerrado el ${weekdayLabelForDate(preparationOrderEdit.shipping_date || preparationOrderEdit.preparation_date)}` : `Abierto · ${formatReceptionWindow(preparationOrderEdit.delivery_window_start || getClient(preparationOrderEdit.client_id)?.opening_time, preparationOrderEdit.delivery_window_end || getClient(preparationOrderEdit.client_id)?.closing_time)}`}</strong></div><small>El aviso se calcula con el día de envío y el cierre semanal de la ficha del cliente.</small></section>
+            <div className="preparation-order-edit-grid">
+              <label>Día de preparación<input type="date" value={preparationOrderEdit.preparation_date || ""} onChange={(event) => setPreparationOrderEdit((current: any) => ({ ...current, preparation_date: event.target.value }))} disabled={preparationOrderEditSaving} /></label>
+              <label>Día de envío<input type="date" value={preparationOrderEdit.shipping_date || ""} onChange={(event) => setPreparationOrderEdit((current: any) => ({ ...current, shipping_date: event.target.value }))} disabled={preparationOrderEditSaving} /></label>
+              <label>Dirección de entrega<input value={preparationOrderEdit.address || ""} onChange={(event) => setPreparationOrderEdit((current: any) => ({ ...current, address: event.target.value }))} disabled={preparationOrderEditSaving} /></label>
+              <label>Ciudad<input value={preparationOrderEdit.delivery_city || ""} onChange={(event) => setPreparationOrderEdit((current: any) => ({ ...current, delivery_city: event.target.value }))} disabled={preparationOrderEditSaving} /></label>
+              <label>Hora de apertura<input type="time" value={String(preparationOrderEdit.delivery_window_start || "").slice(0, 5)} onChange={(event) => setPreparationOrderEdit((current: any) => ({ ...current, delivery_window_start: event.target.value }))} disabled={preparationOrderEditSaving} /></label>
+              <label>Hora de cierre<input type="time" value={String(preparationOrderEdit.delivery_window_end || "").slice(0, 5)} onChange={(event) => setPreparationOrderEdit((current: any) => ({ ...current, delivery_window_end: event.target.value }))} disabled={preparationOrderEditSaving} /></label>
+              <label className="preparation-order-edit-check"><input type="checkbox" checked={Number(preparationOrderEdit.urgent || 0) === 1} onChange={(event) => setPreparationOrderEdit((current: any) => ({ ...current, urgent: event.target.checked ? 1 : 0 }))} disabled={preparationOrderEditSaving} />Pedido urgente</label>
+            </div>
+            <div className="preparation-order-edit-notes"><label>Nota para almacén<textarea value={preparationOrderEdit.loading_notes || ""} onChange={(event) => setPreparationOrderEdit((current: any) => ({ ...current, loading_notes: event.target.value }))} placeholder="Indicaciones para preparar el pedido…" rows={3} disabled={preparationOrderEditSaving} /></label><label>Nota para reparto<textarea value={preparationOrderEdit.driver_notes || ""} onChange={(event) => setPreparationOrderEdit((current: any) => ({ ...current, driver_notes: event.target.value }))} placeholder="Indicaciones para cargar y entregar…" rows={3} disabled={preparationOrderEditSaving} /></label><label>Notas generales<textarea value={preparationOrderEdit.notes || ""} onChange={(event) => setPreparationOrderEdit((current: any) => ({ ...current, notes: event.target.value }))} placeholder="Información adicional del pedido…" rows={3} disabled={preparationOrderEditSaving} /></label></div>
+            <section className="preparation-order-edit-lines" aria-label="Artículos del pedido"><b>Artículos del pedido</b>{preparationOrderEditLines.length ? preparationOrderEditLines.map((line: any) => <div key={line.id}><span>{productOptions.find((product: any) => Number(product.id) === Number(line.product_id))?.name || line.product_name || `Producto #${line.product_id}`}</span><strong>{line.quantity_requested || line.quantity} {quantityUnitLabel(line.quantity_unit)}</strong></div>) : <small>No hay líneas de producto asociadas.</small>}</section>
+            {preparationOrderEditError && <p className="preparation-order-edit-error" role="alert">{preparationOrderEditError}</p>}
+            {preparationOrderEditMessage && <p className="preparation-order-edit-success" role="status">{preparationOrderEditMessage}</p>}
+            <footer className="preview-actions"><button type="button" className="button secondary" onClick={() => !preparationOrderEditSaving && setPreparationOrderEdit(null)} disabled={preparationOrderEditSaving}>Cerrar</button><button type="submit" className="button primary" disabled={preparationOrderEditSaving || isOrderSent(preparationOrderEdit)}>{preparationOrderEditSaving ? "Guardando…" : isOrderSent(preparationOrderEdit) ? "Pedido cerrado" : "Guardar cambios"}</button></footer>
+          </>}
+        </form>
+      </div>}
       {shipmentLabelOpen && preview && isLoadPreparation && <ShipmentLabelModal shipment={preview} client={previewClient} lines={previewLines} products={productOptions} address={previewAddress} city={previewCity} onClose={() => setShipmentLabelOpen(false)} />}
       {notePreview && (
         <div className="preview-overlay" onClick={() => setNotePreview(null)}>
