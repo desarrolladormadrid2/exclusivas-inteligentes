@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.146";
+const APP_VERSION = "2.0.147";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -3232,7 +3232,7 @@ function ClientReceivablesPanel({ client, invoices, payments }: { client: any; i
   );
 }
 
-function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFormConsumed }: { active: string; user?: any; onNavigate?: (module: string, date?: string) => void; assistantFormIntent?: any; onAssistantFormConsumed?: () => void }) {
+function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFormConsumed, warehouseMode = false }: { active: string; user?: any; onNavigate?: (module: string, date?: string) => void; assistantFormIntent?: any; onAssistantFormConsumed?: () => void; warehouseMode?: boolean }) {
   const c = cfg[active];
   const actorHeaders = {
     "Content-Type": "application/json",
@@ -5531,7 +5531,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   ]);
   const timeFields = new Set(["opening_time", "closing_time", "delivery_window_start", "delivery_window_end"]);
   const isDateField = (field: string) => dateFields.has(field) || field.endsWith("_date") || field.endsWith("_at");
-  const isLoadPreparation = active === "Preparación de pedidos";
+  const isLoadPreparation = warehouseMode && active === "Preparación de pedidos";
   const preparationAssigneeOptions = (lookups.users || [])
     .filter((candidate: any) => {
       if (Number(candidate.deleted || 0) === 1) return false;
@@ -10932,7 +10932,7 @@ function WarehouseTabletApp() {
     </header>
     <nav className="warehouse-tablet-nav" aria-label="Secciones de almacén">{sections.map((section) => <button type="button" key={section.id} className={active === section.id ? "is-active" : ""} aria-pressed={active === section.id} onClick={() => setActive(section.id)}><b>{section.short}</b></button>)}</nav>
     <section className="warehouse-tablet-content">
-      {active === "Preparación de pedidos" && <Manager active="Preparación de pedidos" user={currentUser} onNavigate={(module, date) => { if (date) setLoadDate(date); setActive(module); }} />}
+      {active === "Preparación de pedidos" && <Manager active="Preparación de pedidos" user={currentUser} warehouseMode onNavigate={(module, date) => { if (date) setLoadDate(date); setActive(module); }} />}
       {active === "Carga de vehículos" && <VehicleLoadManager user={currentUser} initialDate={loadDate} />}
       {active === "Entradas" && <Manager active="Entradas" user={currentUser} onNavigate={(module) => setActive(module)} />}
       {active === "Crear incidencia" && <WarehouseIncidentManager user={currentUser} />}
