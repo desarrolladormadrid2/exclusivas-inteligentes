@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.147";
+const APP_VERSION = "2.0.148";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -626,7 +626,7 @@ const cfg: any = {
   "Preparación de pedidos": {
     api: "shipments",
     title: "Preparación de pedidos",
-    statusFilter: ["Preparando", "Preparado", "Preparado con incidencia"],
+    statusFilter: ["Pendiente", "Nuevo", "Confirmado", "Preparando", "Preparado", "Preparado con incidencia"],
     fields: [
       "code",
       "order_id",
@@ -5532,6 +5532,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const timeFields = new Set(["opening_time", "closing_time", "delivery_window_start", "delivery_window_end"]);
   const isDateField = (field: string) => dateFields.has(field) || field.endsWith("_date") || field.endsWith("_at");
   const isLoadPreparation = warehouseMode && active === "Preparación de pedidos";
+  const isCrmPreparation = !warehouseMode && active === "Preparación de pedidos";
   const preparationAssigneeOptions = (lookups.users || [])
     .filter((candidate: any) => {
       if (Number(candidate.deleted || 0) === 1) return false;
@@ -5749,6 +5750,19 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pagedRows = sortedRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const preparationStatusGroup = (row: any) => {
+    const status = String(row.status || "Pendiente");
+    if (["Preparado", "Preparado con incidencia"].includes(status)) return "prepared";
+    if (["Preparando", "En preparación"].includes(status) && (row.prepared_by || row.preparation_started_at || row.preparation_started_by)) return "preparing";
+    return "pending";
+  };
+  const crmPreparationColumns = [
+    { key: "pending", title: "Pendientes de preparar", hint: "Aún no empezados" },
+    { key: "preparing", title: "Preparando", hint: "En curso" },
+    { key: "prepared", title: "Preparados", hint: "Listos para cargar" },
+  ].map((column) => ({ ...column, rows: sortedRows.filter((row) => preparationStatusGroup(row) === column.key) }));
+  const preparationClient = (row: any) => row.client_name || getClient(row.client_id)?.name || "Cliente sin nombre";
+  const preparationAddress = (row: any) => [row.address, row.delivery_city || row.city].filter(Boolean).join(" · ") || "Dirección no indicada";
   const currentListKey = `${active}|${showDeleted ? "deleted" : "active"}|${showInactive ? "all-statuses" : "active-only"}`;
   const listIsReady = !loading && loadedListKey === currentListKey;
   useEffect(() => {
@@ -6410,7 +6424,41 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             </div>
           )}
         </div>
-        <TopHorizontalScroll className="table-scroll">
+        {isCrmPreparation ? (
+          listIsReady ? (
+          <section className="crm-preparation-board" aria-label="Preparación de pedidos por estado">
+            {crmPreparationColumns.map((column) => (
+              <section className={`crm-preparation-column crm-preparation-column-${column.key}`} key={column.key}>
+                <header className="crm-preparation-column-head">
+                  <div><h3>{column.title}</h3><small>{column.hint}</small></div>
+                  <strong>{column.rows.length}</strong>
+                </header>
+                <div className="crm-preparation-column-list">
+                  {column.rows.length ? column.rows.map((row) => {
+                    const client = preparationClient(row);
+                    const date = row.preparation_date || row.shipping_date || row.expected_delivery_at;
+                    const deliveryWindow = row.delivery_window_start && row.delivery_window_end ? `${String(row.delivery_window_start).slice(0, 5)}–${String(row.delivery_window_end).slice(0, 5)}` : "Horario pendiente";
+                    return (
+                      <button type="button" className="crm-preparation-card" key={row.id} onClick={() => void openPreview(row)}>
+                        <span className="crm-preparation-card-top"><b>{row.code || `Envío #${row.id}`}</b><em>{row.status || "Pendiente"}</em></span>
+                        <strong>{client}</strong>
+                        <span>{preparationAddress(row)}</span>
+                        <small>{date ? `Preparación ${String(date).slice(0, 10)}` : "Fecha pendiente"} · Envío {row.shipping_date ? String(row.shipping_date).slice(0, 10) : "pendiente"}</small>
+                        <small>{deliveryWindow}{Number(row.urgent) === 1 ? " · URGENTE" : ""}</small>
+                      </button>
+                    );
+                  }) : <p className="crm-preparation-empty">No hay pedidos en este estado.</p>}
+                </div>
+              </section>
+            ))}
+          </section>
+          ) : (
+            <div className="data-loading" role="status" aria-live="polite">
+              <span className="loading-spinner" aria-hidden="true" />
+              <LoadingIndicator label="Cargando preparación de pedidos…" />
+            </div>
+          )
+        ) : <TopHorizontalScroll className="table-scroll">
           <table>
             <thead>
             <tr>
@@ -6430,7 +6478,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             </thead>
             <tbody>
               {pagedRows.map((r) => (
-                  <tr key={r.id ?? r.product_id} data-inline-row={r.id ?? r.product_id} data-row-modal={active === "Presupuestos" || active === "Pedidos" || active === "Envíos" || active === "Facturas" || active === "Albaranes" || usesRecordModal || active === "Entradas" ? "true" : undefined} className={`${isProducts && Number(r.stock || 0) - Number(r.stock_reserved || 0) <= Number(r.min_stock || 0) ? "product-row-critical" : ""}${isLoadPreparation && Number(r.urgent) === 1 ? " prep-row-urgent" : ""}${isLoadPreparation && r.status === "Preparado con incidencia" ? " prep-row-incident" : ""}${Number(r.deleted) === 1 ? " deleted-row" : ""}${active === "Pedidos" ? " order-list-row" : ""}`} onClick={(event) => { if (inlineEditing === (r.id ?? r.product_id) || (event.target as HTMLElement).closest("button, input, select, textarea, a, details, summary")) return; if (active === "Entradas") { void openEntryDetail(r); return; } if (active === "Envíos" || active === "Facturas" || active === "Albaranes") { void openPreview(r); return; } if (active === "Presupuestos" || active === "Pedidos") { if (active === "Pedidos" && isOrderSent(r)) void openPreview(r); else void openRecordModal(r); return; } if (isLoadPreparation) { void openPreparationRow(r); return; } if (usesRecordModal) { void openRecordModal(r); return; } beginInline(r); }}>
+                  <tr key={r.id ?? r.product_id} data-inline-row={r.id ?? r.product_id} data-row-modal={active === "Presupuestos" || active === "Pedidos" || active === "Envíos" || active === "Facturas" || active === "Albaranes" || active === "Preparación de pedidos" || usesRecordModal || active === "Entradas" ? "true" : undefined} className={`${isProducts && Number(r.stock || 0) - Number(r.stock_reserved || 0) <= Number(r.min_stock || 0) ? "product-row-critical" : ""}${isLoadPreparation && Number(r.urgent) === 1 ? " prep-row-urgent" : ""}${isLoadPreparation && r.status === "Preparado con incidencia" ? " prep-row-incident" : ""}${Number(r.deleted) === 1 ? " deleted-row" : ""}${active === "Pedidos" ? " order-list-row" : ""}`} onClick={(event) => { if (inlineEditing === (r.id ?? r.product_id) || (event.target as HTMLElement).closest("button, input, select, textarea, a, details, summary")) return; if (active === "Entradas") { void openEntryDetail(r); return; } if (active === "Envíos" || active === "Facturas" || active === "Albaranes") { void openPreview(r); return; } if (active === "Presupuestos" || active === "Pedidos") { if (active === "Pedidos" && isOrderSent(r)) void openPreview(r); else void openRecordModal(r); return; } if (isLoadPreparation) { void openPreparationRow(r); return; } if (isCrmPreparation) { void openPreview(r); return; } if (usesRecordModal) { void openRecordModal(r); return; } beginInline(r); }}>
                     {isProducts && <td className="product-check-column" data-label="Seleccionar"><input type="checkbox" checked={selectedProductIds.includes(Number(r.id))} onChange={() => toggleProductSelection(Number(r.id))} aria-label={`Seleccionar ${r.name}`} /></td>}
                     {isProducts && <td className="product-image-column" data-label="Imagen"><button type="button" className={`product-thumbnail-button${productImageSource(r) ? "" : " product-reference-thumbnail"}`} onClick={() => setProductDetail(r)} aria-label={`Abrir imagen de ${r.name}`}>{<img src={productDisplayImageSource(r)} alt={productImageSource(r) ? "" : `Imagen de referencia para ${r.name}`} loading="lazy" />}</button></td>}
                     {isProducts && renderProductLots(r)}
@@ -6591,21 +6639,21 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                 ))}
             </tbody>
           </table>
-        </TopHorizontalScroll>
-      {listIsReady && sortedRows.length > 0 && <div className="table-pagination" aria-label="Paginación del listado">
+        </TopHorizontalScroll>}
+      {!isCrmPreparation && listIsReady && sortedRows.length > 0 && <div className="table-pagination" aria-label="Paginación del listado">
         <span>Mostrando {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, sortedRows.length)} de {sortedRows.length}</span>
         <label>Filas<select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }} aria-label="Filas por página"><option value="15">15</option><option value="25">25</option><option value="50">50</option><option value="100">100</option></select></label>
         <button type="button" className="button secondary" disabled={currentPage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Anterior</button>
         <b>Página {currentPage} de {totalPages}</b>
         <button type="button" className="button secondary" disabled={currentPage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>Siguiente</button>
       </div>}
-      {!listIsReady && (
+      {!isCrmPreparation && !listIsReady && (
         <div className="data-loading" role="status" aria-live="polite">
           <span className="loading-spinner" aria-hidden="true" />
           <LoadingIndicator label="Cargando datos desde la base de datos…" />
         </div>
       )}
-      {listIsReady && !filteredRows.length && (
+      {!isCrmPreparation && listIsReady && !filteredRows.length && (
         <p className="muted empty-row">{rows.length ? "No hay productos que coincidan con los filtros." : "No hay registros todavía."}</p>
       )}
       {deletedUndo && deletedUndo.api === c.api && <div className="undo-toast" role="status"><span>Se ha enviado a la papelera: <b>{deletedUndo.label}</b></span><button type="button" className="button secondary" onClick={() => void undoDelete()}>Deshacer</button></div>}
