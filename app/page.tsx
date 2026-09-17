@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.157";
+const APP_VERSION = "2.0.158";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -1347,6 +1347,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
   const [confirmedShipmentIds, setConfirmedShipmentIds] = useState<Set<number>>(new Set());
   const [driverByVehicle, setDriverByVehicle] = useState<Record<string, string>>({});
   const [draggedShipmentId, setDraggedShipmentId] = useState<number | null>(null);
+  const [dragOverSlot, setDragOverSlot] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -1484,6 +1485,8 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
 
   function moveShipment(shipmentId: number, targetKey: string, beforeId?: number) {
     if (!shipmentId) return;
+    setError("");
+    setDragOverSlot("");
     setBoardAssignments((current) => {
       const next = Object.fromEntries(Object.entries(current).map(([key, ids]) => [key, ids.filter((id) => Number(id) !== shipmentId)])) as Record<string, number[]>;
       if (targetKey !== "unassigned") {
@@ -1552,6 +1555,13 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
   }
 
   const shipmentById = new Map(dayShipments.map((item: any) => [Number(item.id), item]));
+  const readDraggedShipmentId = (event: any) => Number(event.dataTransfer.getData("text/plain")) || draggedShipmentId || 0;
+  const allowShipmentDrop = (event: any, slotKey?: string) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    if (slotKey) setDragOverSlot(slotKey);
+  };
+  const renderDropSlot = (targetKey: string, slotKey: string, beforeId?: number) => <div className={`vehicle-load-drop-slot${dragOverSlot === slotKey ? " is-active" : ""}`} onDragEnter={(event) => allowShipmentDrop(event, slotKey)} onDragOver={(event) => allowShipmentDrop(event, slotKey)} onDragLeave={() => setDragOverSlot("")} onDrop={(event) => { event.preventDefault(); moveShipment(readDraggedShipmentId(event), targetKey, beforeId); }} aria-label="Colocar aquí" />;
   const renderBoardCard = (item: any, targetKey: string) => {
     const stats = getLoadStats(item);
     const isConfirmed = confirmedShipmentIds.has(Number(item.id));
@@ -1559,7 +1569,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
     const canConfirm = stats.complete && preparationReady;
     const reception = item.opening_time && item.closing_time ? `Recepción ${String(item.opening_time).slice(0, 5)}–${String(item.closing_time).slice(0, 5)}` : "Horario pendiente";
     const statusLabel = preparationReady ? (item.status === "Preparado con incidencia" ? "Preparado con incidencia" : "Preparado") : item.status === "Preparando" ? "En preparación" : "Pendiente de preparar";
-    return <article className="vehicle-load-board-card" key={item.id} draggable onDragStart={(event) => { event.dataTransfer.setData("text/plain", String(item.id)); setDraggedShipmentId(Number(item.id)); }} onDragEnd={() => setDraggedShipmentId(null)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveShipment(Number(event.dataTransfer.getData("text/plain")) || draggedShipmentId || 0, targetKey, Number(item.id)); }}>
+    return <article className="vehicle-load-board-card" key={item.id} draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", String(item.id)); setDraggedShipmentId(Number(item.id)); }} onDragEnd={() => { setDraggedShipmentId(null); setDragOverSlot(""); }} onDragOver={(event) => allowShipmentDrop(event)} onDrop={(event) => { event.preventDefault(); moveShipment(readDraggedShipmentId(event), targetKey, Number(item.id)); }}>
       <div className="vehicle-load-board-card-top"><b>{item.code}</b><strong>{item.distance_km === null ? "—" : `${String(item.distance_km).replace(".", ",")} km`}</strong></div>
       <strong>{item.client_name}</strong>
       <div className="vehicle-load-board-card-meta"><span className="vehicle-load-card-reception">{reception}</span><span className={`vehicle-load-card-status${preparationReady ? " is-ready" : ""}`}>{statusLabel}</span><small>{stats.lines.length ? `${stats.quantityLabel}${stats.lines.length > 2 ? ` · ${stats.lines.length} líneas` : ""}` : "Sin líneas preparadas"}</small></div>
@@ -1582,9 +1592,9 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       {vehicleColumns.map((column: any) => {
         const key = String(column.id);
         const columnItems = (boardAssignments[key] || []).map((id) => shipmentById.get(Number(id))).filter(Boolean);
-        return <section className="vehicle-load-column" key={key} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveShipment(Number(event.dataTransfer.getData("text/plain")) || draggedShipmentId || 0, key); }}>
+        return <section className="vehicle-load-column" key={key} onDragOver={(event) => allowShipmentDrop(event)} onDrop={(event) => { event.preventDefault(); moveShipment(readDraggedShipmentId(event), key); }}>
           <header className="vehicle-load-column-head"><div><h3>{column.plate || column.name || `Camión ${key}`}</h3><span>{columnItems.length} pedidos</span></div><label>Conductor<input value={driverByVehicle[key] || column.driver || user?.username || ""} onChange={(event) => setDriverByVehicle((current) => ({ ...current, [key]: event.target.value }))} placeholder="Nombre" /></label></header>
-          <div className="vehicle-load-column-list">{columnItems.length ? columnItems.map((item: any) => renderBoardCard(item, key)) : <p className="vehicle-load-column-empty">Suelta aquí los pedidos</p>}</div>
+          <div className="vehicle-load-column-list">{columnItems.length ? [renderDropSlot(key, `${key}-start`, Number(columnItems[0].id)), ...columnItems.flatMap((item: any, index: number) => [renderBoardCard(item, key), renderDropSlot(key, `${key}-${item.id}-after`, Number(columnItems[index + 1]?.id) || undefined)])] : <p className="vehicle-load-column-empty">Suelta aquí los pedidos</p>}</div>
         </section>;
       })}
     </section>
