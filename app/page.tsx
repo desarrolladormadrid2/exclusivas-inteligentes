@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.158";
+const APP_VERSION = "2.0.160";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -1340,11 +1340,13 @@ function VehicleOperationsPanel({ user, routeDate, vehicles, onReload }: { user:
 
 function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: string }) {
   const [shipments, setShipments] = useState<any[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
+  const [invoices, setInvoices] = useState<any[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
   const [routes, setRoutes] = useState<any[]>([]);
   const [routeDate, setRouteDate] = useState(() => initialDate || tabletTodayInput());
   const [vehicles, setVehicles] = useState<any[]>([]);
   const [boardAssignments, setBoardAssignments] = useState<Record<string, number[]>>({});
-  const [confirmedShipmentIds, setConfirmedShipmentIds] = useState<Set<number>>(new Set());
   const [driverByVehicle, setDriverByVehicle] = useState<Record<string, string>>({});
   const [draggedShipmentId, setDraggedShipmentId] = useState<number | null>(null);
   const [dragOverSlot, setDragOverSlot] = useState("");
@@ -1352,13 +1354,14 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [printShipmentId, setPrintShipmentId] = useState<number | null>(null);
   const [origin, setOrigin] = useState({ latitude: 40.4168, longitude: -3.7038, label: "Madrid (estimación)" });
 
   async function load() {
     setLoading(true);
     setError("");
     try {
-      const [shipmentResponse, clientsResponse, pointsResponse, warehousesResponse, routesResponse, vehiclesResponse, orderLinesResponse, productsResponse] = await Promise.all([
+      const [shipmentResponse, clientsResponse, pointsResponse, warehousesResponse, routesResponse, vehiclesResponse, orderLinesResponse, productsResponse, ordersResponse, invoicesResponse] = await Promise.all([
         fetch("/api/shipments"),
         fetch("/api/clients?view=lookup&limit=500"),
         fetch("/api/collection_points?view=lookup&limit=500"),
@@ -1367,6 +1370,8 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
         fetch("/api/vehicles"),
         fetch("/api/order_lines"),
         fetch("/api/products?view=lookup&limit=2000"),
+        fetch("/api/orders"),
+        fetch("/api/invoices"),
       ]);
       const shipmentRows = shipmentResponse.ok ? await shipmentResponse.json() : [];
       const clients = clientsResponse.ok ? await clientsResponse.json() : [];
@@ -1376,6 +1381,11 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       const vehicleRows = vehiclesResponse.ok ? await vehiclesResponse.json() : [];
       const orderLines = orderLinesResponse.ok ? await orderLinesResponse.json() : [];
       const products = productsResponse.ok ? await productsResponse.json() : [];
+      const orderRows = ordersResponse.ok ? await ordersResponse.json() : [];
+      const invoiceRows = invoicesResponse.ok ? await invoicesResponse.json() : [];
+      setOrders(Array.isArray(orderRows) ? orderRows : []);
+      setInvoices(Array.isArray(invoiceRows) ? invoiceRows : []);
+      setProducts(Array.isArray(products) ? products : []);
       setVehicles(Array.isArray(vehicleRows) ? vehicleRows : []);
       const warehouse = (Array.isArray(warehouses) ? warehouses : []).find((item: any) => Number.isFinite(Number(item.latitude)) && Number.isFinite(Number(item.longitude)) && Number(item.latitude) !== 0 && Number(item.longitude) !== 0)
         || (Array.isArray(warehouses) ? warehouses : []).find((item: any) => /principal/i.test(String(item.name || "")))
@@ -1435,21 +1445,18 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
   useEffect(() => {
     const nextAssignments: Record<string, number[]> = {};
     const nextDrivers: Record<string, string> = {};
-    const nextConfirmed = new Set<number>();
     routes
       .filter((route: any) => String(route.route_date || "").slice(0, 10) === routeDate && String(route.status || "") !== "Cancelada")
       .sort((a: any, b: any) => Number(a.id || 0) - Number(b.id || 0))
       .forEach((route: any) => {
         const key = String(route.vehicle_id || `route-${route.id}`);
         nextAssignments[key] = (route.stops || []).slice().sort((a: any, b: any) => Number(a.position || 0) - Number(b.position || 0)).map((stop: any) => {
-          if (Number(stop.load_confirmed) === 1) nextConfirmed.add(Number(stop.shipment_id));
           return Number(stop.shipment_id);
         }).filter(Boolean);
         nextDrivers[key] = String(route.driver || "");
       });
     setBoardAssignments(nextAssignments);
     setDriverByVehicle(nextDrivers);
-    setConfirmedShipmentIds(nextConfirmed);
   }, [routeDate, routes]);
 
   const routeDateRoutes = routes.filter((route: any) => String(route.route_date || "").slice(0, 10) === routeDate && String(route.status || "") !== "Cancelada");
@@ -1506,21 +1513,6 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
     return { lines, complete, completeLines, quantityLabel };
   }
 
-  function confirmShipment(item: any) {
-    const stats = getLoadStats(item);
-    const preparationReady = ["Preparado", "Preparado con incidencia"].includes(String(item.status || "")) && Boolean(String(item.preparation_closed_at || "").trim());
-    if (!preparationReady) {
-      setError(`El pedido ${item.code} todavía está en preparación.`);
-      return;
-    }
-    if (!stats.complete) {
-      setError(`El pedido ${item.code} no está completo: ${stats.completeLines} de ${stats.lines.length} líneas completas.`);
-      return;
-    }
-    setConfirmedShipmentIds((current) => new Set([...current, Number(item.id)]));
-    setError("");
-  }
-
   async function saveVehicleBoard() {
     const columns = vehicleColumns.map((column: any) => ({
       vehicle_id: Number.isInteger(Number(column.id)) ? Number(column.id) : null,
@@ -1529,11 +1521,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       shipment_ids: boardAssignments[String(column.id)] || [],
     })).filter((column) => column.shipment_ids.length);
     if (!columns.length) { setError("Arrastra al menos un pedido a un camión."); return; }
-    const pendingConfirmation = columns.flatMap((column) => column.shipment_ids).filter((shipmentId) => !confirmedShipmentIds.has(Number(shipmentId)));
-    if (pendingConfirmation.length) {
-      setError("Confirma las unidades de cada pedido antes de guardar la carga.");
-      return;
-    }
+    const assignedShipmentIds = columns.flatMap((column) => column.shipment_ids);
     setSaving(true);
     setError("");
     setMessage("");
@@ -1541,7 +1529,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       const response = await fetch("/api/routes/board", {
         method: "PUT",
         headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Usuario local" },
-        body: JSON.stringify({ route_date: routeDate, columns, confirmed_shipment_ids: Array.from(confirmedShipmentIds), origin_latitude: origin.latitude, origin_longitude: origin.longitude, origin_address: origin.label }),
+        body: JSON.stringify({ route_date: routeDate, columns, confirmed_shipment_ids: assignedShipmentIds, origin_latitude: origin.latitude, origin_longitude: origin.longitude, origin_address: origin.label }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || "No se ha podido asignar la carga.");
@@ -1555,6 +1543,22 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
   }
 
   const shipmentById = new Map(dayShipments.map((item: any) => [Number(item.id), item]));
+  const printShipment = printShipmentId ? shipmentById.get(Number(printShipmentId)) : null;
+  async function printInvoiceDocument(invoice: any) {
+    if (!invoice?.id) return;
+    const popup = window.open("about:blank", "_blank");
+    try {
+      const response = await fetch(`/api/invoices/${invoice.id}/pdf`, { method: "POST", headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Usuario local" }, body: JSON.stringify({}) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "No se ha podido preparar la factura.");
+      const url = data.share_url || `/api/invoices/share/${encodeURIComponent(data.share_token || "")}`;
+      if (popup) popup.location.href = url;
+      else window.open(url, "_blank", "noopener,noreferrer");
+    } catch (reason: any) {
+      popup?.close();
+      setError(reason?.message || "No se ha podido preparar la factura.");
+    }
+  }
   const readDraggedShipmentId = (event: any) => Number(event.dataTransfer.getData("text/plain")) || draggedShipmentId || 0;
   const allowShipmentDrop = (event: any, slotKey?: string) => {
     event.preventDefault();
@@ -1564,18 +1568,14 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
   const renderDropSlot = (targetKey: string, slotKey: string, beforeId?: number) => <div className={`vehicle-load-drop-slot${dragOverSlot === slotKey ? " is-active" : ""}`} onDragEnter={(event) => allowShipmentDrop(event, slotKey)} onDragOver={(event) => allowShipmentDrop(event, slotKey)} onDragLeave={() => setDragOverSlot("")} onDrop={(event) => { event.preventDefault(); moveShipment(readDraggedShipmentId(event), targetKey, beforeId); }} aria-label="Colocar aquí" />;
   const renderBoardCard = (item: any, targetKey: string) => {
     const stats = getLoadStats(item);
-    const isConfirmed = confirmedShipmentIds.has(Number(item.id));
     const preparationReady = ["Preparado", "Preparado con incidencia"].includes(String(item.status || "")) && Boolean(String(item.preparation_closed_at || "").trim());
-    const canConfirm = stats.complete && preparationReady;
     const reception = item.opening_time && item.closing_time ? `Recepción ${String(item.opening_time).slice(0, 5)}–${String(item.closing_time).slice(0, 5)}` : "Horario pendiente";
     const statusLabel = preparationReady ? (item.status === "Preparado con incidencia" ? "Preparado con incidencia" : "Preparado") : item.status === "Preparando" ? "En preparación" : "Pendiente de preparar";
     return <article className="vehicle-load-board-card" key={item.id} draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", String(item.id)); setDraggedShipmentId(Number(item.id)); }} onDragEnd={() => { setDraggedShipmentId(null); setDragOverSlot(""); }} onDragOver={(event) => allowShipmentDrop(event)} onDrop={(event) => { event.preventDefault(); moveShipment(readDraggedShipmentId(event), targetKey, Number(item.id)); }}>
       <div className="vehicle-load-board-card-top"><b>{item.code}</b><strong>{item.distance_km === null ? "—" : `${String(item.distance_km).replace(".", ",")} km`}</strong></div>
       <strong>{item.client_name}</strong>
       <div className="vehicle-load-board-card-meta"><span className="vehicle-load-card-reception">{reception}</span><span className={`vehicle-load-card-status${preparationReady ? " is-ready" : ""}`}>{statusLabel}</span><small>{stats.lines.length ? `${stats.quantityLabel}${stats.lines.length > 2 ? ` · ${stats.lines.length} líneas` : ""}` : "Sin líneas preparadas"}</small></div>
-      <button type="button" className={`vehicle-load-confirm${isConfirmed ? " is-confirmed" : ""}`} disabled={isConfirmed || !canConfirm} onClick={(event) => { event.stopPropagation(); confirmShipment(item); }}>
-        {isConfirmed ? "Pedido completo" : canConfirm ? "Confirmar unidades" : preparationReady ? "Faltan unidades" : "Pendiente de preparar"}
-      </button>
+      <button type="button" className="vehicle-load-print" onClick={(event) => { event.stopPropagation(); setPrintShipmentId(Number(item.id)); }}>Imprimir</button>
     </article>;
   };
 
@@ -1599,11 +1599,12 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       })}
     </section>
     <section className="vehicle-load-unassigned panel">
-      <div className="panel-head"><div><h3>Pedidos del día</h3><p className="muted">Aquí aparecen todos. Arrástralos al camión y confirma las unidades antes de guardar.</p></div><strong>{unassigned.length} sin asignar</strong></div>
+      <div className="panel-head"><div><h3>Pedidos del día</h3><p className="muted">Aquí aparecen todos. Arrástralos al camión, revisa el pedido y guarda la carga.</p></div><strong>{unassigned.length} sin asignar</strong></div>
       <div className="vehicle-load-dropzone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveShipment(Number(event.dataTransfer.getData("text/plain")) || draggedShipmentId || 0, "unassigned"); }}>
         {loading ? <div className="data-loading" role="status"><LoadingIndicator label="Cargando pedidos preparados…" /></div> : unassigned.length ? unassigned.map((item: any) => renderBoardCard(item, "unassigned")) : <p className="empty-state">Todos los pedidos están asignados a un camión.</p>}
       </div>
     </section>
+    {printShipment && <ShipmentLabelModal shipment={printShipment} client={{ name: printShipment.client_name }} lines={Array.isArray(printShipment.load_lines) ? printShipment.load_lines : []} products={products} address={printShipment.address || ""} city={printShipment.city || ""} order={orders.find((item: any) => Number(item.id) === Number(printShipment.order_id))} invoice={invoices.find((item: any) => Number(item.order_id) === Number(printShipment.order_id))} onPrintInvoice={(invoice) => void printInvoiceDocument(invoice)} onClose={() => setPrintShipmentId(null)} />}
   </section>;
 }
 
@@ -2265,7 +2266,7 @@ function ProductBatchLabelModal({ products, onClose }: { products: any[]; onClos
   );
 }
 
-function ShipmentLabelModal({ shipment, client, lines, products, address, city, onClose }: { shipment: any; client: any; lines: any[]; products: any[]; address: string; city: string; onClose: () => void }) {
+function ShipmentLabelModal({ shipment, client, lines, products, address, city, order, invoice, onClose, onPrintInvoice }: { shipment: any; client: any; lines: any[]; products: any[]; address: string; city: string; order?: any; invoice?: any; onClose: () => void; onPrintInvoice?: (invoice: any) => void }) {
   const code = String(shipment?.code || `ENV-${shipment?.id || "SIN-CODIGO"}`);
   const trackingToken = String(shipment?.public_tracking_token || "").trim();
   const trackingUrl = trackingToken && typeof window !== "undefined"
@@ -2292,6 +2293,19 @@ function ShipmentLabelModal({ shipment, client, lines, products, address, city, 
     "CONTENIDO:",
     ...lineRows.map((line) => `- ${line.quantity} ${line.unit}: ${line.name}${line.lots ? ` · ${line.lots}` : ""}`),
   ].join("\n");
+  const [printDocument, setPrintDocument] = useState<"label" | "order">("label");
+  const orderCode = String(order?.code || shipment?.order_code || shipment?.order_id || "—");
+  const orderDate = String(order?.created_at || shipment?.created_at || "").slice(0, 10);
+  const orderTotal = Number(order?.amount || lines.reduce((sum: number, line: any) => sum + Number(line.amount || 0), 0));
+  const printDocumentNow = (document: "label" | "order") => {
+    setPrintDocument(document);
+    window.setTimeout(() => window.print(), 80);
+  };
+  useEffect(() => {
+    const resetPrintDocument = () => setPrintDocument("label");
+    window.addEventListener("afterprint", resetPrintDocument);
+    return () => window.removeEventListener("afterprint", resetPrintDocument);
+  }, []);
   useEffect(() => {
     if (barcodeRef.current) {
       try { JsBarcode(barcodeRef.current, code, { format: "CODE128", displayValue: true, fontSize: 13, height: 58, margin: 3, textMargin: 4 }); } catch { /* El QR y la referencia siguen disponibles. */ }
@@ -2300,7 +2314,7 @@ function ShipmentLabelModal({ shipment, client, lines, products, address, city, 
   }, [code, qrPayload]);
   return (
     <div className="preview-overlay shipment-label-overlay" onClick={(event) => event.target === event.currentTarget && onClose()}>
-      <div className="shipment-label-modal" onClick={(event) => event.stopPropagation()}>
+      <div className={`shipment-label-modal${printDocument === "order" ? " is-printing-order" : ""}`} onClick={(event) => event.stopPropagation()}>
         <div className="product-label-head shipment-label-toolbar"><div><p className="eyebrow">ETIQUETA DE ENVÍO</p><h2>{code}</h2><small>Identifica el pedido, los bultos y su contenido en el almacén y durante el reparto.</small></div><button type="button" onClick={onClose} aria-label="Cerrar">×</button></div>
         <article className={`shipment-label-sheet shipment-label-print-${printMode}`} aria-label={`Etiqueta de envío ${code}`}>
           <header className="shipment-label-brand"><div><b>EXCLUSIVAS</b><strong>INTELIGENTES</strong></div><div className="shipment-label-code-meta"><span>NOTA DE CARGA</span><b>{code}</b><small className="shipment-label-sticker-note">IDENTIFICACIÓN DE ENVÍO · CONSERVAR HASTA LA ENTREGA</small></div></header>
@@ -2309,8 +2323,16 @@ function ShipmentLabelModal({ shipment, client, lines, products, address, city, 
           <section className="shipment-label-content"><div className="shipment-label-section-title"><span>CONTENIDO DEL ENVÍO</span><small>{lineRows.length} referencias</small></div>{lineRows.length ? <ul>{lineRows.map((line, index) => <li key={`${line.name}-${index}`}><b>{line.quantity} {line.unit}</b><span>{line.name}{line.lots && <small className="shipment-label-lots">{line.lots}</small>}</span></li>)}</ul> : <p>Contenido pendiente de cargar.</p>}</section>
           <section className="shipment-label-codes"><div className="shipment-label-barcode"><svg ref={barcodeRef} aria-label={`Código de barras ${code}`} /><small>{code}</small></div><div className="shipment-label-qr">{qrImage ? <img src={qrImage} alt={`Código QR del envío ${code}`} /> : <span>Generando QR…</span>}<small>{trackingUrl ? "Escanea para abrir el seguimiento" : "Escanea para consultar el contenido"}</small>{trackingUrl && <a href={trackingUrl} target="_blank" rel="noreferrer">Abrir seguimiento</a>}</div></section>
         </article>
+        <article className="shipment-order-sheet" aria-label={`Pedido ${orderCode}`}>
+          <header><div><p className="eyebrow">PEDIDO</p><h2>{orderCode}</h2></div><div className="shipment-order-sheet-meta"><span>Fecha</span><b>{orderDate ? formatSpanishDateValue(orderDate, false) : "—"}</b><span>Estado</span><b>{shipment?.status || order?.status || "Pendiente"}</b></div></header>
+          <div className="shipment-order-sheet-rule" />
+          <section className="shipment-order-sheet-recipient"><div><span>CLIENTE</span><strong>{client?.name || shipment?.client_name || "Cliente sin asignar"}</strong><p>{address || "Dirección no indicada"}{city ? ` · ${city}` : ""}</p></div><div><span>RECEPCIÓN</span><strong>{shipment?.delivery_window_start && shipment?.delivery_window_end ? `${String(shipment.delivery_window_start).slice(0, 5)}–${String(shipment.delivery_window_end).slice(0, 5)}` : "Horario pendiente"}</strong></div></section>
+          <section className="shipment-order-sheet-lines"><div className="shipment-order-sheet-title"><span>ARTÍCULOS DEL PEDIDO</span><small>{lines.length} referencias</small></div>{lines.length ? <ul>{lines.map((line: any, index: number) => { const product = products.find((item: any) => Number(item.id) === Number(line.product_id)); return <li key={`${line.id || line.product_id}-${index}`}><b>{Number(line.quantity_requested || line.quantity || 0)} {quantityUnitLabel(line.quantity_unit)}</b><span>{product?.name || line.product_name || `Producto #${line.product_id}`}</span><strong>{Number(line.amount || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</strong></li>; })}</ul> : <p>Sin líneas de producto.</p>}</section>
+          {(order?.notes || order?.loading_notes || order?.driver_notes) && <section className="shipment-order-sheet-notes"><span>NOTAS</span>{order?.notes && <p><b>Generales:</b> {order.notes}</p>}{order?.loading_notes && <p><b>Almacén:</b> {order.loading_notes}</p>}{order?.driver_notes && <p><b>Reparto:</b> {order.driver_notes}</p>}</section>}
+          <footer><span>Total del pedido</span><strong>{orderTotal.toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</strong></footer>
+        </article>
         <div className="product-label-print-controls shipment-label-print-controls"><label>Qué imprimir<select value={printMode} onChange={(event) => setPrintMode(event.target.value as typeof printMode)}><option value="all">Etiqueta completa</option><option value="barcode">Solo código de barras</option><option value="qr">Solo código QR</option><option value="both">QR + código de barras</option></select></label><small>El modo se aplica al imprimir o guardar como PDF.</small></div>
-        <div className="product-label-actions shipment-label-actions"><button className="button secondary" type="button" onClick={onClose}>Cerrar</button><button className="button primary" type="button" onClick={() => window.print()}>Imprimir / guardar PDF</button></div>
+        <div className="product-label-actions shipment-label-actions"><button className="button secondary" type="button" onClick={onClose}>Cerrar</button><button className="button primary" type="button" onClick={() => printDocumentNow("label")}>Imprimir etiqueta</button><button className="button secondary" type="button" onClick={() => printDocumentNow("order")}>Imprimir pedido</button><button className="button workflow" type="button" disabled={!invoice?.id} onClick={() => invoice?.id && onPrintInvoice?.(invoice)}>{invoice?.id ? "Imprimir factura" : "Factura no disponible"}</button></div>
       </div>
     </div>
   );

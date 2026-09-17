@@ -57,6 +57,30 @@ input[type="checkbox"] { accent-color: #b91c1c; }
 .shipment-label-qr img { width: 132px; height: 132px; image-rendering: pixelated; }
 .shipment-label-qr span { display: grid; place-items: center; width: 132px; height: 132px; color: #657780; font-size: 10px; }
 .shipment-label-actions { background: #f4f7f8; }
+.shipment-order-sheet { box-sizing: border-box; margin-top: 14px; padding: 18px; border: 1px solid #cbd7dc; background: #fff; color: #17252c; }
+.shipment-order-sheet header, .shipment-order-sheet-recipient, .shipment-order-sheet-title, .shipment-order-sheet footer { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.shipment-order-sheet h2 { margin: 3px 0 0; color: #26343d; font-size: 22px; }
+.shipment-order-sheet-meta { display: grid; gap: 2px; min-width: 120px; text-align: right; }
+.shipment-order-sheet-meta span, .shipment-order-sheet-recipient span, .shipment-order-sheet-title span, .shipment-order-sheet-notes>span { color: #b91c1c; font-size: 9px; font-weight: 800; letter-spacing: .12em; }
+.shipment-order-sheet-meta b { color: #26343d; font-size: 11px; }
+.shipment-order-sheet-rule { height: 2px; margin: 12px 0 14px; background: #b91c1c; }
+.shipment-order-sheet-recipient { padding-bottom: 12px; border-bottom: 1px solid #dce4e7; }
+.shipment-order-sheet-recipient>div { display: grid; gap: 3px; min-width: 0; }
+.shipment-order-sheet-recipient strong { color: #26343d; font-size: 13px; }
+.shipment-order-sheet-recipient p { margin: 0; color: #526670; font-size: 11px; }
+.shipment-order-sheet-lines { padding: 13px 0 8px; }
+.shipment-order-sheet-title { align-items: center; padding-bottom: 7px; border-bottom: 1px solid #dce4e7; }
+.shipment-order-sheet-title small { color: #657780; font-size: 10px; }
+.shipment-order-sheet-lines ul { margin: 0; padding: 0; list-style: none; }
+.shipment-order-sheet-lines li { display: grid; grid-template-columns: 125px minmax(0,1fr) 90px; gap: 8px; padding: 7px 0; border-bottom: 1px solid #edf1f2; font-size: 11px; }
+.shipment-order-sheet-lines li b { color: #b91c1c; }
+.shipment-order-sheet-lines li strong { color: #26343d; text-align: right; }
+.shipment-order-sheet-lines>p { margin: 10px 0; color: #657780; font-size: 11px; }
+.shipment-order-sheet-notes { display: grid; gap: 4px; margin-top: 8px; padding: 9px 10px; border-left: 3px solid #b91c1c; background: #fff8f8; }
+.shipment-order-sheet-notes p { margin: 0; color: #526670; font-size: 10px; line-height: 1.35; }
+.shipment-order-sheet-notes p b { color: #26343d; }
+.shipment-order-sheet footer { align-items: center; margin-top: 12px; padding-top: 10px; border-top: 2px solid #17252c; color: #526670; font-size: 11px; }
+.shipment-order-sheet footer strong { color: #26343d; font-size: 17px; }
 .warehouse-scanner-manual { display: flex; align-items: end; gap: 8px; }
 .warehouse-scanner-manual label { display: grid; flex: 1; gap: 4px; color: #526670; font-size: 10px; font-weight: 700; }
 .warehouse-scanner-manual input { box-sizing: border-box; width: 100%; min-height: 32px; padding: 7px 8px; border: 1px solid #cbd7dc; background: #fff; color: #26343d; font: inherit; font-size: 11px; }
@@ -94,6 +118,9 @@ input[type="checkbox"] { accent-color: #b91c1c; }
   .shipment-label-modal { width: 100%; max-height: none; overflow: visible; padding: 0; border: 0; background: #fff; box-shadow: none; }
   .shipment-label-toolbar, .shipment-label-actions { display: none !important; }
   .shipment-label-sheet { width: 100%; min-height: 140mm; padding: 12mm; border: 0; }
+  .shipment-order-sheet { display: none !important; margin: 0; padding: 12mm; border: 0; }
+  .shipment-label-modal.is-printing-order .shipment-label-sheet { display: none !important; }
+  .shipment-label-modal.is-printing-order .shipment-order-sheet { display: block !important; }
   .shipment-label-print-controls { display: none !important; }
   .shipment-label-print-barcode > *:not(.shipment-label-codes), .shipment-label-print-qr > *:not(.shipment-label-codes), .shipment-label-print-both > *:not(.shipment-label-codes) { display: none !important; }
   .shipment-label-print-barcode .shipment-label-qr, .shipment-label-print-qr .shipment-label-barcode { display: none !important; }
@@ -6017,6 +6044,8 @@ body:has(.warehouse-tablet-app) .settings-panel {
 .vehicle-load-confirm:hover:not(:disabled){background:#fff4f4}
 .vehicle-load-confirm:disabled{border-color:#d7e0e4;background:#f7f9fa;color:#8a989e;cursor:default}
 .vehicle-load-confirm.is-confirmed{border-color:#16855f;background:#e8f7ef;color:#087f5b}
+.vehicle-load-print{grid-area:action;width:145px;min-height:28px;margin:0;padding:5px 8px;border:1px solid #bd2027;background:#bd2027;color:#fff;font:inherit;font-size:10px;font-weight:700;cursor:pointer}
+.vehicle-load-print:hover{background:#a61920}
 @media(max-width:700px){.vehicle-load-toolbar{grid-template-columns:minmax(150px,1fr) auto auto}.vehicle-load-toolbar-summary{grid-column:1/-1;grid-row:2}.vehicle-load-board{grid-template-columns:1fr}.vehicle-load-column-head{align-items:stretch;flex-direction:column}.vehicle-load-column-head label{width:100%}.vehicle-load-dropzone{grid-template-columns:1fr;max-height:300px}.vehicle-load-board-card{grid-template-columns:minmax(0,1fr) 128px}.vehicle-load-confirm{width:128px}}
 
 /* Preparación del CRM: tablero sencillo por estado, separado de la hoja del almacén. */
