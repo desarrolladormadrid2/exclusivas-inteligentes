@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.154";
+const APP_VERSION = "2.0.155";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -1388,7 +1388,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
           ? { latitude: 40.3083, longitude: -3.7327, label: "Getafe (estimación)" }
           : { latitude: 40.4168, longitude: -3.7038, label: "Madrid (estimación)" };
       const prepared = (Array.isArray(shipmentRows) ? shipmentRows : [])
-        .filter((item: any) => ["Preparado", "Preparado con incidencia"].includes(String(item.status || "")) && Boolean(String(item.preparation_closed_at || "").trim()))
+        .filter((item: any) => !["Cancelado", "Anulado"].includes(String(item.status || "")))
         .map((item: any) => {
           const point = (Array.isArray(points) ? points : []).find((row: any) => Number(row.id) === Number(item.collection_point_id));
           const client = (Array.isArray(clients) ? clients : []).find((row: any) => Number(row.id) === Number(item.client_id));
@@ -1421,7 +1421,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       setShipments(prepared);
       setRoutes(Array.isArray(routeRows) ? routeRows : []);
     } catch {
-      setError("No se han podido cargar los envíos preparados.");
+    setError("No se han podido cargar los pedidos del día.");
     } finally {
       setLoading(false);
     }
@@ -1509,6 +1509,11 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
 
   function confirmShipment(item: any) {
     const stats = getLoadStats(item);
+    const preparationReady = ["Preparado", "Preparado con incidencia"].includes(String(item.status || "")) && Boolean(String(item.preparation_closed_at || "").trim());
+    if (!preparationReady) {
+      setError(`El pedido ${item.code} todavía está en preparación.`);
+      return;
+    }
     if (!stats.complete) {
       setError(`El pedido ${item.code} no está completo: ${stats.completeLines} de ${stats.lines.length} líneas completas.`);
       return;
@@ -1554,14 +1559,18 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
   const renderBoardCard = (item: any, targetKey: string) => {
     const stats = getLoadStats(item);
     const isConfirmed = confirmedShipmentIds.has(Number(item.id));
+    const preparationReady = ["Preparado", "Preparado con incidencia"].includes(String(item.status || "")) && Boolean(String(item.preparation_closed_at || "").trim());
+    const canConfirm = stats.complete && preparationReady;
     const reception = item.opening_time && item.closing_time ? `Recepción ${String(item.opening_time).slice(0, 5)}–${String(item.closing_time).slice(0, 5)}` : "Horario pendiente";
+    const statusLabel = preparationReady ? (item.status === "Preparado con incidencia" ? "Preparado con incidencia" : "Preparado") : item.status === "Preparando" ? "En preparación" : "Pendiente de preparar";
     return <article className="vehicle-load-board-card" key={item.id} draggable onDragStart={(event) => { event.dataTransfer.setData("text/plain", String(item.id)); setDraggedShipmentId(Number(item.id)); }} onDragEnd={() => setDraggedShipmentId(null)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveShipment(Number(event.dataTransfer.getData("text/plain")) || draggedShipmentId || 0, targetKey, Number(item.id)); }}>
       <div className="vehicle-load-board-card-top"><b>{item.code}</b><strong>{item.distance_km === null ? "—" : `${String(item.distance_km).replace(".", ",")} km`}</strong></div>
       <strong>{item.client_name}</strong>
       <span className="vehicle-load-card-reception">{reception}</span>
+      <span className={`vehicle-load-card-status${preparationReady ? " is-ready" : ""}`}>{statusLabel}</span>
       <small>{stats.lines.length ? `${stats.quantityLabel}${stats.lines.length > 2 ? ` · ${stats.lines.length} líneas` : ""}` : "Sin líneas preparadas"}</small>
-      <button type="button" className={`vehicle-load-confirm${isConfirmed ? " is-confirmed" : ""}`} disabled={isConfirmed || !stats.complete} onClick={(event) => { event.stopPropagation(); confirmShipment(item); }}>
-        {isConfirmed ? "Pedido completo" : stats.complete ? "Confirmar unidades" : "Faltan unidades"}
+      <button type="button" className={`vehicle-load-confirm${isConfirmed ? " is-confirmed" : ""}`} disabled={isConfirmed || !canConfirm} onClick={(event) => { event.stopPropagation(); confirmShipment(item); }}>
+        {isConfirmed ? "Pedido completo" : canConfirm ? "Confirmar unidades" : preparationReady ? "Faltan unidades" : "Pendiente de preparar"}
       </button>
     </article>;
   };
@@ -1569,14 +1578,14 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
   return <section className="vehicle-load-manager">
     <div className="vehicle-load-toolbar">
       <label>Fecha de carga<input type="date" value={routeDate} onChange={(event) => setRouteDate(event.target.value)} /></label>
-      <span className="vehicle-load-toolbar-summary"><b>{dayShipments.length} pedidos preparados</b><small>{unassigned.length} sin asignar · horario primero, distancia después</small></span>
+      <span className="vehicle-load-toolbar-summary"><b>{dayShipments.length} pedidos del día</b><small>{dayShipments.filter((item: any) => ["Preparado", "Preparado con incidencia"].includes(String(item.status || ""))).length} listos para cargar · horario primero, distancia después</small></span>
       <button type="button" className="button secondary" onClick={() => void load()}>Actualizar</button>
       <button type="button" className="button primary" disabled={saving || !assignedIds.size} onClick={() => void saveVehicleBoard()}>{saving ? "Guardando…" : "Guardar cargas"}</button>
     </div>
     {error && <p className="error-message" role="alert">{error}</p>}
     {message && <p className="success-message" role="status">{message}</p>}
     <section className="vehicle-load-unassigned panel">
-      <div className="panel-head"><div><h3>Pedidos del día</h3><p className="muted">Arrastra cada pedido a un camión. Suéltalo aquí para quitarlo del camión. El orden es manual.</p></div><strong>{unassigned.length} sin asignar</strong></div>
+      <div className="panel-head"><div><h3>Pedidos del día</h3><p className="muted">Aquí aparecen todos. Confirma las unidades cuando estén preparados y arrástralos al camión.</p></div><strong>{unassigned.length} sin asignar</strong></div>
       <div className="vehicle-load-dropzone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveShipment(Number(event.dataTransfer.getData("text/plain")) || draggedShipmentId || 0, "unassigned"); }}>
         {loading ? <div className="data-loading" role="status"><LoadingIndicator label="Cargando pedidos preparados…" /></div> : unassigned.length ? unassigned.map((item: any) => renderBoardCard(item, "unassigned")) : <p className="empty-state">Todos los pedidos están asignados a un camión.</p>}
       </div>

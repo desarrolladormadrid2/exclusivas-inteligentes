@@ -6008,6 +6008,8 @@ body:has(.warehouse-tablet-app) .settings-panel {
 .vehicle-load-board-card>strong{overflow:hidden;color:#26343d;font-size:12px;text-overflow:ellipsis;white-space:nowrap}
 .vehicle-load-board-card>span{overflow:hidden;font-size:10px;text-overflow:ellipsis;white-space:nowrap}
 .vehicle-load-card-reception{color:#26343d!important;font-weight:700}
+.vehicle-load-card-status{color:#9a6500!important;font-size:10px!important;font-weight:700}
+.vehicle-load-card-status.is-ready{color:#087f5b!important}
 .vehicle-load-board-card>small{overflow:hidden;color:#71818a;font-size:9px;text-overflow:ellipsis;white-space:nowrap}
 .vehicle-load-confirm{width:100%;min-height:28px;margin-top:3px;padding:5px 8px;border:1px solid #bd2027;background:#fff;color:#bd2027;font:inherit;font-size:10px;font-weight:700;cursor:pointer}
 .vehicle-load-confirm:hover:not(:disabled){background:#fff4f4}
