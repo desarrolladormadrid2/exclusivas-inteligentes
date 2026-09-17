@@ -893,6 +893,14 @@ function resolveShipmentStop(shipment) {
   const longitude = Number(shipment.longitude ?? point?.longitude ?? client?.longitude);
   return { shipment_id: Number(shipment.id), client_id: shipment.client_id || null, collection_point_id: shipment.collection_point_id || null, client_name: client?.name || "Cliente sin nombre", address: shipment.address || point?.address || client?.address || "", city: shipment.delivery_city || point?.city || client?.city || "", opening_time: shipment.delivery_window_start || point?.opening_time || client?.opening_time || "", closing_time: shipment.delivery_window_end || point?.closing_time || client?.closing_time || "", latitude: Number.isFinite(latitude) && latitude !== 0 ? latitude : null, longitude: Number.isFinite(longitude) && longitude !== 0 ? longitude : null, notes: shipment.notes || "", driver_notes: shipment.driver_notes || "", invoice_delivery_method: shipment.invoice_delivery_method || client?.invoice_delivery_method || "Pendiente de indicar", status: shipment.status || "Pendiente" };
 }
+function shipmentHasCompletePreparedLines(shipment) {
+  const lines = db.prepare("SELECT quantity,quantity_requested,prepared_quantity,prepared FROM order_lines WHERE order_id=?").all(Number(shipment.order_id || 0));
+  return lines.length > 0 && lines.every((line) => {
+    const requested = Number(line.quantity_requested ?? line.quantity ?? 0);
+    const prepared = Number(line.prepared_quantity) > 0 ? Number(line.prepared_quantity) : Number(line.prepared) === 1 ? Number(line.quantity || 0) : 0;
+    return Math.abs(prepared - requested) < 0.001;
+  });
+}
 function optimizeStops(stops, originLat, originLon) {
   const remaining = [...stops];
   const ordered = [];
@@ -1776,6 +1784,8 @@ export async function crmApiHandler(req, res) {
           const shipmentRows = shipmentIds.map((id) => db.prepare("SELECT * FROM shipments WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(id)).filter(Boolean);
           if (shipmentRows.length !== shipmentIds.length) return send(res, 400, { error: "Uno de los pedidos ya no está disponible" });
           if (shipmentIds.some((shipmentId) => !confirmedShipmentIds.has(shipmentId))) return send(res, 400, { error: "Confirma las unidades de todos los pedidos antes de guardar la carga" });
+          const incomplete = shipmentRows.find((shipment) => !shipmentHasCompletePreparedLines(shipment));
+          if (incomplete) return send(res, 400, { error: `El pedido ${incomplete.code || incomplete.id} no tiene todas las unidades preparadas` });
           const missing = shipmentRows.map(resolveShipmentStop).filter((stop) => stop.latitude == null || stop.longitude == null);
           if (missing.length) return send(res, 400, { error: "Hay pedidos sin geolocalizar", missing: missing.map((stop) => ({ shipment_id: stop.shipment_id, client_name: stop.client_name, address: stop.address })) });
           const vehicleId = Number(column.vehicle_id || 0) || null;
