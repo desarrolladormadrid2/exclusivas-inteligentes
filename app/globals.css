@@ -6034,3 +6034,14 @@ body:has(.warehouse-tablet-app) .settings-panel {
 .crm-preparation-card>small{overflow:hidden;color:#71818a;font-size:9px;text-overflow:ellipsis;white-space:nowrap}
 .crm-preparation-empty{margin:0;padding:18px 8px;color:#8a989e;font-size:11px;text-align:center}
 @media(max-width:950px){.crm-preparation-board{grid-template-columns:1fr}.crm-preparation-column-list{min-height:0}}
+
+/* En preparación solo se necesitan búsqueda y fecha; todo queda en una línea. */
+.crm-preparation-manager .table-tools{display:flex;align-items:center;gap:8px;padding:9px 10px;overflow-x:auto;white-space:nowrap}
+.crm-preparation-manager .table-tools-primary{display:flex;align-items:center;flex:1 1 auto;flex-wrap:nowrap;min-width:220px}
+.crm-preparation-manager .table-tools-primary>input{flex:1 1 auto;min-width:220px}
+.crm-preparation-manager .table-tools-filters{display:flex;align-items:center;flex:0 0 auto;flex-wrap:nowrap;gap:6px;padding-top:0}
+.crm-preparation-manager .prep-date-filter{margin-left:0}
+.crm-preparation-manager .prep-date-filter label{display:flex;align-items:center;gap:5px;white-space:nowrap}
+.crm-preparation-manager .prep-date-filter input{width:142px}
+.crm-preparation-manager .saved-views{display:none}
+@media(max-width:800px){.crm-preparation-manager .table-tools{align-items:stretch;flex-wrap:wrap;white-space:normal}.crm-preparation-manager .table-tools-primary{min-width:100%;}.crm-preparation-manager .table-tools-filters{width:100%;overflow-x:auto;white-space:nowrap}.crm-preparation-manager .prep-date-filter{width:auto}}

@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.149";
+const APP_VERSION = "2.0.150";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -5984,7 +5984,6 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     Presupuestos: "Crear presupuesto",
     Facturas: "Crear factura",
     Albaranes: "Crear albarán",
-    "Preparación de pedidos": "Crear preparación",
     Almacenes: "Crear almacén",
     "Lugares de recogida": "Crear lugar de recogida",
     Entradas: "Crear entrada",
@@ -6017,14 +6016,14 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   };
   return (
     <>
-    <div className={`manager${isLoadPreparation ? " load-preparation-manager" : ""}`}>
+    <div className={`manager${isLoadPreparation ? " load-preparation-manager" : ""}${isCrmPreparation ? " crm-preparation-manager" : ""}`}>
       {!isLoadPreparation && <div className="manager-head">
         <div>
           <p className="eyebrow">GESTIÓN · {APP_ENVIRONMENT === "Producción" ? "DATOS OPERATIVOS" : "ENTORNO LOCAL"}</p>
           <h2>{c.title}</h2>
         </div>
         <div>
-          <button
+          {active !== "Preparación de pedidos" && <button
             type="button"
             className="button primary"
             onClick={() => {
@@ -6052,7 +6051,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             }}
           >
             {active === "Pedidos" ? "Crear pedido" : createActionLabels[active] || "Crear registro"}
-          </button>{" "}
+          </button>}{" "}
           {active === "Facturas" && (
             <button
               type="button"
@@ -6357,7 +6356,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
               {showInactive ? "Ocultar bajas" : "Mostrar bajas"}
             </button>
           )}
-          <button
+          {active !== "Preparación de pedidos" && <button
             type="button"
             className={`deleted-toggle${showDeleted ? " is-active" : ""}`}
             title={showDeleted ? "Ocultar los registros enviados a la papelera" : "Mostrar los registros enviados a la papelera"}
@@ -6365,7 +6364,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             onClick={() => setShowDeleted((current) => !current)}
           >
             {showDeleted ? "Ocultar eliminados" : "Mostrar eliminados"}
-          </button>
+          </button>}
           </div>
         </div>
         {active === "Stock" && <div className="stock-meaning" role="note"><b>Cómo leer la cobertura:</b><span>Stock físico = existencias actuales</span><span>Necesario = unidades requeridas por pedidos abiertos</span><span>Saldo = stock físico − necesario</span><span className="stock-meaning-alert">Saldo negativo = no se pueden cubrir todos los pedidos</span></div>}
