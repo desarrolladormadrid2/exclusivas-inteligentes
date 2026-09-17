@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.155";
+const APP_VERSION = "2.0.156";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -1484,10 +1484,6 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
 
   function moveShipment(shipmentId: number, targetKey: string, beforeId?: number) {
     if (!shipmentId) return;
-    if (targetKey !== "unassigned" && !confirmedShipmentIds.has(shipmentId)) {
-      setError("Confirma las unidades del pedido antes de meterlo en un camión.");
-      return;
-    }
     setBoardAssignments((current) => {
       const next = Object.fromEntries(Object.entries(current).map(([key, ids]) => [key, ids.filter((id) => Number(id) !== shipmentId)])) as Record<string, number[]>;
       if (targetKey !== "unassigned") {
@@ -1584,12 +1580,6 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
     </div>
     {error && <p className="error-message" role="alert">{error}</p>}
     {message && <p className="success-message" role="status">{message}</p>}
-    <section className="vehicle-load-unassigned panel">
-      <div className="panel-head"><div><h3>Pedidos del día</h3><p className="muted">Aquí aparecen todos. Confirma las unidades cuando estén preparados y arrástralos al camión.</p></div><strong>{unassigned.length} sin asignar</strong></div>
-      <div className="vehicle-load-dropzone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveShipment(Number(event.dataTransfer.getData("text/plain")) || draggedShipmentId || 0, "unassigned"); }}>
-        {loading ? <div className="data-loading" role="status"><LoadingIndicator label="Cargando pedidos preparados…" /></div> : unassigned.length ? unassigned.map((item: any) => renderBoardCard(item, "unassigned")) : <p className="empty-state">Todos los pedidos están asignados a un camión.</p>}
-      </div>
-    </section>
     <section className="vehicle-load-board" aria-label="Asignación de pedidos a camiones">
       {vehicleColumns.map((column: any) => {
         const key = String(column.id);
@@ -1599,6 +1589,12 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
           <div className="vehicle-load-column-list">{columnItems.length ? columnItems.map((item: any) => renderBoardCard(item, key)) : <p className="vehicle-load-column-empty">Suelta aquí los pedidos</p>}</div>
         </section>;
       })}
+    </section>
+    <section className="vehicle-load-unassigned panel">
+      <div className="panel-head"><div><h3>Pedidos del día</h3><p className="muted">Aquí aparecen todos. Arrástralos al camión y confirma las unidades antes de guardar.</p></div><strong>{unassigned.length} sin asignar</strong></div>
+      <div className="vehicle-load-dropzone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveShipment(Number(event.dataTransfer.getData("text/plain")) || draggedShipmentId || 0, "unassigned"); }}>
+        {loading ? <div className="data-loading" role="status"><LoadingIndicator label="Cargando pedidos preparados…" /></div> : unassigned.length ? unassigned.map((item: any) => renderBoardCard(item, "unassigned")) : <p className="empty-state">Todos los pedidos están asignados a un camión.</p>}
+      </div>
     </section>
   </section>;
 }
