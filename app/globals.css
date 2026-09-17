@@ -5989,7 +5989,7 @@ body:has(.warehouse-tablet-app) .settings-panel {
 .vehicle-load-manager .panel-head h3{font-size:13px}
 .vehicle-load-manager .panel-head p{margin:2px 0 0;font-size:10px}
 .vehicle-load-manager .panel-head>strong{color:#bd2027;font-size:11px;white-space:nowrap}
-.vehicle-load-dropzone{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:6px;min-height:64px;padding:7px;background:#f7f9fa}
+.vehicle-load-dropzone{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:5px;max-height:320px;min-height:52px;overflow-y:auto;padding:6px;background:#f7f9fa}
 .vehicle-load-board{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;align-items:start}
 .vehicle-load-column{min-height:190px}
 .vehicle-load-column-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-bottom:3px solid #bd2027;background:#fff8f8}
@@ -5999,23 +5999,23 @@ body:has(.warehouse-tablet-app) .settings-panel {
 .vehicle-load-column-head input{box-sizing:border-box;width:100%;height:28px;padding:0 6px;border:1px solid #cbd7dc;background:#fff;color:#26343d;font:inherit;font-size:10px}
 .vehicle-load-column-list{display:grid;gap:5px;min-height:135px;padding:7px;background:#f7f9fa}
 .vehicle-load-column-empty{display:grid;place-items:center;min-height:90px;margin:0;border:1px dashed #cbd7dc;color:#8a989e;font-size:11px}
-.vehicle-load-board-card{display:grid;gap:3px;padding:8px 9px;border:1px solid #d7e0e4;border-left:4px solid #bd2027;background:#fff;color:#536873;cursor:grab;user-select:none}
+.vehicle-load-board-card{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"top top" "client action" "meta action";align-items:center;gap:2px 8px;padding:6px 8px;border:1px solid #d7e0e4;border-left:4px solid #bd2027;background:#fff;color:#536873;cursor:grab;user-select:none}
 .vehicle-load-board-card:active{cursor:grabbing}
 .vehicle-load-board-card:hover{border-color:#bd2027;background:#fffdfd}
-.vehicle-load-board-card-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.vehicle-load-board-card-top{display:flex;grid-area:top;align-items:center;justify-content:space-between;gap:8px}
 .vehicle-load-board-card-top b{color:#bd2027;font-size:10px}
 .vehicle-load-board-card-top strong{color:#26343d;font-size:10px}
-.vehicle-load-board-card>strong{overflow:hidden;color:#26343d;font-size:12px;text-overflow:ellipsis;white-space:nowrap}
-.vehicle-load-board-card>span{overflow:hidden;font-size:10px;text-overflow:ellipsis;white-space:nowrap}
+.vehicle-load-board-card>strong{grid-area:client;overflow:hidden;color:#26343d;font-size:12px;text-overflow:ellipsis;white-space:nowrap}
+.vehicle-load-board-card-meta{display:flex;grid-area:meta;align-items:center;flex-wrap:wrap;gap:2px 8px;min-width:0}
+.vehicle-load-board-card-meta>span,.vehicle-load-board-card-meta>small{overflow:hidden;font-size:9px;text-overflow:ellipsis;white-space:nowrap}
 .vehicle-load-card-reception{color:#26343d!important;font-weight:700}
 .vehicle-load-card-status{color:#9a6500!important;font-size:10px!important;font-weight:700}
 .vehicle-load-card-status.is-ready{color:#087f5b!important}
-.vehicle-load-board-card>small{overflow:hidden;color:#71818a;font-size:9px;text-overflow:ellipsis;white-space:nowrap}
-.vehicle-load-confirm{width:100%;min-height:28px;margin-top:3px;padding:5px 8px;border:1px solid #bd2027;background:#fff;color:#bd2027;font:inherit;font-size:10px;font-weight:700;cursor:pointer}
+.vehicle-load-confirm{grid-area:action;width:145px;min-height:28px;margin:0;padding:5px 8px;border:1px solid #bd2027;background:#fff;color:#bd2027;font:inherit;font-size:10px;font-weight:700;cursor:pointer}
 .vehicle-load-confirm:hover:not(:disabled){background:#fff4f4}
 .vehicle-load-confirm:disabled{border-color:#d7e0e4;background:#f7f9fa;color:#8a989e;cursor:default}
 .vehicle-load-confirm.is-confirmed{border-color:#16855f;background:#e8f7ef;color:#087f5b}
-@media(max-width:700px){.vehicle-load-toolbar{grid-template-columns:minmax(150px,1fr) auto auto}.vehicle-load-toolbar-summary{grid-column:1/-1;grid-row:2}.vehicle-load-board{grid-template-columns:1fr}.vehicle-load-column-head{align-items:stretch;flex-direction:column}.vehicle-load-column-head label{width:100%}}
+@media(max-width:700px){.vehicle-load-toolbar{grid-template-columns:minmax(150px,1fr) auto auto}.vehicle-load-toolbar-summary{grid-column:1/-1;grid-row:2}.vehicle-load-board{grid-template-columns:1fr}.vehicle-load-column-head{align-items:stretch;flex-direction:column}.vehicle-load-column-head label{width:100%}.vehicle-load-dropzone{grid-template-columns:1fr;max-height:300px}.vehicle-load-board-card{grid-template-columns:minmax(0,1fr) 128px}.vehicle-load-confirm{width:128px}}
 
 /* Preparación del CRM: tablero sencillo por estado, separado de la hoja del almacén. */
 .crm-preparation-board{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:10px;background:#f5f7f8;border-top:1px solid #d7e0e4}

@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.156";
+const APP_VERSION = "2.0.157";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -1562,9 +1562,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
     return <article className="vehicle-load-board-card" key={item.id} draggable onDragStart={(event) => { event.dataTransfer.setData("text/plain", String(item.id)); setDraggedShipmentId(Number(item.id)); }} onDragEnd={() => setDraggedShipmentId(null)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveShipment(Number(event.dataTransfer.getData("text/plain")) || draggedShipmentId || 0, targetKey, Number(item.id)); }}>
       <div className="vehicle-load-board-card-top"><b>{item.code}</b><strong>{item.distance_km === null ? "—" : `${String(item.distance_km).replace(".", ",")} km`}</strong></div>
       <strong>{item.client_name}</strong>
-      <span className="vehicle-load-card-reception">{reception}</span>
-      <span className={`vehicle-load-card-status${preparationReady ? " is-ready" : ""}`}>{statusLabel}</span>
-      <small>{stats.lines.length ? `${stats.quantityLabel}${stats.lines.length > 2 ? ` · ${stats.lines.length} líneas` : ""}` : "Sin líneas preparadas"}</small>
+      <div className="vehicle-load-board-card-meta"><span className="vehicle-load-card-reception">{reception}</span><span className={`vehicle-load-card-status${preparationReady ? " is-ready" : ""}`}>{statusLabel}</span><small>{stats.lines.length ? `${stats.quantityLabel}${stats.lines.length > 2 ? ` · ${stats.lines.length} líneas` : ""}` : "Sin líneas preparadas"}</small></div>
       <button type="button" className={`vehicle-load-confirm${isConfirmed ? " is-confirmed" : ""}`} disabled={isConfirmed || !canConfirm} onClick={(event) => { event.stopPropagation(); confirmShipment(item); }}>
         {isConfirmed ? "Pedido completo" : canConfirm ? "Confirmar unidades" : preparationReady ? "Faltan unidades" : "Pendiente de preparar"}
       </button>
