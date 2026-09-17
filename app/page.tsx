@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.145";
+const APP_VERSION = "2.0.146";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -1320,11 +1320,10 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
   const [shipments, setShipments] = useState<any[]>([]);
   const [routes, setRoutes] = useState<any[]>([]);
   const [routeDate, setRouteDate] = useState(() => initialDate || tabletTodayInput());
-  const [selected, setSelected] = useState<number[]>([]);
-  const [driver, setDriver] = useState(user?.username || "");
-  const [vehicle, setVehicle] = useState("");
-  const [vehicleId, setVehicleId] = useState("");
   const [vehicles, setVehicles] = useState<any[]>([]);
+  const [boardAssignments, setBoardAssignments] = useState<Record<string, number[]>>({});
+  const [driverByVehicle, setDriverByVehicle] = useState<Record<string, string>>({});
+  const [draggedShipmentId, setDraggedShipmentId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -1397,7 +1396,6 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       setOrigin(nextOrigin);
       setShipments(prepared);
       setRoutes(Array.isArray(routeRows) ? routeRows : []);
-      setSelected([]);
     } catch {
       setError("No se han podido cargar los envíos preparados.");
     } finally {
@@ -1409,11 +1407,36 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
     if (initialDate) setRouteDate(initialDate);
   }, [initialDate]);
 
-  const assignedByShipment = new Map<number, any>();
-  routes.forEach((route: any) => {
-    if (String(route.status || "") === "Cancelada") return;
-    (route.stops || []).forEach((stop: any) => assignedByShipment.set(Number(stop.shipment_id), route));
-  });
+  useEffect(() => {
+    const nextAssignments: Record<string, number[]> = {};
+    const nextDrivers: Record<string, string> = {};
+    routes
+      .filter((route: any) => String(route.route_date || "").slice(0, 10) === routeDate && String(route.status || "") !== "Cancelada")
+      .sort((a: any, b: any) => Number(a.id || 0) - Number(b.id || 0))
+      .forEach((route: any) => {
+        const key = String(route.vehicle_id || `route-${route.id}`);
+        nextAssignments[key] = (route.stops || []).slice().sort((a: any, b: any) => Number(a.position || 0) - Number(b.position || 0)).map((stop: any) => Number(stop.shipment_id)).filter(Boolean);
+        nextDrivers[key] = String(route.driver || "");
+      });
+    setBoardAssignments(nextAssignments);
+    setDriverByVehicle(nextDrivers);
+  }, [routeDate, routes]);
+
+  const routeDateRoutes = routes.filter((route: any) => String(route.route_date || "").slice(0, 10) === routeDate && String(route.status || "") !== "Cancelada");
+  const vehicleColumns = (() => {
+    const registeredKeys = new Set(vehicles.map((vehicle: any) => String(vehicle.id)));
+    const legacyColumns = routeDateRoutes
+      .filter((route: any) => !route.vehicle_id || !registeredKeys.has(String(route.vehicle_id)))
+      .map((route: any) => ({ id: route.vehicle_id || `route-${route.id}`, name: route.vehicle || `Camión ${route.id}`, plate: route.vehicle || "", driver: route.driver || "" }));
+    const columns = [...vehicles, ...legacyColumns];
+    const unique = new Map<string, any>();
+    columns.forEach((column: any) => unique.set(String(column.id), column));
+    if (!unique.size) {
+      unique.set("manual-1", { id: "manual-1", name: "Camión 1" });
+      unique.set("manual-2", { id: "manual-2", name: "Camión 2" });
+    }
+    return Array.from(unique.values());
+  })();
   const receptionMinutes = (value: any) => {
     const match = String(value || "").match(/^(\d{1,2}):?(\d{2})/);
     return match ? Number(match[1]) * 60 + Number(match[2]) : -1;
@@ -1427,26 +1450,43 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       return closingOrder || openingOrder || distanceOrder || String(a.address || "").localeCompare(String(b.address || ""), "es", { numeric: true });
     })
     .map((item, index) => ({ ...item, load_position: index + 1 }));
-  const unassigned = dayShipments.filter((item) => !assignedByShipment.has(Number(item.id)));
+  const assignedIds = new Set(Object.values(boardAssignments).flat().map(Number));
+  const unassigned = dayShipments.filter((item) => !assignedIds.has(Number(item.id)));
 
-  async function createVehicleLoad() {
-    if (!selected.length) { setError("Selecciona al menos un envío preparado."); return; }
-    if (!String(vehicle).trim()) { setError("Indica el camión o matrícula."); return; }
-    if (!String(driver).trim()) { setError("Indica el conductor."); return; }
+  function moveShipment(shipmentId: number, targetKey: string, beforeId?: number) {
+    if (!shipmentId) return;
+    setBoardAssignments((current) => {
+      const next = Object.fromEntries(Object.entries(current).map(([key, ids]) => [key, ids.filter((id) => Number(id) !== shipmentId)])) as Record<string, number[]>;
+      if (targetKey !== "unassigned") {
+        const target = next[targetKey] || [];
+        const position = beforeId && beforeId !== shipmentId ? target.indexOf(beforeId) : -1;
+        next[targetKey] = position >= 0 ? [...target.slice(0, position), shipmentId, ...target.slice(position)] : [...target, shipmentId];
+      }
+      return next;
+    });
+  }
+
+  async function saveVehicleBoard() {
+    const columns = vehicleColumns.map((column: any) => ({
+      vehicle_id: Number.isInteger(Number(column.id)) ? Number(column.id) : null,
+      vehicle: column.plate || column.name || `Camión ${column.id}`,
+      driver: driverByVehicle[String(column.id)] || column.driver || user?.username || "",
+      shipment_ids: boardAssignments[String(column.id)] || [],
+    })).filter((column) => column.shipment_ids.length);
+    if (!columns.length) { setError("Arrastra al menos un pedido a un camión."); return; }
     setSaving(true);
     setError("");
     setMessage("");
     try {
-      const response = await fetch("/api/routes", {
-        method: "POST",
+      const response = await fetch("/api/routes/board", {
+        method: "PUT",
         headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Usuario local" },
-        body: JSON.stringify({ route_date: routeDate, shipment_ids: selected, driver: driver.trim(), vehicle_id: vehicleId || null, vehicle: vehicle.trim(), origin_latitude: origin.latitude, origin_longitude: origin.longitude, origin_address: origin.label }),
+        body: JSON.stringify({ route_date: routeDate, columns, origin_latitude: origin.latitude, origin_longitude: origin.longitude, origin_address: origin.label }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || "No se ha podido asignar la carga.");
-      setRoutes((current) => [body, ...current]);
-      setSelected([]);
-      setMessage(`Carga ${body.code} asignada a ${body.vehicle || vehicle.trim()} · ${driver.trim()}.`);
+      setRoutes((current) => [...(body.routes || []), ...current.filter((route: any) => String(route.route_date || "").slice(0, 10) !== routeDate)]);
+      setMessage(`Carga guardada: ${columns.reduce((total, column) => total + column.shipment_ids.length, 0)} pedidos asignados.`);
     } catch (reason: any) {
       setError(reason?.message || "No se ha podido asignar la carga.");
     } finally {
@@ -1454,36 +1494,42 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
     }
   }
 
+  const shipmentById = new Map(dayShipments.map((item: any) => [Number(item.id), item]));
+  const renderBoardCard = (item: any, targetKey: string) => {
+    const material = (item.load_lines || []).slice(0, 2).map((line: any) => `${line.quantity_to_load} ${quantityUnitLabel(line.quantity_unit)} · ${line.product_name}`).join(" · ");
+    return <article className="vehicle-load-board-card" key={item.id} draggable onDragStart={(event) => { event.dataTransfer.setData("text/plain", String(item.id)); setDraggedShipmentId(Number(item.id)); }} onDragEnd={() => setDraggedShipmentId(null)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveShipment(Number(event.dataTransfer.getData("text/plain")) || draggedShipmentId || 0, targetKey, Number(item.id)); }}>
+      <div className="vehicle-load-board-card-top"><b>{item.code}</b><strong>{item.distance_km === null ? "—" : `${String(item.distance_km).replace(".", ",")} km`}</strong></div>
+      <strong>{item.client_name}</strong>
+      <span>{[item.address, item.city].filter(Boolean).join(" · ") || "Dirección no indicada"}</span>
+      <small>{item.opening_time && item.closing_time ? `Recepción ${item.opening_time}–${item.closing_time}` : "Horario pendiente"}{material ? ` · ${material}` : ""}</small>
+    </article>;
+  };
+
   return <section className="vehicle-load-manager">
-    <div className="manager-head">
-      <div><p className="eyebrow">LOGÍSTICA · SALIDA</p><h2>Carga de vehículos</h2><p className="muted">Asigna los pedidos preparados a un camión y un conductor antes de salir.</p></div>
-      <button type="button" className="button secondary" onClick={() => void load()}>Actualizar</button>
-    </div>
     <div className="vehicle-load-toolbar">
-      <label>Fecha de salida<input type="date" value={routeDate} onChange={(event) => { setRouteDate(event.target.value); setSelected([]); }} /></label>
-      <label>Camión / matrícula{vehicles.length ? <select value={vehicleId} onChange={(event) => { const selectedVehicle = vehicles.find((item: any) => Number(item.id) === Number(event.target.value)); setVehicleId(event.target.value); setVehicle(selectedVehicle?.plate || selectedVehicle?.name || ""); }}><option value="">Seleccionar camión…</option>{vehicles.map((item: any) => <option key={item.id} value={item.id}>{item.plate || item.name}</option>)}</select> : <input value={vehicle} onChange={(event) => setVehicle(event.target.value)} placeholder="Añade primero un camión abajo" />}</label>
-      <label>Conductor<input value={driver} onChange={(event) => setDriver(event.target.value)} placeholder="Nombre del conductor" /></label>
-      <div className="vehicle-load-origin"><span>Ordenado desde</span><b>{origin.label}</b><small>Distancias estimadas en línea recta</small></div>
+      <label>Fecha de carga<input type="date" value={routeDate} onChange={(event) => setRouteDate(event.target.value)} /></label>
+      <span className="vehicle-load-toolbar-summary"><b>{dayShipments.length} pedidos</b><small>{unassigned.length} pendientes de asignar · {origin.label}</small></span>
+      <button type="button" className="button secondary" onClick={() => void load()}>Actualizar</button>
+      <button type="button" className="button primary" disabled={saving || !assignedIds.size} onClick={() => void saveVehicleBoard()}>{saving ? "Guardando…" : "Guardar cargas"}</button>
     </div>
     {error && <p className="error-message" role="alert">{error}</p>}
     {message && <p className="success-message" role="status">{message}</p>}
-    <section className="vehicle-load-panel panel">
-      <div className="panel-head"><div><h3>Pedidos preparados</h3><p className="muted">{dayShipments.length} envíos · {unassigned.length} sin asignar · orden de carga: última entrega primero</p></div><button type="button" className="button primary" disabled={saving || !selected.length} onClick={() => void createVehicleLoad()}>{saving ? "Asignando…" : `Asignar seleccionados (${selected.length})`}</button></div>
-      {loading ? <div className="data-loading" role="status"><LoadingIndicator label="Cargando pedidos preparados…" /></div> : <div className="vehicle-load-list">
-        {dayShipments.length ? dayShipments.map((item: any) => {
-          const route = assignedByShipment.get(Number(item.id));
-          const isSelected = selected.includes(Number(item.id));
-          return <article className={`vehicle-load-row${route ? " is-assigned" : ""}${isSelected ? " is-selected" : ""}`} key={item.id}>
-            <label className="vehicle-load-check"><input type="checkbox" checked={isSelected} disabled={Boolean(route)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, Number(item.id)] : current.filter((id) => id !== Number(item.id)))} aria-label={`Seleccionar ${item.code}`} /></label>
-            <div className="vehicle-load-distance"><b>{item.distance_km === null ? "—" : `${String(item.distance_km).replace(".", ",")} km`}</b><small>Carga {item.load_position} · {item.distance_km === null ? "Sin coordenadas" : "desde almacén"}</small></div>
-            <div className="vehicle-load-main"><b>{item.code}</b><strong>{item.client_name}</strong><span>{[item.address, item.city].filter(Boolean).join(" · ") || "Dirección no indicada"}</span><small>Recepción: {item.opening_time && item.closing_time ? `${item.opening_time}–${item.closing_time}` : "Horario pendiente"}</small><small>{item.packages || 1} bultos · Estado: {item.status}</small><div className="vehicle-load-items"><b>Material preparado</b>{item.load_lines?.length ? item.load_lines.map((line: any) => <span key={line.id}>{line.quantity_to_load} {quantityUnitLabel(line.quantity_unit)} · {line.product_name}{line.product_sku ? ` · ${line.product_sku}` : ""}</span>) : <span>Detalle de productos pendiente</span>}</div></div>
-            <div className="vehicle-load-notes"><span><b>Nota de carga</b>{item.notes || "Sin indicaciones"}</span><span><b>Nota del repartidor</b>{item.driver_notes || "Sin indicaciones"}</span><span><b>Factura</b>{item.invoice_delivery_method || "Pendiente de indicar"}</span></div>
-            <div className="vehicle-load-assignment">{route ? <><b>Asignado</b><span>{route.vehicle || "Sin camión"}</span><small>{route.driver || "Sin conductor"} · {route.code}</small></> : <span className="vehicle-load-pending">Pendiente de asignar</span>}</div>
-          </article>;
-        }) : <p className="empty-state">No hay pedidos preparados para el {formatSpanishDateValue(routeDate, false)}.</p>}
-      </div>}
+    <section className="vehicle-load-unassigned panel">
+      <div className="panel-head"><div><h3>Pedidos del día</h3><p className="muted">Arrastra cada pedido a un camión. Suéltalo aquí para quitarlo del camión. El orden es manual.</p></div><strong>{unassigned.length} sin asignar</strong></div>
+      <div className="vehicle-load-dropzone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveShipment(Number(event.dataTransfer.getData("text/plain")) || draggedShipmentId || 0, "unassigned"); }}>
+        {loading ? <div className="data-loading" role="status"><LoadingIndicator label="Cargando pedidos preparados…" /></div> : unassigned.length ? unassigned.map((item: any) => renderBoardCard(item, "unassigned")) : <p className="empty-state">Todos los pedidos están asignados a un camión.</p>}
+      </div>
     </section>
-    <VehicleOperationsPanel user={user} routeDate={routeDate} vehicles={vehicles} onReload={() => void load()} />
+    <section className="vehicle-load-board" aria-label="Asignación de pedidos a camiones">
+      {vehicleColumns.map((column: any) => {
+        const key = String(column.id);
+        const columnItems = (boardAssignments[key] || []).map((id) => shipmentById.get(Number(id))).filter(Boolean);
+        return <section className="vehicle-load-column" key={key} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveShipment(Number(event.dataTransfer.getData("text/plain")) || draggedShipmentId || 0, key); }}>
+          <header className="vehicle-load-column-head"><div><h3>{column.plate || column.name || `Camión ${key}`}</h3><span>{columnItems.length} pedidos</span></div><label>Conductor<input value={driverByVehicle[key] || column.driver || user?.username || ""} onChange={(event) => setDriverByVehicle((current) => ({ ...current, [key]: event.target.value }))} placeholder="Nombre" /></label></header>
+          <div className="vehicle-load-column-list">{columnItems.length ? columnItems.map((item: any) => renderBoardCard(item, key)) : <p className="vehicle-load-column-empty">Suelta aquí los pedidos</p>}</div>
+        </section>;
+      })}
+    </section>
   </section>;
 }
 
