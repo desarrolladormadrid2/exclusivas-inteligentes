@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.148";
+const APP_VERSION = "2.0.149";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -5696,6 +5696,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       || (quickView === "not-shipped" && ["Pendiente de enviar", "Preparado"].includes(currentShippingStatus))
       || (quickView === "critical" && criticalStock)
       || (quickView === "review" && (reviewStatus || currentBillingStatus !== "Facturado" && active === "Pedidos"));
+    if (isCrmPreparation) return matchesText && matchesQuickView && (!preparationDateFilter || rowDate === preparationDateFilter);
     if (!isProducts && !isLoadPreparation) return matchesText && matchesBilling && matchesShipping && matchesQuickView && matchesOrderCreatedFrom && matchesOrderCreatedTo && (!listFilterActive || (matchesListClient && matchesListSupplier && matchesListFrom && matchesListTo && matchesListStatus));
     if (isLoadPreparation) return matchesText && matchesQuickView && (!preparationDateFilter || String(row.preparation_date || "").slice(0, 10) === preparationDateFilter);
     const matchesCategory = !productFilters.category || row.category === productFilters.category;
@@ -6098,7 +6099,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       {dbError && <div className="db-error">{dbError}</div>}
       {error && <div className="error-message" role="alert">{error}</div>}
       {productSaveMessage && active === "Productos" && <div className="success-message" role="status">{productSaveMessage}</div>}
-      {!isLoadPreparation && active !== "Pedidos" && <BusinessRelatedPanels active={active} rows={rows} lookups={lookups} onNavigate={onNavigate} />}
+      {!isLoadPreparation && active !== "Pedidos" && active !== "Preparación de pedidos" && <BusinessRelatedPanels active={active} rows={rows} lookups={lookups} onNavigate={onNavigate} />}
       {active === "Compras" && <SupplierPayablesPanel rows={rows} suppliers={lookups.suppliers || []} actor={user?.username || "Usuario local"} onReload={() => setListRefreshKey((current) => current + 1)} />}
       {isLoadPreparation && <CollectiveLoadModal rows={preparationRows} lookups={lookups} dateFilter={preparationDateFilter} actor={user?.username || "Usuario local"} onClose={() => onNavigate?.("Carga de vehículos", preparationDateFilter)} onDateFilterChange={setPreparationDateFilter} embedded />}
       {active === "Gastos y tickets" && (
@@ -6332,7 +6333,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             <label className="list-filter-field">Estado<select value={listStatus} onChange={(event) => setListStatus(event.target.value)} aria-label={`Filtrar ${active.toLowerCase()} por estado`}><option>Todos</option>{listStatusOptions.map((status) => <option key={status}>{status}</option>)}</select></label>
             {(listClient || listSupplier || listDateFrom || listDateTo || orderCreatedFrom || orderCreatedTo || listStatus !== "Todos") && <button type="button" className="deleted-toggle" onClick={() => { setListClient(""); setListSupplier(""); setListDateFrom(""); setListDateTo(""); setOrderCreatedFrom(""); setOrderCreatedTo(""); setListStatus("Todos"); }}>Limpiar filtros</button>}
           </>}
-          {isLoadPreparation && <div className="prep-date-filter" aria-label="Filtrar preparación por fecha"><label>Preparar el día <input type="date" value={preparationDateFilter} onChange={(event) => setPreparationDateFilter(event.target.value)} /></label><button type="button" className={`button ${preparationDateFilter === tabletTodayInput() ? "primary" : "secondary"}`} aria-pressed={preparationDateFilter === tabletTodayInput()} onClick={() => setPreparationDateFilter(tabletTodayInput())}>Hoy</button><button type="button" className={`button ${preparationDateFilter === tabletDateOffset(1) ? "primary" : "secondary"}`} aria-pressed={preparationDateFilter === tabletDateOffset(1)} onClick={() => setPreparationDateFilter(tabletDateOffset(1))}>Mañana</button><button type="button" className={`button ${preparationDateFilter === "" ? "primary" : "secondary"}`} aria-pressed={preparationDateFilter === ""} onClick={() => setPreparationDateFilter("")}>Todos</button></div>}
+          {(isLoadPreparation || isCrmPreparation) && <div className="prep-date-filter" aria-label="Filtrar preparación por fecha"><label>Preparar el día <input type="date" value={preparationDateFilter} onChange={(event) => setPreparationDateFilter(event.target.value)} /></label><button type="button" className={`button ${preparationDateFilter === tabletTodayInput() ? "primary" : "secondary"}`} aria-pressed={preparationDateFilter === tabletTodayInput()} onClick={() => setPreparationDateFilter(tabletTodayInput())}>Hoy</button><button type="button" className={`button ${preparationDateFilter === tabletDateOffset(1) ? "primary" : "secondary"}`} aria-pressed={preparationDateFilter === tabletDateOffset(1)} onClick={() => setPreparationDateFilter(tabletDateOffset(1))}>Mañana</button>{isLoadPreparation && <button type="button" className={`button ${preparationDateFilter === "" ? "primary" : "secondary"}`} aria-pressed={preparationDateFilter === ""} onClick={() => setPreparationDateFilter("")}>Todos</button>}</div>}
           {isLoadPreparation && <div className="prep-summary"><b>{filteredRows.length} pedidos a preparar</b><span>{preparationUrgentCount} urgentes</span><span>{preparationIncidentCount} con incidencia</span></div>}
           {active === "Stock" && (
             <select className="stock-sort-select" value={stockSort} onChange={(event) => setStockSort(event.target.value)} aria-label="Ordenar stock">
