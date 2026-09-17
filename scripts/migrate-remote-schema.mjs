@@ -98,7 +98,8 @@ const migrationsByTable = {
     ["table", "CREATE TABLE IF NOT EXISTS vehicle_maintenance(id INTEGER PRIMARY KEY AUTOINCREMENT,vehicle_id INTEGER NOT NULL,maintenance_date TEXT NOT NULL,maintenance_km REAL DEFAULT 0,maintenance_type TEXT NOT NULL,amount REAL DEFAULT 0,next_due_km REAL,next_due_date TEXT,notes TEXT,status TEXT DEFAULT 'Realizado',created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT)"],
   ],
   delivery_route_stops: [
-    ["table", "CREATE TABLE IF NOT EXISTS delivery_route_stops(id INTEGER PRIMARY KEY AUTOINCREMENT,route_id INTEGER NOT NULL,position INTEGER NOT NULL,shipment_id INTEGER,client_id INTEGER,collection_point_id INTEGER,client_name TEXT,address TEXT,city TEXT,latitude REAL,longitude REAL,distance_km REAL DEFAULT 0,status TEXT DEFAULT 'Pendiente',notes TEXT,driver_notes TEXT,invoice_delivery_method TEXT,created_at TEXT,updated_at TEXT)"],
+    ["table", "CREATE TABLE IF NOT EXISTS delivery_route_stops(id INTEGER PRIMARY KEY AUTOINCREMENT,route_id INTEGER NOT NULL,position INTEGER NOT NULL,shipment_id INTEGER,client_id INTEGER,collection_point_id INTEGER,client_name TEXT,address TEXT,city TEXT,latitude REAL,longitude REAL,distance_km REAL DEFAULT 0,status TEXT DEFAULT 'Pendiente',load_confirmed INTEGER DEFAULT 0,notes TEXT,driver_notes TEXT,invoice_delivery_method TEXT,created_at TEXT,updated_at TEXT)"],
+    ["load_confirmed", "ALTER TABLE delivery_route_stops ADD COLUMN load_confirmed INTEGER DEFAULT 0"],
     ["driver_notes", "ALTER TABLE delivery_route_stops ADD COLUMN driver_notes TEXT"],
     ["invoice_delivery_method", "ALTER TABLE delivery_route_stops ADD COLUMN invoice_delivery_method TEXT"],
   ],

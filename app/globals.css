@@ -6007,7 +6007,12 @@ body:has(.warehouse-tablet-app) .settings-panel {
 .vehicle-load-board-card-top strong{color:#26343d;font-size:10px}
 .vehicle-load-board-card>strong{overflow:hidden;color:#26343d;font-size:12px;text-overflow:ellipsis;white-space:nowrap}
 .vehicle-load-board-card>span{overflow:hidden;font-size:10px;text-overflow:ellipsis;white-space:nowrap}
+.vehicle-load-card-reception{color:#26343d!important;font-weight:700}
 .vehicle-load-board-card>small{overflow:hidden;color:#71818a;font-size:9px;text-overflow:ellipsis;white-space:nowrap}
+.vehicle-load-confirm{width:100%;min-height:28px;margin-top:3px;padding:5px 8px;border:1px solid #bd2027;background:#fff;color:#bd2027;font:inherit;font-size:10px;font-weight:700;cursor:pointer}
+.vehicle-load-confirm:hover:not(:disabled){background:#fff4f4}
+.vehicle-load-confirm:disabled{border-color:#d7e0e4;background:#f7f9fa;color:#8a989e;cursor:default}
+.vehicle-load-confirm.is-confirmed{border-color:#16855f;background:#e8f7ef;color:#087f5b}
 @media(max-width:700px){.vehicle-load-toolbar{grid-template-columns:minmax(150px,1fr) auto auto}.vehicle-load-toolbar-summary{grid-column:1/-1;grid-row:2}.vehicle-load-board{grid-template-columns:1fr}.vehicle-load-column-head{align-items:stretch;flex-direction:column}.vehicle-load-column-head label{width:100%}}
 
 /* Preparación del CRM: tablero sencillo por estado, separado de la hoja del almacén. */

@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.152";
+const APP_VERSION = "2.0.153";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -1344,6 +1344,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
   const [routeDate, setRouteDate] = useState(() => initialDate || tabletTodayInput());
   const [vehicles, setVehicles] = useState<any[]>([]);
   const [boardAssignments, setBoardAssignments] = useState<Record<string, number[]>>({});
+  const [confirmedShipmentIds, setConfirmedShipmentIds] = useState<Set<number>>(new Set());
   const [driverByVehicle, setDriverByVehicle] = useState<Record<string, string>>({});
   const [draggedShipmentId, setDraggedShipmentId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1398,8 +1399,9 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
             .filter((line: any) => Number(line.order_id) === Number(item.order_id))
             .map((line: any) => {
               const product = (Array.isArray(products) ? products : []).find((row: any) => Number(row.id) === Number(line.product_id));
-              const quantity = Number(line.prepared_quantity || 0) > 0 ? Number(line.prepared_quantity) : Number(line.quantity || 0);
-              return { ...line, product_name: product?.name || `Producto #${line.product_id}`, product_sku: product?.sku || "", quantity_to_load: quantity };
+              const requestedQuantity = Number(line.quantity_requested ?? line.quantity ?? 0);
+              const preparedQuantity = Number(line.prepared_quantity) > 0 ? Number(line.prepared_quantity) : Number(line.prepared) === 1 ? Number(line.quantity || 0) : 0;
+              return { ...line, product_name: product?.name || `Producto #${line.product_id}`, product_sku: product?.sku || "", requested_quantity_to_load: requestedQuantity, prepared_quantity_to_load: preparedQuantity };
             });
           return {
             ...item,
@@ -1432,16 +1434,21 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
   useEffect(() => {
     const nextAssignments: Record<string, number[]> = {};
     const nextDrivers: Record<string, string> = {};
+    const nextConfirmed = new Set<number>();
     routes
       .filter((route: any) => String(route.route_date || "").slice(0, 10) === routeDate && String(route.status || "") !== "Cancelada")
       .sort((a: any, b: any) => Number(a.id || 0) - Number(b.id || 0))
       .forEach((route: any) => {
         const key = String(route.vehicle_id || `route-${route.id}`);
-        nextAssignments[key] = (route.stops || []).slice().sort((a: any, b: any) => Number(a.position || 0) - Number(b.position || 0)).map((stop: any) => Number(stop.shipment_id)).filter(Boolean);
+        nextAssignments[key] = (route.stops || []).slice().sort((a: any, b: any) => Number(a.position || 0) - Number(b.position || 0)).map((stop: any) => {
+          if (Number(stop.load_confirmed) === 1) nextConfirmed.add(Number(stop.shipment_id));
+          return Number(stop.shipment_id);
+        }).filter(Boolean);
         nextDrivers[key] = String(route.driver || "");
       });
     setBoardAssignments(nextAssignments);
     setDriverByVehicle(nextDrivers);
+    setConfirmedShipmentIds(nextConfirmed);
   }, [routeDate, routes]);
 
   const routeDateRoutes = routes.filter((route: any) => String(route.route_date || "").slice(0, 10) === routeDate && String(route.status || "") !== "Cancelada");
@@ -1464,7 +1471,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
     return match ? Number(match[1]) * 60 + Number(match[2]) : -1;
   };
   const dayShipments = shipments
-    .filter((item) => String(item.preparation_date || item.shipping_date || item.expected_delivery_at || item.delivery_date || "").slice(0, 10) === routeDate)
+    .filter((item) => String(item.shipping_date || item.expected_delivery_at || item.delivery_date || item.preparation_date || "").slice(0, 10) === routeDate)
     .sort((a, b) => {
       const closingOrder = receptionMinutes(b.closing_time) - receptionMinutes(a.closing_time);
       const openingOrder = receptionMinutes(b.opening_time) - receptionMinutes(a.opening_time);
@@ -1477,6 +1484,10 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
 
   function moveShipment(shipmentId: number, targetKey: string, beforeId?: number) {
     if (!shipmentId) return;
+    if (targetKey !== "unassigned" && !confirmedShipmentIds.has(shipmentId)) {
+      setError("Confirma las unidades del pedido antes de meterlo en un camión.");
+      return;
+    }
     setBoardAssignments((current) => {
       const next = Object.fromEntries(Object.entries(current).map(([key, ids]) => [key, ids.filter((id) => Number(id) !== shipmentId)])) as Record<string, number[]>;
       if (targetKey !== "unassigned") {
@@ -1488,6 +1499,24 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
     });
   }
 
+  function getLoadStats(item: any) {
+    const lines = Array.isArray(item.load_lines) ? item.load_lines : [];
+    const completeLines = lines.filter((line: any) => Math.abs(Number(line.prepared_quantity_to_load || 0) - Number(line.requested_quantity_to_load || 0)) < 0.001).length;
+    const complete = lines.length > 0 && completeLines === lines.length;
+    const quantityLabel = lines.slice(0, 2).map((line: any) => `${line.prepared_quantity_to_load || 0}/${line.requested_quantity_to_load || 0} ${quantityUnitLabel(line.quantity_unit)}`).join(" · ");
+    return { lines, complete, completeLines, quantityLabel };
+  }
+
+  function confirmShipment(item: any) {
+    const stats = getLoadStats(item);
+    if (!stats.complete) {
+      setError(`El pedido ${item.code} no está completo: ${stats.completeLines} de ${stats.lines.length} líneas completas.`);
+      return;
+    }
+    setConfirmedShipmentIds((current) => new Set([...current, Number(item.id)]));
+    setError("");
+  }
+
   async function saveVehicleBoard() {
     const columns = vehicleColumns.map((column: any) => ({
       vehicle_id: Number.isInteger(Number(column.id)) ? Number(column.id) : null,
@@ -1496,6 +1525,11 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       shipment_ids: boardAssignments[String(column.id)] || [],
     })).filter((column) => column.shipment_ids.length);
     if (!columns.length) { setError("Arrastra al menos un pedido a un camión."); return; }
+    const pendingConfirmation = columns.flatMap((column) => column.shipment_ids).filter((shipmentId) => !confirmedShipmentIds.has(Number(shipmentId)));
+    if (pendingConfirmation.length) {
+      setError("Confirma las unidades de cada pedido antes de guardar la carga.");
+      return;
+    }
     setSaving(true);
     setError("");
     setMessage("");
@@ -1503,7 +1537,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       const response = await fetch("/api/routes/board", {
         method: "PUT",
         headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Usuario local" },
-        body: JSON.stringify({ route_date: routeDate, columns, origin_latitude: origin.latitude, origin_longitude: origin.longitude, origin_address: origin.label }),
+        body: JSON.stringify({ route_date: routeDate, columns, confirmed_shipment_ids: Array.from(confirmedShipmentIds), origin_latitude: origin.latitude, origin_longitude: origin.longitude, origin_address: origin.label }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || "No se ha podido asignar la carga.");
@@ -1518,19 +1552,24 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
 
   const shipmentById = new Map(dayShipments.map((item: any) => [Number(item.id), item]));
   const renderBoardCard = (item: any, targetKey: string) => {
-    const material = (item.load_lines || []).slice(0, 2).map((line: any) => `${line.quantity_to_load} ${quantityUnitLabel(line.quantity_unit)} · ${line.product_name}`).join(" · ");
+    const stats = getLoadStats(item);
+    const isConfirmed = confirmedShipmentIds.has(Number(item.id));
+    const reception = item.opening_time && item.closing_time ? `Recepción ${String(item.opening_time).slice(0, 5)}–${String(item.closing_time).slice(0, 5)}` : "Horario pendiente";
     return <article className="vehicle-load-board-card" key={item.id} draggable onDragStart={(event) => { event.dataTransfer.setData("text/plain", String(item.id)); setDraggedShipmentId(Number(item.id)); }} onDragEnd={() => setDraggedShipmentId(null)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveShipment(Number(event.dataTransfer.getData("text/plain")) || draggedShipmentId || 0, targetKey, Number(item.id)); }}>
       <div className="vehicle-load-board-card-top"><b>{item.code}</b><strong>{item.distance_km === null ? "—" : `${String(item.distance_km).replace(".", ",")} km`}</strong></div>
       <strong>{item.client_name}</strong>
-      <span>{[item.address, item.city].filter(Boolean).join(" · ") || "Dirección no indicada"}</span>
-      <small>{item.opening_time && item.closing_time ? `Recepción ${item.opening_time}–${item.closing_time}` : "Horario pendiente"}{material ? ` · ${material}` : ""}</small>
+      <span className="vehicle-load-card-reception">{reception}</span>
+      <small>{stats.lines.length ? `${stats.quantityLabel}${stats.lines.length > 2 ? ` · ${stats.lines.length} líneas` : ""}` : "Sin líneas preparadas"}</small>
+      <button type="button" className={`vehicle-load-confirm${isConfirmed ? " is-confirmed" : ""}`} disabled={isConfirmed || !stats.complete} onClick={(event) => { event.stopPropagation(); confirmShipment(item); }}>
+        {isConfirmed ? "Pedido completo" : stats.complete ? "Confirmar unidades" : "Faltan unidades"}
+      </button>
     </article>;
   };
 
   return <section className="vehicle-load-manager">
     <div className="vehicle-load-toolbar">
       <label>Fecha de carga<input type="date" value={routeDate} onChange={(event) => setRouteDate(event.target.value)} /></label>
-      <span className="vehicle-load-toolbar-summary"><b>{dayShipments.length} pedidos</b><small>{unassigned.length} pendientes de asignar · {origin.label}</small></span>
+      <span className="vehicle-load-toolbar-summary"><b>{dayShipments.length} pedidos preparados</b><small>{unassigned.length} sin asignar · horario primero, distancia después</small></span>
       <button type="button" className="button secondary" onClick={() => void load()}>Actualizar</button>
       <button type="button" className="button primary" disabled={saving || !assignedIds.size} onClick={() => void saveVehicleBoard()}>{saving ? "Guardando…" : "Guardar cargas"}</button>
     </div>
