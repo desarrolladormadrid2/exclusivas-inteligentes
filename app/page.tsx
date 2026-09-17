@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.150";
+const APP_VERSION = "2.0.151";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 
 const WEEKDAY_OPTIONS = [
@@ -6332,7 +6332,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             <label className="list-filter-field">Estado<select value={listStatus} onChange={(event) => setListStatus(event.target.value)} aria-label={`Filtrar ${active.toLowerCase()} por estado`}><option>Todos</option>{listStatusOptions.map((status) => <option key={status}>{status}</option>)}</select></label>
             {(listClient || listSupplier || listDateFrom || listDateTo || orderCreatedFrom || orderCreatedTo || listStatus !== "Todos") && <button type="button" className="deleted-toggle" onClick={() => { setListClient(""); setListSupplier(""); setListDateFrom(""); setListDateTo(""); setOrderCreatedFrom(""); setOrderCreatedTo(""); setListStatus("Todos"); }}>Limpiar filtros</button>}
           </>}
-          {(isLoadPreparation || isCrmPreparation) && <div className="prep-date-filter" aria-label="Filtrar preparación por fecha"><label>Preparar el día <input type="date" value={preparationDateFilter} onChange={(event) => setPreparationDateFilter(event.target.value)} /></label><button type="button" className={`button ${preparationDateFilter === tabletTodayInput() ? "primary" : "secondary"}`} aria-pressed={preparationDateFilter === tabletTodayInput()} onClick={() => setPreparationDateFilter(tabletTodayInput())}>Hoy</button><button type="button" className={`button ${preparationDateFilter === tabletDateOffset(1) ? "primary" : "secondary"}`} aria-pressed={preparationDateFilter === tabletDateOffset(1)} onClick={() => setPreparationDateFilter(tabletDateOffset(1))}>Mañana</button>{isLoadPreparation && <button type="button" className={`button ${preparationDateFilter === "" ? "primary" : "secondary"}`} aria-pressed={preparationDateFilter === ""} onClick={() => setPreparationDateFilter("")}>Todos</button>}</div>}
+          {(isLoadPreparation || isCrmPreparation) && <div className="prep-date-filter" aria-label="Filtrar preparación por fecha"><label>Día de preparación <input type="date" value={preparationDateFilter} onChange={(event) => setPreparationDateFilter(event.target.value)} /></label><button type="button" className={`button ${preparationDateFilter === tabletTodayInput() ? "primary" : "secondary"}`} aria-pressed={preparationDateFilter === tabletTodayInput()} onClick={() => setPreparationDateFilter(tabletTodayInput())}>Hoy</button><button type="button" className={`button ${preparationDateFilter === tabletDateOffset(1) ? "primary" : "secondary"}`} aria-pressed={preparationDateFilter === tabletDateOffset(1)} onClick={() => setPreparationDateFilter(tabletDateOffset(1))}>Mañana</button>{isLoadPreparation && <button type="button" className={`button ${preparationDateFilter === "" ? "primary" : "secondary"}`} aria-pressed={preparationDateFilter === ""} onClick={() => setPreparationDateFilter("")}>Todos</button>}</div>}
           {isLoadPreparation && <div className="prep-summary"><b>{filteredRows.length} pedidos a preparar</b><span>{preparationUrgentCount} urgentes</span><span>{preparationIncidentCount} con incidencia</span></div>}
           {active === "Stock" && (
             <select className="stock-sort-select" value={stockSort} onChange={(event) => setStockSort(event.target.value)} aria-label="Ordenar stock">
