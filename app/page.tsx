@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.178";
+const APP_VERSION = "2.0.179";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 
@@ -192,23 +192,25 @@ async function fetchWithRetry(url: string, init?: RequestInit, attempts = 5) {
   throw lastError instanceof Error ? lastError : new Error("No se pudo conectar con el CRM");
 }
 const lookupMemoryCache = new Map<string, { expiresAt: number; rows: any[]; pending?: Promise<any[]> }>();
-async function fetchCompactLookup(resource: string, actor: string, force = false) {
-  const cached = lookupMemoryCache.get(resource);
+async function fetchCompactLookup(resource: string, actor: string, force = false, queryParams: Record<string, string> = {}) {
+  const query = new URLSearchParams({ view: "lookup", limit: "2000", ...queryParams });
+  const cacheKey = `${resource}?${query.toString()}`;
+  const cached = lookupMemoryCache.get(cacheKey);
   if (!force && cached && (cached.rows.length > 0 || cached.expiresAt > Date.now())) return cached.rows;
   if (cached?.pending) return cached.pending;
-  const pending = fetchWithRetry(`/api/${resource}?view=lookup&limit=2000`, { headers: { "X-Actor": actor } }, 5)
+  const pending = fetchWithRetry(`/api/${resource}?${query.toString()}`, { headers: { "X-Actor": actor } }, 5)
     .then((response) => response.ok ? response.json() : [])
     .then((value) => {
       const rows = Array.isArray(value) ? value : [];
-      lookupMemoryCache.set(resource, { rows, expiresAt: rows.length ? Number.MAX_SAFE_INTEGER : Date.now() + 15000 });
+      lookupMemoryCache.set(cacheKey, { rows, expiresAt: rows.length ? Number.MAX_SAFE_INTEGER : Date.now() + 15000 });
       return rows;
     })
     .catch(() => [])
     .finally(() => {
-      const current = lookupMemoryCache.get(resource);
-      if (current?.pending) lookupMemoryCache.set(resource, { ...current, pending: undefined });
+      const current = lookupMemoryCache.get(cacheKey);
+      if (current?.pending) lookupMemoryCache.set(cacheKey, { ...current, pending: undefined });
     });
-  lookupMemoryCache.set(resource, { rows: cached?.rows || [], expiresAt: cached?.expiresAt || 0, pending });
+  lookupMemoryCache.set(cacheKey, { rows: cached?.rows || [], expiresAt: cached?.expiresAt || 0, pending });
   return pending;
 }
 function clearLookupMemoryCache() {
@@ -1423,7 +1425,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
     try {
       const [shipmentResponse, warehousesResponse, routesResponse, vehiclesResponse] = await Promise.all([
         fetch(`/api/shipments?date=${encodeURIComponent(routeDate)}`),
-        fetch("/api/warehouses?limit=500"),
+        fetch("/api/warehouses?limit=50"),
         fetch(`/api/routes?date=${encodeURIComponent(routeDate)}`),
         fetch("/api/vehicles"),
       ]);
@@ -1614,6 +1616,25 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
     return { lines, complete, completeLines, quantityLabel };
   }
 
+  function getVehiclePlanStats(items: any[]) {
+    let previous = { latitude: origin.latitude, longitude: origin.longitude };
+    let distance = 0;
+    let locatedStops = 0;
+    items.forEach((item: any) => {
+      if (!isPlausibleRouteCoordinate(item.latitude, item.longitude, origin)) return;
+      distance += haversineKm(previous.latitude, previous.longitude, Number(item.latitude), Number(item.longitude));
+      previous = { latitude: Number(item.latitude), longitude: Number(item.longitude) };
+      locatedStops += 1;
+    });
+    const serviceMinutes = items.length * 45;
+    const drivingMinutes = distance * 2;
+    return { distance: Number(distance.toFixed(1)), minutes: Math.round(serviceMinutes + drivingMinutes), locatedStops };
+  }
+
+  function formatLoadDuration(minutes: number) {
+    return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
+  }
+
   async function saveVehicleBoard() {
     const columns = vehicleColumns.map((column: any) => ({
       vehicle_id: Number.isInteger(Number(column.id)) ? Number(column.id) : null,
@@ -1704,8 +1725,10 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       {vehicleColumns.map((column: any) => {
         const key = String(column.id);
         const columnItems = (boardAssignments[key] || []).map((id) => shipmentById.get(Number(id))).filter(Boolean);
+        const planStats = getVehiclePlanStats(columnItems);
+        const overDailyLimit = planStats.minutes > 600;
         return <section className="vehicle-load-column" key={key} onDragOver={(event) => allowShipmentDrop(event)} onDrop={(event) => { event.preventDefault(); moveShipment(readDraggedShipmentId(event), key); }}>
-          <header className="vehicle-load-column-head"><div><h3>{column.plate || column.name || `Camión ${key}`}</h3><span>{columnItems.length} pedidos</span></div><label>Conductor<input value={driverByVehicle[key] || column.driver || user?.username || ""} onChange={(event) => setDriverByVehicle((current) => ({ ...current, [key]: event.target.value }))} placeholder="Nombre" /></label></header>
+          <header className="vehicle-load-column-head"><div><h3>{column.plate || column.name || `Camión ${key}`}</h3><span>{columnItems.length} pedidos</span><small className={overDailyLimit ? "is-over-limit" : ""}>{planStats.distance.toLocaleString("es-ES", { maximumFractionDigits: 1 })} km · {formatLoadDuration(planStats.minutes)}{overDailyLimit ? " · supera 10 h" : ""}</small></div><label>Conductor<input value={driverByVehicle[key] || column.driver || user?.username || ""} onChange={(event) => setDriverByVehicle((current) => ({ ...current, [key]: event.target.value }))} placeholder="Nombre" /></label></header>
           <div className="vehicle-load-column-list">{columnItems.length ? [renderDropSlot(key, `${key}-start`, Number(columnItems[0].id)), ...columnItems.flatMap((item: any, index: number) => [renderBoardCard(item, key, index, columnItems.length), renderDropSlot(key, `${key}-${item.id}-after`, Number(columnItems[index + 1]?.id) || undefined)])] : <p className="vehicle-load-column-empty">Suelta aquí los pedidos</p>}</div>
         </section>;
       })}
@@ -2696,7 +2719,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
       setLoading(false);
       return () => { cancelled = true; controller.abort(); window.clearTimeout(timeout); };
     }
-    fetch("/api/order_lines", { headers: { "X-Actor": actor }, signal: controller.signal })
+    fetch(`/api/order_lines?order_ids=${encodeURIComponent(orderKey)}`, { headers: { "X-Actor": actor }, signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error("No se han podido cargar las líneas de los pedidos.")))
       .then((payload) => {
         if (cancelled) return;
@@ -3886,7 +3909,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     // Las estructuras de los listados han cambiado varias veces (por ejemplo,
     // Entradas pasó de compartir datos con movimientos a usar goods_receipts).
     // Versionar la clave evita rehidratar filas antiguas con IDs incompatibles.
-    const cacheKey = `excluvas.listado.v2.${c.api}.${showDeleted ? "deleted" : "active"}.${showInactive ? "all-statuses" : "active-only"}`;
+    const preparationCacheDate = active === "Preparación de pedidos" ? preparationDateFilter : "";
+    const cacheKey = `excluvas.listado.v3.${c.api}.${preparationCacheDate || "all-dates"}.${showDeleted ? "deleted" : "active"}.${showInactive ? "all-statuses" : "active-only"}`;
     const applyList = (value: any[]) => {
       const enrichedRows = c.api === "orders"
         ? value.map((item: any) => ({ ...item, billing_status: item.billing_status || (item.status === "Facturado" ? "Facturado" : "Sin facturar") }))
@@ -3902,7 +3926,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           ? statusRows.filter((item: any) => c.statusFilter.includes(item.status || "Preparando"))
           : statusRows;
     };
-    const listKey = `${active}|${showDeleted ? "deleted" : "active"}|${showInactive ? "all-statuses" : "active-only"}`;
+    const listKey = `${active}|${preparationCacheDate || "all-dates"}|${showDeleted ? "deleted" : "active"}|${showInactive ? "all-statuses" : "active-only"}`;
     let hasCachedRows = false;
     try {
       const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
@@ -3923,6 +3947,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     const params = new URLSearchParams();
     if (showDeleted) params.set("include_deleted", "1");
     if (showInactive && ["suppliers", "clients", "products"].includes(c.api)) params.set("include_inactive", "1");
+    if (preparationCacheDate && c.api === "shipments") params.set("preparation_date", preparationCacheDate);
     fetchWithRetry("/api/" + c.api + (params.toString() ? `?${params.toString()}` : ""), {
       headers: { "X-Actor": user?.username || "Usuario local" },
     })
@@ -3942,7 +3967,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         );
       })
       .finally(() => setLoading(false));
-  }, [active, showDeleted, showInactive, listRefreshKey]);
+  }, [active, showDeleted, showInactive, preparationDateFilter, listRefreshKey]);
   useEffect(() => {
     const lookupResourcesByActive: Record<string, string[]> = {
       Productos: ["suppliers", "warehouses", "product_lots"],
@@ -3954,7 +3979,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       Compras: ["suppliers", "products", "purchase_orders", "invoices"],
       "Compras inteligentes": ["suppliers", "products", "purchase_orders"],
       Almacenes: ["warehouses", "products"],
-       "Preparación de pedidos": ["clients", "orders", "products", "collection_points", "shipments", "order_lines", "users"],
+       "Preparación de pedidos": ["clients", "orders", "products", "collection_points", "shipments", "users"],
       "Lugares de recogida": ["clients", "collection_points"],
       Entradas: ["products", "warehouses", "suppliers", "purchase_orders", "invoices"],
       Salidas: ["clients", "orders", "collection_points", "shipments"],
@@ -3970,14 +3995,32 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     };
     const lookupResources = lookupResourcesByActive[active] || [];
     if (!lookupResources.length) return;
+    const preparationQuery = active === "Preparación de pedidos" && preparationDateFilter
+      ? { preparation_date: preparationDateFilter }
+      : {};
     Promise.allSettled(
-      lookupResources.map(async (resource) => [resource, await fetchCompactLookup(resource, user?.username || "Usuario local")] as const),
+      lookupResources.map(async (resource) => [resource, await fetchCompactLookup(resource, user?.username || "Usuario local", false, ["orders", "shipments"].includes(resource) ? preparationQuery : {})] as const),
     ).then((results) => setLookups((current: any) => {
       const next = { ...current };
       results.forEach((result) => { if (result.status === "fulfilled") next[result.value[0]] = result.value[1]; });
       return next;
     }));
-  }, [active, user?.username, lookupRefreshKey]);
+  }, [active, preparationDateFilter, user?.username, lookupRefreshKey]);
+  useEffect(() => {
+    if (active !== "Preparación de pedidos") return;
+    const orderIds = [...new Set([
+      ...rows.map((row: any) => Number(row.order_id || row._source_order_id || 0)),
+      ...(Array.isArray(lookups.orders) ? lookups.orders.map((row: any) => Number(row.id || 0)) : []),
+    ].filter((id) => Number.isInteger(id) && id > 0))].join(",");
+    if (!orderIds) {
+      setLookups((current: any) => current.order_lines?.length ? { ...current, order_lines: [] } : current);
+      return;
+    }
+    let cancelled = false;
+    fetchCompactLookup("order_lines", user?.username || "Usuario local", false, { order_ids: orderIds })
+      .then((lines) => { if (!cancelled) setLookups((current: any) => ({ ...current, order_lines: lines })); });
+    return () => { cancelled = true; };
+  }, [active, preparationDateFilter, rows, lookups.orders, user?.username, lookupRefreshKey]);
   useEffect(() => {
     if (!formOpen || !["Pedidos", "Presupuestos"].includes(active) || (lookups.products || []).length) return;
     fetchCompactLookup("products", user?.username || "Usuario local").then((products) => {

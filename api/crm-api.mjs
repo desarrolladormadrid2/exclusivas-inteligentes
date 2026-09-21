@@ -982,6 +982,7 @@ for (const [name, table, columns] of [
   ["idx_delivery_note_lines_note", "delivery_note_lines", "delivery_note_id"],
   ["idx_shipments_status_date", "shipments", "status, expected_delivery_at"],
   ["idx_shipments_expected_date", "shipments", "expected_delivery_at"],
+  ["idx_shipments_preparation_date", "shipments", "preparation_date"],
   ["idx_shipments_order", "shipments", "order_id"],
   ["idx_inventory_product_date", "inventory_movements", "product_id, movement_date"],
   ["idx_goods_receipts_supplier_date", "goods_receipts", "supplier_id, receipt_date"],
@@ -2899,6 +2900,7 @@ export async function crmApiHandler(req, res) {
         const isLookup = query.get("view") === "lookup";
         const isPublicCatalog = t === "products" && query.get("view") === "public";
         const dateFilter = String(query.get("date") || "").slice(0, 10);
+        const preparationDateFilter = String(query.get("preparation_date") || "").slice(0, 10);
         const nextDateFilter = /^\d{4}-\d{2}-\d{2}$/.test(dateFilter)
           ? (() => { const next = new Date(`${dateFilter}T00:00:00Z`); next.setUTCDate(next.getUTCDate() + 1); return next.toISOString().slice(0, 10); })()
           : "";
@@ -2965,6 +2967,13 @@ export async function crmApiHandler(req, res) {
         if (t === "shipments" && /^\d{4}-\d{2}-\d{2}$/.test(dateFilter)) {
           filters.push("((shipments.expected_delivery_at>=? AND shipments.expected_delivery_at<?) OR (shipments.expected_delivery_at IS NULL AND substr(COALESCE(shipment_order.shipping_date,shipment_order.delivery_date,shipment_order.preparation_date),1,10)=?))");
           filterParams.push(dateFilter, nextDateFilter, dateFilter);
+        }
+        if (/^\d{4}-\d{2}-\d{2}$/.test(preparationDateFilter) && ["shipments", "orders"].includes(t)) {
+          const preparationDateExpression = t === "shipments"
+            ? "substr(COALESCE(shipments.preparation_date,shipment_order.preparation_date,shipment_order.shipping_date,shipment_order.delivery_date),1,10)"
+            : "substr(COALESCE(orders.preparation_date,orders.shipping_date,orders.delivery_date),1,10)";
+          filters.push(`${preparationDateExpression}=?`);
+          filterParams.push(preparationDateFilter);
         }
         const requestedIds = String(query.get("ids") || "").split(",").map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0);
         if (query.has("ids") && ["clients", "collection_points", "products", "orders", "shipments", "invoices"].includes(t)) {
