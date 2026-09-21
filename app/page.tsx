@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.164";
+const APP_VERSION = "2.0.165";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 
@@ -1362,31 +1362,16 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
     setLoading(true);
     setError("");
     try {
-      const [shipmentResponse, clientsResponse, pointsResponse, warehousesResponse, routesResponse, vehiclesResponse, orderLinesResponse, productsResponse, ordersResponse, invoicesResponse] = await Promise.all([
-        fetch("/api/shipments"),
-        fetch("/api/clients?view=lookup&limit=500"),
-        fetch("/api/collection_points?view=lookup&limit=500"),
+      const [shipmentResponse, warehousesResponse, routesResponse, vehiclesResponse] = await Promise.all([
+        fetch(`/api/shipments?date=${encodeURIComponent(routeDate)}`),
         fetch("/api/warehouses?limit=500"),
-        fetch("/api/routes"),
+        fetch(`/api/routes?date=${encodeURIComponent(routeDate)}`),
         fetch("/api/vehicles"),
-        fetch("/api/order_lines"),
-        fetch("/api/products?view=lookup&limit=2000"),
-        fetch("/api/orders"),
-        fetch("/api/invoices"),
       ]);
       const shipmentRows = shipmentResponse.ok ? await shipmentResponse.json() : [];
-      const clients = clientsResponse.ok ? await clientsResponse.json() : [];
-      const points = pointsResponse.ok ? await pointsResponse.json() : [];
       const warehouses = warehousesResponse.ok ? await warehousesResponse.json() : [];
       const routeRows = routesResponse.ok ? await routesResponse.json() : [];
       const vehicleRows = vehiclesResponse.ok ? await vehiclesResponse.json() : [];
-      const orderLines = orderLinesResponse.ok ? await orderLinesResponse.json() : [];
-      const products = productsResponse.ok ? await productsResponse.json() : [];
-      const orderRows = ordersResponse.ok ? await ordersResponse.json() : [];
-      const invoiceRows = invoicesResponse.ok ? await invoicesResponse.json() : [];
-      setOrders(Array.isArray(orderRows) ? orderRows : []);
-      setInvoices(Array.isArray(invoiceRows) ? invoiceRows : []);
-      setProducts(Array.isArray(products) ? products : []);
       setVehicles(Array.isArray(vehicleRows) ? vehicleRows : []);
       const warehouse = (Array.isArray(warehouses) ? warehouses : []).find((item: any) => Number.isFinite(Number(item.latitude)) && Number.isFinite(Number(item.longitude)) && Number(item.latitude) !== 0 && Number(item.longitude) !== 0)
         || (Array.isArray(warehouses) ? warehouses : []).find((item: any) => /principal/i.test(String(item.name || "")))
@@ -1402,6 +1387,33 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
           : /getafe/i.test(String(warehouse?.address || warehouse?.name || ""))
             ? { latitude: 40.3083, longitude: -3.7327, label: `${warehouseLabel} (estimación)` }
             : { latitude: 40.4168, longitude: -3.7038, label: `${warehouseLabel} (estimación)` };
+      setOrigin(nextOrigin);
+      setRoutes(Array.isArray(routeRows) ? routeRows : []);
+      if (!Array.isArray(shipmentRows) || shipmentRows.length === 0) {
+        setOrders([]);
+        setInvoices([]);
+        setProducts([]);
+        setShipments([]);
+        setBoardAssignments({});
+        return;
+      }
+      const [clientsResponse, pointsResponse, orderLinesResponse, productsResponse, ordersResponse, invoicesResponse] = await Promise.all([
+        fetch("/api/clients?view=lookup&limit=500"),
+        fetch("/api/collection_points?view=lookup&limit=500"),
+        fetch("/api/order_lines"),
+        fetch("/api/products?view=lookup&limit=2000"),
+        fetch("/api/orders"),
+        fetch("/api/invoices"),
+      ]);
+      const clients = clientsResponse.ok ? await clientsResponse.json() : [];
+      const points = pointsResponse.ok ? await pointsResponse.json() : [];
+      const orderLines = orderLinesResponse.ok ? await orderLinesResponse.json() : [];
+      const products = productsResponse.ok ? await productsResponse.json() : [];
+      const orderRows = ordersResponse.ok ? await ordersResponse.json() : [];
+      const invoiceRows = invoicesResponse.ok ? await invoicesResponse.json() : [];
+      setOrders(Array.isArray(orderRows) ? orderRows : []);
+      setInvoices(Array.isArray(invoiceRows) ? invoiceRows : []);
+      setProducts(Array.isArray(products) ? products : []);
       const prepared = (Array.isArray(shipmentRows) ? shipmentRows : [])
         .filter((item: any) => !["Cancelado", "Anulado"].includes(String(item.status || "")))
         .map((item: any) => {
@@ -1432,16 +1444,14 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
             load_lines: loadLines,
           };
         });
-      setOrigin(nextOrigin);
       setShipments(prepared);
-      setRoutes(Array.isArray(routeRows) ? routeRows : []);
     } catch {
     setError("No se han podido cargar los pedidos del día.");
     } finally {
       setLoading(false);
     }
   }
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(); }, [routeDate]);
   useEffect(() => {
     if (initialDate) setRouteDate(initialDate);
   }, [initialDate]);

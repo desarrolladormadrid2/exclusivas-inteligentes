@@ -2895,6 +2895,7 @@ export async function crmApiHandler(req, res) {
         const includeInactive = query.get("include_inactive") === "1";
         const isLookup = query.get("view") === "lookup";
         const isPublicCatalog = t === "products" && query.get("view") === "public";
+        const dateFilter = String(query.get("date") || "").slice(0, 10);
         const parsePageValue = (value, fallback) => {
           const parsed = Number.parseInt(String(value || ""), 10);
           return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
@@ -2953,7 +2954,12 @@ export async function crmApiHandler(req, res) {
                    AND COALESCE(pending_invoice.status,'Pendiente') NOT IN ('Cobrada','Pagada','Anulada','Proforma')) AS pending_invoice_total`
             : listSelectFor(t);
         const filters = [];
+        const filterParams = [];
         if (!includeDeleted && hasColumn(t, "deleted")) filters.push(`CAST(COALESCE(${t === "orders" ? "orders" : t}.deleted,0) AS INTEGER)=0`);
+        if (t === "shipments" && /^\d{4}-\d{2}-\d{2}$/.test(dateFilter)) {
+          filters.push("substr(COALESCE(shipment_order.shipping_date,shipment_order.delivery_date,shipment_order.preparation_date,shipments.expected_delivery_at),1,10)=?");
+          filterParams.push(dateFilter);
+        }
         if (isPublicCatalog) {
           filters.push("CAST(COALESCE(products.active,1) AS INTEGER)=1", "LOWER(COALESCE(products.product_status,'Activo')) NOT IN ('inactivo','baja','descatalogado')", "TRIM(COALESCE(products.name,''))<>''", "LOWER(products.name) NOT GLOB '__test*'", "LOWER(products.name) NOT GLOB '__dbg*'", "LOWER(products.name) NOT GLOB '__debug*'", "LOWER(products.name) NOT GLOB 'demo*'");
         } else if (!includeInactive && ["suppliers", "clients", "products"].includes(t)) {
@@ -2966,7 +2972,7 @@ export async function crmApiHandler(req, res) {
         const orderBy = isPublicCatalog
           ? "CASE WHEN TRIM(COALESCE(products.photo_web_url,''))<>'' THEN 0 ELSE 1 END, products.id DESC"
           : `${t === "orders" ? "orders.id" : t === "shipments" ? "shipments.id" : "id"} DESC`;
-        const rows = db.prepare(`SELECT ${selection} FROM ${source} ${where} ORDER BY ${orderBy}${pagination}`).all();
+        const rows = db.prepare(`SELECT ${selection} FROM ${source} ${where} ORDER BY ${orderBy}${pagination}`).all(...filterParams);
         const responseRows = t === "shipments"
           ? rows.map(attachShipmentTrackingToken)
           : t === "order_lines"
