@@ -2899,6 +2899,9 @@ export async function crmApiHandler(req, res) {
         const isLookup = query.get("view") === "lookup";
         const isPublicCatalog = t === "products" && query.get("view") === "public";
         const dateFilter = String(query.get("date") || "").slice(0, 10);
+        const nextDateFilter = /^\d{4}-\d{2}-\d{2}$/.test(dateFilter)
+          ? (() => { const next = new Date(`${dateFilter}T00:00:00Z`); next.setUTCDate(next.getUTCDate() + 1); return next.toISOString().slice(0, 10); })()
+          : "";
         const parsePageValue = (value, fallback) => {
           const parsed = Number.parseInt(String(value || ""), 10);
           return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
@@ -2960,8 +2963,8 @@ export async function crmApiHandler(req, res) {
         const filterParams = [];
         if (!includeDeleted && hasColumn(t, "deleted")) filters.push(`CAST(COALESCE(${t === "orders" ? "orders" : t}.deleted,0) AS INTEGER)=0`);
         if (t === "shipments" && /^\d{4}-\d{2}-\d{2}$/.test(dateFilter)) {
-          filters.push("substr(COALESCE(shipment_order.shipping_date,shipment_order.delivery_date,shipment_order.preparation_date,shipments.expected_delivery_at),1,10)=?");
-          filterParams.push(dateFilter);
+          filters.push("((shipments.expected_delivery_at>=? AND shipments.expected_delivery_at<?) OR (shipments.expected_delivery_at IS NULL AND substr(COALESCE(shipment_order.shipping_date,shipment_order.delivery_date,shipment_order.preparation_date),1,10)=?))");
+          filterParams.push(dateFilter, nextDateFilter, dateFilter);
         }
         const requestedIds = String(query.get("ids") || "").split(",").map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0);
         if (query.has("ids") && ["clients", "collection_points", "products", "orders", "shipments", "invoices"].includes(t)) {
