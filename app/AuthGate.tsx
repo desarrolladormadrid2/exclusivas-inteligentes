@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 
 function apiUrl(path: string) {
   return path;
@@ -19,7 +19,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [loginBusy, setLoginBusy] = useState(false);
   const [isPublicOrderPortal, setIsPublicOrderPortal] = useState(false);
   const [currentPath, setCurrentPath] = useState("");
-  useEffect(() => {
+  useLayoutEffect(() => {
     const path = window.location.pathname.replace(/\/$/, "");
     setCurrentPath(path || "/");
     setIsPublicOrderPortal(["/portal-pedidos", "/web"].includes(path) || path.startsWith("/seguimiento/"));
@@ -36,7 +36,10 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     window.location.replace("/reparto");
   }, [currentPath, sessionReady, user]);
   useEffect(() => {
-    fetch(apiUrl("/api/users"))
+    if (!sessionReady || user) return;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 2500);
+    fetch(apiUrl("/api/users"), { signal: controller.signal })
       .then((response) => (response.ok ? response.json() : []))
       .then((data) => {
         const activeUsers = Array.isArray(data)
@@ -52,12 +55,11 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
           return String(a.username || "").localeCompare(String(b.username || ""), "es");
         });
         setUsers(orderedUsers.length ? orderedUsers : [{ username: "Luis" }, { username: "Jose" }]);
-        if (orderedUsers.length && !orderedUsers.some((item: any) => item.username === name)) {
-          setName(orderedUsers[0].username);
-        }
+        if (orderedUsers.length) setName((current) => orderedUsers.some((item: any) => item.username === current) ? current : orderedUsers[0].username);
       })
       .catch(() => setUsers([{ username: "Luis" }, { username: "Jose" }]));
-  }, []);
+    return () => { window.clearTimeout(timeout); controller.abort(); };
+  }, [sessionReady, user]);
   async function login(e: any) {
     e.preventDefault();
     setError("");
