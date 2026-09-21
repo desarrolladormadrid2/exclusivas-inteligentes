@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.172";
+const APP_VERSION = "2.0.173";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 
@@ -1212,6 +1212,23 @@ function IntegratedMap({ locations, radiusMeters = 150 }: { locations: any[]; ra
   </div>;
 }
 
+function VehicleLoadPlanningMap({ locations, origin }: { locations: any[]; origin: { latitude: number; longitude: number; label: string } }) {
+  const valid = locations.filter((location) => Number.isFinite(Number(location.latitude)) && Number.isFinite(Number(location.longitude)));
+  if (!locations.length) return null;
+  if (!valid.length) return <section className="vehicle-load-planning-map panel"><header className="vehicle-load-planning-head"><div><h3>Mapa de pedidos</h3><p className="muted">Geolocaliza las direcciones para dibujar la ruta.</p></div><strong>0/{locations.length} ubicados</strong></header><div className="vehicle-load-planning-empty">No hay pedidos geolocalizados para este día.</div></section>;
+  const points = [{ latitude: origin.latitude, longitude: origin.longitude, name: origin.label, isOrigin: true }, ...valid];
+  const latitudes = points.map((point) => Number(point.latitude));
+  const longitudes = points.map((point) => Number(point.longitude));
+  const minLatitude = Math.min(...latitudes), maxLatitude = Math.max(...latitudes), minLongitude = Math.min(...longitudes), maxLongitude = Math.max(...longitudes);
+  const latitudePadding = Math.max(0.012, (maxLatitude - minLatitude) * 0.14);
+  const longitudePadding = Math.max(0.014, (maxLongitude - minLongitude) * 0.14);
+  const south = minLatitude - latitudePadding, north = maxLatitude + latitudePadding, west = minLongitude - longitudePadding, east = maxLongitude + longitudePadding;
+  const project = (latitude: number, longitude: number) => ({ x: ((longitude - west) / Math.max(0.0001, east - west)) * 100, y: (1 - (latitude - south) / Math.max(0.0001, north - south)) * 100 });
+  const routePoints = points.map((point) => { const projected = project(Number(point.latitude), Number(point.longitude)); return `${projected.x},${projected.y}`; }).join(" ");
+  const mapSrc = `https://www.openstreetmap.org/export/embed.html?bbox=${west}%2C${south}%2C${east}%2C${north}&layer=mapnik`;
+  return <section className="vehicle-load-planning-map panel"><header className="vehicle-load-planning-head"><div><h3>Mapa de pedidos y ruta</h3><p className="muted">Nave  →  pedidos del día. El orden sugerido parte del más lejano y respeta la apertura de entrega.</p></div><strong>{valid.length}/{locations.length} ubicados</strong></header><div className="vehicle-load-planning-body"><div className="vehicle-load-planning-canvas"><iframe title="Mapa de pedidos del día" src={mapSrc} loading="lazy" /><svg className="vehicle-load-planning-route" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polyline points={routePoints} /></svg>{points.map((point, index) => { const projected = project(Number(point.latitude), Number(point.longitude)); return <span key={`${point.id || "origin"}-${index}`} className={`vehicle-load-planning-marker${point.isOrigin ? " is-origin" : ""}`} style={{ left: `${projected.x}%`, top: `${projected.y}%` }} title={point.isOrigin ? origin.label : `${index}. ${point.client_name || "Pedido"}`} >{point.isOrigin ? "N" : index}</span>; })}</div><ol className="vehicle-load-planning-stops"><li className="is-origin"><b>N</b><span><strong>Salida</strong><small>{origin.label}</small></span></li>{valid.map((item: any, index: number) => <li key={item.id}><b>{index + 1}</b><span><strong>{item.client_name || "Cliente sin nombre"}</strong><small>{item.opening_time && item.closing_time ? `Recepción ${String(item.opening_time).slice(0, 5)}–${String(item.closing_time).slice(0, 5)}` : "Horario pendiente"}{item.distance_km === null ? " · Distancia pendiente" : ` · ${String(item.distance_km).replace(".", ",")} km`}</small></span></li>)}</ol></div>{valid.length < locations.length && <p className="vehicle-load-planning-warning">{locations.length - valid.length} pedido{locations.length - valid.length === 1 ? " sin" : "s sin"} coordenadas. No se puede calcular su posición en la ruta hasta geolocalizarlo.</p>}</section>;
+}
+
 function haversineKm(aLat: number, aLon: number, bLat: number, bLon: number) {
   const earthRadiusKm = 6371;
   const toRadians = (value: number) => value * Math.PI / 180;
@@ -1623,6 +1640,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       <button type="button" className="button secondary" onClick={() => void load()}>Actualizar</button>
       <button type="button" className="button primary" disabled={saving || !assignedIds.size} onClick={() => void saveVehicleBoard()}>{saving ? "Guardando…" : "Guardar cargas"}</button>
     </div>
+    <VehicleLoadPlanningMap locations={dayShipments} origin={origin} />
     {error && <p className="error-message" role="alert">{error}</p>}
     {message && <p className="success-message" role="status">{message}</p>}
     <section className="vehicle-load-board" aria-label="Asignación de pedidos a camiones">
