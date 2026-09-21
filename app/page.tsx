@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.176";
+const APP_VERSION = "2.0.177";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 
@@ -192,15 +192,15 @@ async function fetchWithRetry(url: string, init?: RequestInit, attempts = 5) {
   throw lastError instanceof Error ? lastError : new Error("No se pudo conectar con el CRM");
 }
 const lookupMemoryCache = new Map<string, { expiresAt: number; rows: any[]; pending?: Promise<any[]> }>();
-async function fetchCompactLookup(resource: string, actor: string) {
+async function fetchCompactLookup(resource: string, actor: string, force = false) {
   const cached = lookupMemoryCache.get(resource);
-  if (cached && cached.expiresAt > Date.now()) return cached.rows;
+  if (!force && cached && (cached.rows.length > 0 || cached.expiresAt > Date.now())) return cached.rows;
   if (cached?.pending) return cached.pending;
   const pending = fetchWithRetry(`/api/${resource}?view=lookup&limit=2000`, { headers: { "X-Actor": actor } }, 5)
     .then((response) => response.ok ? response.json() : [])
     .then((value) => {
       const rows = Array.isArray(value) ? value : [];
-      lookupMemoryCache.set(resource, { rows, expiresAt: Date.now() + 30000 });
+      lookupMemoryCache.set(resource, { rows, expiresAt: rows.length ? Number.MAX_SAFE_INTEGER : Date.now() + 15000 });
       return rows;
     })
     .catch(() => [])
@@ -210,6 +210,9 @@ async function fetchCompactLookup(resource: string, actor: string) {
     });
   lookupMemoryCache.set(resource, { rows: cached?.rows || [], expiresAt: cached?.expiresAt || 0, pending });
   return pending;
+}
+function clearLookupMemoryCache() {
+  lookupMemoryCache.clear();
 }
 function allowedModulesFor(user: any) {
   if (user?.role === "admin") return initialModules;
@@ -3768,6 +3771,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const [loading, setLoading] = useState(true);
   const [loadedListKey, setLoadedListKey] = useState("");
   const [listRefreshKey, setListRefreshKey] = useState(0);
+  const [lookupRefreshKey, setLookupRefreshKey] = useState(0);
+  const manualListRefreshRef = useRef(false);
   const [lookups, setLookups] = useState<any>({
     clients: [],
     products: [],
@@ -3785,6 +3790,12 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     users: [],
   });
   const getClient = (id: any) => (lookups.clients || []).find((item: any) => Number(item.id) === Number(id));
+  function refreshCurrentList() {
+    manualListRefreshRef.current = true;
+    clearLookupMemoryCache();
+    setListRefreshKey((current) => current + 1);
+    setLookupRefreshKey((current) => current + 1);
+  }
   useEffect(() => {
     if (active !== "Cobros" || formOpen) return;
     try {
@@ -3873,16 +3884,21 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           : statusRows;
     };
     const listKey = `${active}|${showDeleted ? "deleted" : "active"}|${showInactive ? "all-statuses" : "active-only"}`;
+    let hasCachedRows = false;
     try {
       const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
       if (Array.isArray(cached)) {
         setRows(applyList(cached));
+        setLoadedListKey(listKey);
+        setLoading(false);
+        hasCachedRows = true;
       }
     } catch { /* Si la caché está dañada, se ignora y se consulta la API. */ }
-    // La caché sirve de respaldo si la API falla, pero no debe mostrarse como
-    // si fuera el listado definitivo mientras llega la respuesta actualizada.
-    setLoadedListKey("");
-    setRows([]);
+    const forceRefresh = manualListRefreshRef.current;
+    manualListRefreshRef.current = false;
+    // Al cambiar de sección enseñamos inmediatamente el último listado local.
+    // La consulta completa solo se hace la primera vez o al pulsar Actualizar.
+    if (hasCachedRows && !forceRefresh) return;
     setLoading(true);
     setDbError("");
     const params = new URLSearchParams();
@@ -3942,7 +3958,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       results.forEach((result) => { if (result.status === "fulfilled") next[result.value[0]] = result.value[1]; });
       return next;
     }));
-  }, [active, user?.username]);
+  }, [active, user?.username, lookupRefreshKey]);
   useEffect(() => {
     if (!formOpen || !["Pedidos", "Presupuestos"].includes(active) || (lookups.products || []).length) return;
     fetchCompactLookup("products", user?.username || "Usuario local").then((products) => {
@@ -6122,7 +6138,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const preparationClient = (row: any) => row.client_name || getClient(row.client_id)?.name || "Cliente sin nombre";
   const preparationAddress = (row: any) => [row.address, row.delivery_city || row.city].filter(Boolean).join(" · ") || "Dirección no indicada";
   const currentListKey = `${active}|${showDeleted ? "deleted" : "active"}|${showInactive ? "all-statuses" : "active-only"}`;
-  const listIsReady = !loading && loadedListKey === currentListKey;
+  const listIsReady = loadedListKey === currentListKey;
   useEffect(() => {
     setPage(1);
   }, [search, quickView, listDateFrom, listDateTo, orderCreatedFrom, orderCreatedTo, listClient, listStatus, listSupplier, billingFilter, shippingFilter, preparationDateFilter, productFilters]);
@@ -6409,6 +6425,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           >
             {active === "Pedidos" ? "Crear pedido" : createActionLabels[active] || "Crear registro"}
           </button>}{" "}
+          <button type="button" className="button secondary" onClick={refreshCurrentList} disabled={loading}>{loading ? "Actualizando…" : "Actualizar datos"}</button>{" "}
           {active === "Facturas" && (
             <button
               type="button"
