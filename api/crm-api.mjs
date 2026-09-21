@@ -939,9 +939,10 @@ function optimizeStops(stops, originLat, originLon) {
   return ordered.map((stop, index) => ({ ...stop, position: index + 1 }));
 }
 const roadRouteEstimateCache = new Map();
+const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
 async function calculateRoadRouteEstimate(origin, stops) {
   const points = [origin, ...stops].filter((point) => Number.isFinite(Number(point?.latitude)) && Number.isFinite(Number(point?.longitude)));
-  if (points.length < 2) return { provider: "OSRM", distance_km: 0, driving_minutes: 0, service_minutes: stops.length * 45, total_minutes: stops.length * 45, located_stops: Math.max(0, points.length - 1) };
+  if (points.length < 2) return { provider: "OSRM", distance_km: 0, driving_minutes: 0, service_minutes: stops.length * DEFAULT_DELIVERY_SERVICE_MINUTES, total_minutes: stops.length * DEFAULT_DELIVERY_SERVICE_MINUTES, located_stops: Math.max(0, points.length - 1) };
   const coordinates = points.map((point) => `${Number(point.longitude).toFixed(6)},${Number(point.latitude).toFixed(6)}`).join(";");
   const cached = roadRouteEstimateCache.get(coordinates);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
@@ -957,8 +958,8 @@ async function calculateRoadRouteEstimate(origin, stops) {
       provider: "OSRM",
       distance_km: Number((Number(route.distance || 0) / 1000).toFixed(1)),
       driving_minutes: Math.max(0, Math.round(Number(route.duration || 0) / 60)),
-      service_minutes: stops.length * 45,
-      total_minutes: Math.max(0, Math.round(Number(route.duration || 0) / 60) + stops.length * 45),
+      service_minutes: stops.length * DEFAULT_DELIVERY_SERVICE_MINUTES,
+      total_minutes: Math.max(0, Math.round(Number(route.duration || 0) / 60) + stops.length * DEFAULT_DELIVERY_SERVICE_MINUTES),
       located_stops: points.length - 1,
     };
     roadRouteEstimateCache.set(coordinates, { value, expiresAt: Date.now() + 300000 });

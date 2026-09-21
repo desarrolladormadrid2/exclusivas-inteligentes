@@ -6,9 +6,10 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.180";
+const APP_VERSION = "2.0.181";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
+const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
 
 const WEEKDAY_OPTIONS = [
   { value: "1", label: "Lunes" },
@@ -1663,7 +1664,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       previous = { latitude: Number(item.latitude), longitude: Number(item.longitude) };
       locatedStops += 1;
     });
-    const serviceMinutes = items.length * 45;
+    const serviceMinutes = items.length * DEFAULT_DELIVERY_SERVICE_MINUTES;
     const drivingMinutes = distance * 2;
     return { distance: Number(distance.toFixed(1)), minutes: Math.round(serviceMinutes + drivingMinutes), locatedStops };
   }
@@ -1768,7 +1769,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
         const displayedMinutes = roadStats?.total_minutes ?? planStats.minutes;
         const overDailyLimit = displayedMinutes > 600;
         return <section className="vehicle-load-column" key={key} onDragOver={(event) => allowShipmentDrop(event)} onDrop={(event) => { event.preventDefault(); moveShipment(readDraggedShipmentId(event), key); }}>
-          <header className="vehicle-load-column-head"><div><h3>{column.plate || column.name || `Camión ${key}`}</h3><span>{columnItems.length} pedidos</span><small className={overDailyLimit ? "is-over-limit" : ""}>{roadStats ? `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km carretera · ${formatLoadDuration(displayedMinutes)}` : roadEstimateLoading ? "Calculando tiempo real de carretera…" : `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km aprox. · ${formatLoadDuration(displayedMinutes)}`}{overDailyLimit ? " · supera 10 h" : ""}</small></div><label>Conductor<input value={driverByVehicle[key] || column.driver || user?.username || ""} onChange={(event) => setDriverByVehicle((current) => ({ ...current, [key]: event.target.value }))} placeholder="Nombre" /></label></header>
+          <header className="vehicle-load-column-head"><div><h3>{column.plate || column.name || `Camión ${key}`}</h3><span>{columnItems.length} pedidos</span><small className={overDailyLimit ? "is-over-limit" : ""}>{roadStats ? `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km carretera · ${formatLoadDuration(roadStats.driving_minutes)} conducción + ${roadStats.service_minutes} min entregas = ${formatLoadDuration(displayedMinutes)}` : roadEstimateLoading ? "Calculando tiempo real de carretera…" : `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km aprox. · ${formatLoadDuration(displayedMinutes)} (${columnItems.length} × ${DEFAULT_DELIVERY_SERVICE_MINUTES} min entrega)`}{overDailyLimit ? " · supera 10 h" : ""}</small></div><label>Conductor<input value={driverByVehicle[key] || column.driver || user?.username || ""} onChange={(event) => setDriverByVehicle((current) => ({ ...current, [key]: event.target.value }))} placeholder="Nombre" /></label></header>
           <div className="vehicle-load-column-list">{columnItems.length ? [renderDropSlot(key, `${key}-start`, Number(columnItems[0].id)), ...columnItems.flatMap((item: any, index: number) => [renderBoardCard(item, key, index, columnItems.length), renderDropSlot(key, `${key}-${item.id}-after`, Number(columnItems[index + 1]?.id) || undefined)])] : <p className="vehicle-load-column-empty">Suelta aquí los pedidos</p>}</div>
         </section>;
       })}
