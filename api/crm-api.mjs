@@ -1047,7 +1047,20 @@ async function createRouteAlternatives(stops, originLat, originLon) {
     const warnings = columns.flatMap((column) => column.estimate.time_window_warnings || []);
     alternatives.push({ ...variant, total_minutes: totalMinutes, combined_minutes: combinedMinutes, total_distance_km: Number(totalDistance.toFixed(1)), late_stops: warnings.length, columns });
   }
-  return alternatives;
+  // Presentamos primero la alternativa más operativa. Las ventanas de
+  // recepción son obligatorias; después priorizamos el tiempo real del
+  // camión, los kilómetros y, por último, el tiempo combinado de ambos.
+  alternatives.sort((a, b) => (
+    Number(a.late_stops || 0) - Number(b.late_stops || 0)
+    || Number(a.total_minutes || 0) - Number(b.total_minutes || 0)
+    || Number(a.total_distance_km || 0) - Number(b.total_distance_km || 0)
+    || Number(a.combined_minutes || 0) - Number(b.combined_minutes || 0)
+  ));
+  return alternatives.map((alternative, index) => ({
+    ...alternative,
+    rank: index + 1,
+    recommended: index === 0,
+  }));
 }
 const roadRouteEstimateCache = new Map();
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
