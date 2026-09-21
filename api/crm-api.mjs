@@ -991,6 +991,62 @@ async function optimizeStopsByRoadTimes(stops, originLat, originLon) {
   try { durationMatrix = await calculateRoadDurationMatrix({ latitude: originLat, longitude: originLon }, preparedStops); } catch {}
   return optimizeStops(preparedStops, originLat, originLon, durationMatrix);
 }
+function seedAlternativeOrder(stops, originLat, originLon, durationMatrix, strategy) {
+  const preparedStops = stops.map((stop, index) => ({ ...stop, _routeNode: index + 1 }));
+  if (strategy === "schedule") return optimizeStops(preparedStops, originLat, originLon, durationMatrix);
+  const originDistance = (stop) => Number.isFinite(Number(stop.latitude)) && Number.isFinite(Number(stop.longitude)) ? haversineKm(originLat, originLon, stop.latitude, stop.longitude) : Number.POSITIVE_INFINITY;
+  const opening = (stop) => routeClockMinutes(stop.opening_time);
+  const closing = (stop) => routeClockMinutes(stop.closing_time);
+  return preparedStops.sort((a, b) => {
+    if (strategy === "closing") return (closing(a) - closing(b)) || (opening(a) - opening(b)) || (originDistance(b) - originDistance(a));
+    if (strategy === "nearest") return (originDistance(a) - originDistance(b)) || (opening(a) - opening(b));
+    return (originDistance(b) - originDistance(a)) || (opening(a) - opening(b));
+  }).map((stop, index) => ({ ...stop, position: index + 1 }));
+}
+async function createRouteAlternatives(stops, originLat, originLon) {
+  const preparedStops = stops.map((stop, index) => ({ ...stop, _routeNode: index + 1 }));
+  let durationMatrix = null;
+  try { durationMatrix = await calculateRoadDurationMatrix({ latitude: originLat, longitude: originLon }, preparedStops); } catch {}
+  const byId = new Map(preparedStops.map((stop) => [Number(stop.shipment_id), stop]));
+  const variants = [
+    { title: "Horario primero", description: "Prioriza las ventanas de recepción y reparte la carga de forma equilibrada.", strategy: "schedule", split: "balanced" },
+    { title: "Ruta continua", description: "Mantiene una secuencia geográfica y divide los pedidos en dos bloques.", strategy: "schedule", split: "contiguous" },
+    { title: "Cierres más urgentes", description: "Atiende primero los clientes cuyo horario termina antes.", strategy: "closing", split: "balanced" },
+    { title: "Distancia alternativa", description: "Prueba una distribución distinta dando prioridad a los puntos más lejanos.", strategy: "farthest", split: "alternate" },
+  ];
+  const alternatives = [];
+  for (const variant of variants) {
+    const seed = seedAlternativeOrder(preparedStops.map((stop) => ({ ...stop })), originLat, originLon, durationMatrix, variant.strategy);
+    const buckets = [[], []];
+    if (variant.split === "contiguous") {
+      const splitAt = Math.ceil(seed.length / 2);
+      buckets[0] = seed.slice(0, splitAt).map((stop) => Number(stop.shipment_id));
+      buckets[1] = seed.slice(splitAt).map((stop) => Number(stop.shipment_id));
+    } else if (variant.split === "alternate") {
+      seed.forEach((stop, index) => buckets[index % 2].push(Number(stop.shipment_id)));
+    } else {
+      const totals = [0, 0];
+      seed.forEach((stop) => {
+        const target = totals[0] <= totals[1] ? 0 : 1;
+        buckets[target].push(Number(stop.shipment_id));
+        const distance = Number.isFinite(Number(stop.latitude)) && Number.isFinite(Number(stop.longitude)) ? haversineKm(originLat, originLon, stop.latitude, stop.longitude) : 0;
+        totals[target] += distance * DEFAULT_TRAVEL_MINUTES_PER_KM + DEFAULT_DELIVERY_SERVICE_MINUTES;
+      });
+    }
+    const columns = [];
+    for (const shipmentIds of buckets) {
+      const bucketStops = shipmentIds.map((id) => byId.get(id)).filter(Boolean).map((stop) => ({ ...stop }));
+      const ordered = bucketStops.length > 1 ? optimizeStops(bucketStops, originLat, originLon, durationMatrix) : bucketStops.map((stop, index) => ({ ...stop, position: index + 1 }));
+      const estimate = ordered.length ? await calculateRoadRouteEstimate({ latitude: originLat, longitude: originLon }, ordered) : { distance_km: 0, driving_minutes: 0, waiting_minutes: 0, service_minutes: 0, total_minutes: 0, time_window_warnings: [] };
+      columns.push({ shipment_ids: ordered.map((stop) => Number(stop.shipment_id)).filter(Boolean), stops: ordered, estimate });
+    }
+    const totalMinutes = Math.max(...columns.map((column) => Number(column.estimate.total_minutes || 0)), 0);
+    const totalDistance = columns.reduce((total, column) => total + Number(column.estimate.distance_km || 0), 0);
+    const warnings = columns.flatMap((column) => column.estimate.time_window_warnings || []);
+    alternatives.push({ ...variant, total_minutes: totalMinutes, total_distance_km: Number(totalDistance.toFixed(1)), late_stops: warnings.length, columns });
+  }
+  return alternatives;
+}
 const roadRouteEstimateCache = new Map();
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
 function calculateSequentialRouteSchedule(stops, legMinutes, departureMinutes = DEFAULT_ROUTE_DEPARTURE_MINUTES) {
@@ -1887,6 +1943,20 @@ export async function crmApiHandler(req, res) {
           const created = db.prepare("INSERT INTO vehicle_maintenance(vehicle_id,maintenance_date,maintenance_km,maintenance_type,amount,next_due_km,next_due_date,notes,status,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").run(vehicleId, date, km, String(body.maintenance_type || "Mantenimiento general").trim(), Math.max(0, Number(body.amount || 0)), nextKm, nextDate, String(body.notes || "").trim(), "Realizado", actor, now, now);
           db.prepare("UPDATE vehicles SET odometer_km=MAX(COALESCE(odometer_km,0),?),next_maintenance_km=?,next_maintenance_date=?,updated_at=? WHERE id=?").run(km, nextKm, nextDate, now, vehicleId);
           return send(res, 201, db.prepare("SELECT vm.*,v.name vehicle_name,v.plate vehicle_plate FROM vehicle_maintenance vm JOIN vehicles v ON v.id=vm.vehicle_id WHERE vm.id=?").get(Number(created.lastInsertRowid)));
+        }
+      }
+      if (p[1] === "routes" && req.method === "POST" && p[2] === "alternatives") {
+        const body = await read(req);
+        const origin = { latitude: Number(body.origin_latitude), longitude: Number(body.origin_longitude) };
+        const stops = Array.isArray(body.stops) ? body.stops.slice(0, 50) : [];
+        if (!Number.isFinite(origin.latitude) || !Number.isFinite(origin.longitude)) return send(res, 400, { error: "La salida no está geolocalizada" });
+        if (!stops.length) return send(res, 400, { error: "No hay pedidos preparados para proponer rutas" });
+        const missing = stops.filter((stop) => !Number.isFinite(Number(stop?.latitude)) || !Number.isFinite(Number(stop?.longitude)));
+        if (missing.length) return send(res, 400, { error: "Hay pedidos sin geolocalizar", missing: missing.map((stop) => ({ shipment_id: stop.shipment_id, client_name: stop.client_name || "Cliente sin nombre" })) });
+        try {
+          return send(res, 200, { vehicle_count: 2, alternatives: await createRouteAlternatives(stops, origin.latitude, origin.longitude) });
+        } catch (error) {
+          return send(res, 503, { error: error?.message || "No se han podido proponer las rutas" });
         }
       }
       if (p[1] === "routes" && req.method === "POST" && p[2] === "optimize") {

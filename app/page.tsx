@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.183";
+const APP_VERSION = "2.0.184";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
@@ -1409,6 +1409,8 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
   const [roadEstimates, setRoadEstimates] = useState<Record<string, any>>({});
   const [roadEstimateLoading, setRoadEstimateLoading] = useState(false);
   const [optimizingVehicle, setOptimizingVehicle] = useState("");
+  const [routeAlternatives, setRouteAlternatives] = useState<any[]>([]);
+  const [alternativesLoading, setAlternativesLoading] = useState(false);
 
   async function load(force = false) {
     const cached = vehicleLoadMemoryCache.get(routeDate);
@@ -1717,6 +1719,44 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
     }
   }
 
+  async function proposeRouteAlternatives() {
+    const preparedStops = dayShipments.filter((item: any) => ["Preparado", "Preparado con incidencia"].includes(String(item.status || "")) && Boolean(String(item.preparation_closed_at || "").trim()));
+    if (!preparedStops.length) {
+      setMessage("No hay pedidos preparados y cerrados para proponer rutas.");
+      return;
+    }
+    setAlternativesLoading(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch("/api/routes/alternatives", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Usuario local" },
+        body: JSON.stringify({ origin_latitude: origin.latitude, origin_longitude: origin.longitude, stops: preparedStops.map((stop: any) => ({ shipment_id: Number(stop.id), latitude: stop.latitude, longitude: stop.longitude, opening_time: stop.opening_time || "", closing_time: stop.closing_time || "", client_name: stop.client_name || "" })) }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "No se han podido proponer las rutas.");
+      setRouteAlternatives(Array.isArray(body.alternatives) ? body.alternatives : []);
+      if (!Array.isArray(body.alternatives) || !body.alternatives.length) setMessage("No se han encontrado alternativas para estos pedidos.");
+    } catch (reason: any) {
+      setError(reason?.message || "No se han podido proponer las rutas.");
+    } finally {
+      setAlternativesLoading(false);
+    }
+  }
+
+  function applyRouteAlternative(alternative: any) {
+    const nextAssignments = { ...boardAssignments };
+    vehicleColumns.forEach((column: any) => { nextAssignments[String(column.id)] = []; });
+    vehicleColumns.slice(0, 2).forEach((column: any, index: number) => {
+      nextAssignments[String(column.id)] = Array.isArray(alternative?.columns?.[index]?.shipment_ids) ? alternative.columns[index].shipment_ids.map(Number).filter(Boolean) : [];
+    });
+    setBoardAssignments(nextAssignments);
+    setRoadEstimates(Object.fromEntries(vehicleColumns.slice(0, 2).map((column: any, index: number) => [String(column.id), alternative?.columns?.[index]?.estimate]).filter(([, value]) => value)));
+    setRouteAlternatives([]);
+    setMessage(`${alternative?.title || "Alternativa"} seleccionada. Revisa los dos camiones y guarda las cargas.`);
+  }
+
   async function saveVehicleBoard() {
     const columns = vehicleColumns.map((column: any) => ({
       vehicle_id: Number.isInteger(Number(column.id)) ? Number(column.id) : null,
@@ -1797,6 +1837,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
     <div className="vehicle-load-toolbar">
       <label>Fecha de carga<input type="date" value={routeDate} onChange={(event) => setRouteDate(event.target.value)} /></label>
       <span className="vehicle-load-toolbar-summary"><b>{dayShipments.length} pedidos del día</b><small>{dayShipments.filter((item: any) => ["Preparado", "Preparado con incidencia"].includes(String(item.status || ""))).length} listos para cargar · distancia primero, apertura de entrega después</small></span>
+      <button type="button" className="button secondary" onClick={() => void proposeRouteAlternatives()} disabled={alternativesLoading || loading}>{alternativesLoading ? "Calculando rutas…" : "Proponer 4 rutas"}</button>
       <button type="button" className="button secondary" onClick={() => void load(true)} disabled={loading}>{loading ? "Actualizando…" : "Actualizar"}</button>
       <button type="button" className="button primary" disabled={saving || !assignedIds.size} onClick={() => void saveVehicleBoard()}>{saving ? "Guardando…" : "Guardar cargas"}</button>
     </div>
@@ -1825,6 +1866,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
         {loading ? <div className="data-loading" role="status"><LoadingIndicator label="Cargando pedidos preparados…" /></div> : unassigned.length ? unassigned.map((item: any) => renderBoardCard(item, "unassigned")) : <p className="empty-state">Todos los pedidos están asignados a un camión.</p>}
       </div>
     </section>
+    {routeAlternatives.length > 0 && <div className="preview-overlay vehicle-route-alternatives-overlay" role="dialog" aria-modal="true" aria-label="Alternativas de rutas" onClick={(event) => event.target === event.currentTarget && setRouteAlternatives([])}><div className="vehicle-route-alternatives-modal"><header><div><p className="eyebrow">PLANIFICACIÓN · 2 CAMIONES</p><h2>Elige una alternativa de reparto</h2><small>Se han calculado los tramos entre puntos, las esperas de apertura y 15 minutos por entrega.</small></div><button type="button" className="preview-close" onClick={() => setRouteAlternatives([])} aria-label="Cerrar">×</button></header><div className="vehicle-route-alternatives-grid">{routeAlternatives.map((alternative: any, index: number) => <article className="vehicle-route-alternative" key={`${alternative.title}-${index}`}><div className="vehicle-route-alternative-head"><div><b>Alternativa {index + 1}</b><h3>{alternative.title}</h3><small>{alternative.description}</small></div><strong>{formatLoadDuration(Number(alternative.total_minutes || 0))}</strong></div><div className="vehicle-route-alternative-summary"><span>{Number(alternative.total_distance_km || 0).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km totales</span><span>{alternative.late_stops ? `${alternative.late_stops} fuera de horario` : "Horarios respetados"}</span></div><div className="vehicle-route-alternative-columns">{alternative.columns?.map((column: any, columnIndex: number) => <div key={columnIndex}><b>{vehicleColumns[columnIndex]?.plate || vehicleColumns[columnIndex]?.name || `Camión ${columnIndex + 1}`}</b><span>{column.shipment_ids?.length || 0} pedidos · {formatLoadDuration(Number(column.estimate?.total_minutes || 0))}</span><small>{(column.stops || []).map((stop: any) => stop.client_name || `Pedido ${stop.shipment_id}`).join(" → ") || "Sin pedidos"}</small></div>)}</div><button type="button" className="button primary" onClick={() => applyRouteAlternative(alternative)}>Usar esta alternativa</button></article>)}</div></div></div>}
     {printShipment && <ShipmentLabelModal shipment={printShipment} client={{ name: printShipment.client_name }} lines={Array.isArray(printShipment.load_lines) ? printShipment.load_lines : []} products={products} address={printShipment.address || ""} city={printShipment.city || ""} order={orders.find((item: any) => Number(item.id) === Number(printShipment.order_id))} invoice={invoices.find((item: any) => Number(item.order_id) === Number(printShipment.order_id))} onPrintInvoice={(invoice) => void printInvoiceDocument(invoice)} onClose={() => setPrintShipmentId(null)} />}
   </section>;
 }
