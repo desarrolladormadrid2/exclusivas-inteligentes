@@ -968,6 +968,8 @@ for (const [name, table, columns] of [
   ["idx_orders_status_created", "orders", "status, created_at"],
   ["idx_orders_client", "orders", "client_id"],
   ["idx_orders_delivery_date", "orders", "delivery_date"],
+  ["idx_orders_preparation_date", "orders", "preparation_date"],
+  ["idx_orders_shipping_date", "orders", "shipping_date"],
   ["idx_order_lines_order", "order_lines", "order_id"],
   ["idx_order_lines_product", "order_lines", "product_id"],
   ["idx_order_line_lots_line", "order_line_lots", "order_line_id"],
@@ -979,6 +981,7 @@ for (const [name, table, columns] of [
   ["idx_delivery_notes_order", "delivery_notes", "order_id"],
   ["idx_delivery_note_lines_note", "delivery_note_lines", "delivery_note_id"],
   ["idx_shipments_status_date", "shipments", "status, expected_delivery_at"],
+  ["idx_shipments_expected_date", "shipments", "expected_delivery_at"],
   ["idx_shipments_order", "shipments", "order_id"],
   ["idx_inventory_product_date", "inventory_movements", "product_id, movement_date"],
   ["idx_goods_receipts_supplier_date", "goods_receipts", "supplier_id, receipt_date"],
@@ -2961,15 +2964,19 @@ export async function crmApiHandler(req, res) {
           filterParams.push(dateFilter);
         }
         const requestedIds = String(query.get("ids") || "").split(",").map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0);
-        if (requestedIds.length && ["clients", "collection_points", "products", "orders", "shipments", "invoices"].includes(t)) {
+        if (query.has("ids") && ["clients", "collection_points", "products", "orders", "shipments", "invoices"].includes(t)) {
           const tableReference = t === "orders" ? "orders" : t === "shipments" ? "shipments" : t;
-          filters.push(`${tableReference}.id IN (${requestedIds.map(() => "?").join(",")})`);
-          filterParams.push(...requestedIds);
+          if (requestedIds.length) {
+            filters.push(`${tableReference}.id IN (${requestedIds.map(() => "?").join(",")})`);
+            filterParams.push(...requestedIds);
+          } else filters.push("1=0");
         }
         const requestedOrderIds = String(query.get("order_ids") || "").split(",").map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0);
-        if (requestedOrderIds.length && ["order_lines", "invoices"].includes(t)) {
-          filters.push(`${t}.order_id IN (${requestedOrderIds.map(() => "?").join(",")})`);
-          filterParams.push(...requestedOrderIds);
+        if (query.has("order_ids") && ["order_lines", "invoices"].includes(t)) {
+          if (requestedOrderIds.length) {
+            filters.push(`${t}.order_id IN (${requestedOrderIds.map(() => "?").join(",")})`);
+            filterParams.push(...requestedOrderIds);
+          } else filters.push("1=0");
         }
         if (isPublicCatalog) {
           filters.push("CAST(COALESCE(products.active,1) AS INTEGER)=1", "LOWER(COALESCE(products.product_status,'Activo')) NOT IN ('inactivo','baja','descatalogado')", "TRIM(COALESCE(products.name,''))<>''", "LOWER(products.name) NOT GLOB '__test*'", "LOWER(products.name) NOT GLOB '__dbg*'", "LOWER(products.name) NOT GLOB '__debug*'", "LOWER(products.name) NOT GLOB 'demo*'");
