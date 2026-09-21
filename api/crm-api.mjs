@@ -2960,6 +2960,17 @@ export async function crmApiHandler(req, res) {
           filters.push("substr(COALESCE(shipment_order.shipping_date,shipment_order.delivery_date,shipment_order.preparation_date,shipments.expected_delivery_at),1,10)=?");
           filterParams.push(dateFilter);
         }
+        const requestedIds = String(query.get("ids") || "").split(",").map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0);
+        if (requestedIds.length && ["clients", "collection_points", "products", "orders", "shipments", "invoices"].includes(t)) {
+          const tableReference = t === "orders" ? "orders" : t === "shipments" ? "shipments" : t;
+          filters.push(`${tableReference}.id IN (${requestedIds.map(() => "?").join(",")})`);
+          filterParams.push(...requestedIds);
+        }
+        const requestedOrderIds = String(query.get("order_ids") || "").split(",").map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0);
+        if (requestedOrderIds.length && ["order_lines", "invoices"].includes(t)) {
+          filters.push(`${t}.order_id IN (${requestedOrderIds.map(() => "?").join(",")})`);
+          filterParams.push(...requestedOrderIds);
+        }
         if (isPublicCatalog) {
           filters.push("CAST(COALESCE(products.active,1) AS INTEGER)=1", "LOWER(COALESCE(products.product_status,'Activo')) NOT IN ('inactivo','baja','descatalogado')", "TRIM(COALESCE(products.name,''))<>''", "LOWER(products.name) NOT GLOB '__test*'", "LOWER(products.name) NOT GLOB '__dbg*'", "LOWER(products.name) NOT GLOB '__debug*'", "LOWER(products.name) NOT GLOB 'demo*'");
         } else if (!includeInactive && ["suppliers", "clients", "products"].includes(t)) {

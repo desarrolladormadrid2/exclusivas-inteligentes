@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.165";
+const APP_VERSION = "2.0.166";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 
@@ -1397,20 +1397,23 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
         setBoardAssignments({});
         return;
       }
-      const [clientsResponse, pointsResponse, orderLinesResponse, productsResponse, ordersResponse, invoicesResponse] = await Promise.all([
-        fetch("/api/clients?view=lookup&limit=500"),
-        fetch("/api/collection_points?view=lookup&limit=500"),
-        fetch("/api/order_lines"),
-        fetch("/api/products?view=lookup&limit=2000"),
-        fetch("/api/orders"),
-        fetch("/api/invoices"),
+      const shipmentList = shipmentRows as any[];
+      const queryIds = (values: any[]) => [...new Set(values.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0))].join(",") || "0";
+      const orderIdsQuery = queryIds(shipmentList.map((item) => item.order_id));
+      const [clientsResponse, pointsResponse, orderLinesResponse, ordersResponse, invoicesResponse] = await Promise.all([
+        fetch(`/api/clients?view=lookup&ids=${queryIds(shipmentList.map((item) => item.client_id))}`),
+        fetch(`/api/collection_points?view=lookup&ids=${queryIds(shipmentList.map((item) => item.collection_point_id))}`),
+        fetch(`/api/order_lines?order_ids=${orderIdsQuery}`),
+        fetch(`/api/orders?ids=${orderIdsQuery}`),
+        fetch(`/api/invoices?order_ids=${orderIdsQuery}`),
       ]);
       const clients = clientsResponse.ok ? await clientsResponse.json() : [];
       const points = pointsResponse.ok ? await pointsResponse.json() : [];
       const orderLines = orderLinesResponse.ok ? await orderLinesResponse.json() : [];
-      const products = productsResponse.ok ? await productsResponse.json() : [];
       const orderRows = ordersResponse.ok ? await ordersResponse.json() : [];
       const invoiceRows = invoicesResponse.ok ? await invoicesResponse.json() : [];
+      const productsResponse = await fetch(`/api/products?view=lookup&ids=${queryIds(orderLines.map((line: any) => line.product_id))}`);
+      const products = productsResponse.ok ? await productsResponse.json() : [];
       setOrders(Array.isArray(orderRows) ? orderRows : []);
       setInvoices(Array.isArray(invoiceRows) ? invoiceRows : []);
       setProducts(Array.isArray(products) ? products : []);
