@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.170";
+const APP_VERSION = "2.0.171";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 
@@ -2560,6 +2560,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
   const [bulkValidating, setBulkValidating] = useState(false);
   const [bulkProgress, setBulkProgress] = useState({ completed: 0, total: 0 });
   const [closing, setClosing] = useState(false);
+  const [loadSent, setLoadSent] = useState(false);
   const [incidentLineId, setIncidentLineId] = useState<number | null>(null);
   const [incidentText, setIncidentText] = useState("");
   const [incidentSaving, setIncidentSaving] = useState(false);
@@ -2726,7 +2727,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
   }
 
   async function closeCollectiveLoad() {
-    if (!readyToClose || closing) return;
+    if (!readyToClose || closing || loadSent) return;
     if (!collectiveDateAllowed) {
       setError("La carga colectiva sólo puede hacerse para hoy o mañana. Selecciona una fecha válida.");
       return;
@@ -2752,8 +2753,9 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
         return response.ok;
       }));
       if (responses.some((ok) => !ok)) throw new Error("No se pudo cerrar uno de los pedidos preparados.");
-      setMessage("Carga colectiva cerrada. Los pedidos ya están disponibles en Carga de vehículos.");
-      window.setTimeout(onClose, 650);
+      setLoadSent(true);
+      setMessage("Pedidos enviados a Carga de vehículos. Puedes continuar allí con la asignación al camión.");
+      window.setTimeout(onClose, 1400);
     } catch (reason: any) {
       setError(reason?.message || "No se pudo cerrar la carga colectiva.");
     } finally {
@@ -2939,7 +2941,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
         </div>
         </>
       )}
-       <footer className="collective-load-actions"><button type="button" className="button primary" disabled={loading || bulkValidating || savingId !== null || incidentSaving || !pendingValidationLines.length} onClick={() => void validateAllLines()}>{bulkValidating ? `Validando… ${bulkProgress.completed}/${bulkProgress.total}` : "Validar todos"}</button><button type="button" className="button secondary collective-load-print" onClick={() => window.print()}>Imprimir listado</button><button type="button" className="button primary collective-load-close-action" disabled={!readyToClose || closing || bulkValidating} onClick={() => void closeCollectiveLoad()}>{closing ? "Mandando a cargar…" : "Mandar a cargar"}</button>{!embedded && <button type="button" className="button secondary" disabled={closing || bulkValidating} onClick={onClose}>Cerrar</button>}</footer>
+       <footer className="collective-load-actions"><button type="button" className="button primary" disabled={loading || bulkValidating || savingId !== null || incidentSaving || !pendingValidationLines.length} onClick={() => void validateAllLines()}>{bulkValidating ? `Validando… ${bulkProgress.completed}/${bulkProgress.total}` : "Validar todos"}</button><button type="button" className="button secondary collective-load-print" onClick={() => window.print()}>Imprimir listado</button><button type="button" className="button primary collective-load-close-action" disabled={!readyToClose || closing || bulkValidating || loadSent} onClick={() => void closeCollectiveLoad()}>{loadSent ? "En carga ✓" : closing ? "Mandando a cargar…" : "Mandar a cargar"}</button>{!embedded && <button type="button" className="button secondary" disabled={closing || bulkValidating || loadSent} onClick={onClose}>Cerrar</button>}</footer>
        {incidentLineId !== null && (() => { const incidentLine = sourceLines.find((line) => Number(line.id) === incidentLineId); if (!incidentLine) return null; const product = getProduct(incidentLine); const requested = requestedQuantity(incidentLine); const quantity = Math.max(0, Number(drafts[String(incidentLine.id)] ?? defaultDraftQuantity(incidentLine)) || 0); const missing = Math.max(0, requested - quantity); const order = items.find((item) => Number(item.order_id || item._source_order_id) === Number(incidentLine.order_id)); return <div className="collective-load-incident-overlay" role="dialog" aria-modal="true" aria-label="Registrar incidencia" onMouseDown={(event) => event.target === event.currentTarget && !incidentSaving && setIncidentLineId(null)}><section className="collective-load-incident-modal" onClick={(event) => event.stopPropagation()}><header><div><p className="eyebrow">PREPARACIÓN · INCIDENCIA</p><h3>Registrar incidencia</h3><small>{order?.code || `Pedido #${incidentLine.order_id}`} · {product?.name || `Producto #${incidentLine.product_id}`}</small></div><button type="button" className="preview-close" aria-label="Cerrar" disabled={incidentSaving} onClick={() => setIncidentLineId(null)}>×</button></header><div className="collective-load-incident-summary"><b>Preparadas: {quantity} de {requested}</b><span>Faltan {missing} {quantityUnitLabel(incidentLine.quantity_unit || product?.unit)}</span></div><label className="collective-load-incident-text">Qué ha ocurrido<textarea value={incidentText} onChange={(event) => setIncidentText(event.target.value)} placeholder={`Ej.: solo hay ${quantity} unidades disponibles.`} rows={4} autoFocus /></label><p className="collective-load-incident-help">La incidencia quedará vinculada al pedido y la línea seguirá marcada en rojo hasta resolverla.</p>{error && <p className="collective-load-feedback error-message" role="alert">{error}</p>}<footer><button type="button" className="button secondary" disabled={incidentSaving} onClick={() => setIncidentLineId(null)}>Cancelar</button><button type="button" className="button danger" disabled={incidentSaving} onClick={() => void registerLineIncident(incidentLine)}>{incidentSaving ? "Registrando…" : "Confirmar incidencia"}</button></footer></section></div>; })()}
     </section>
   </div>;
