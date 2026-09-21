@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.181";
+const APP_VERSION = "2.0.182";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
@@ -1408,6 +1408,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
   const [origin, setOrigin] = useState({ latitude: 40.4168, longitude: -3.7038, label: "Madrid (estimación)" });
   const [roadEstimates, setRoadEstimates] = useState<Record<string, any>>({});
   const [roadEstimateLoading, setRoadEstimateLoading] = useState(false);
+  const [optimizingVehicle, setOptimizingVehicle] = useState("");
 
   async function load(force = false) {
     const cached = vehicleLoadMemoryCache.get(routeDate);
@@ -1657,20 +1658,63 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
   function getVehiclePlanStats(items: any[]) {
     let previous = { latitude: origin.latitude, longitude: origin.longitude };
     let distance = 0;
+    let elapsedMinutes = 0;
+    let waitingMinutes = 0;
     let locatedStops = 0;
     items.forEach((item: any) => {
-      if (!isPlausibleRouteCoordinate(item.latitude, item.longitude, origin)) return;
-      distance += haversineKm(previous.latitude, previous.longitude, Number(item.latitude), Number(item.longitude));
-      previous = { latitude: Number(item.latitude), longitude: Number(item.longitude) };
-      locatedStops += 1;
+      const legDistance = isPlausibleRouteCoordinate(item.latitude, item.longitude, origin) ? haversineKm(previous.latitude, previous.longitude, Number(item.latitude), Number(item.longitude)) : 0;
+      const travelMinutes = legDistance * 2;
+      const arrivalMinutes = 8 * 60 + elapsedMinutes + travelMinutes;
+      const opening = receptionMinutes(item.opening_time);
+      const closing = receptionMinutes(item.closing_time);
+      const wait = opening >= 0 ? Math.max(0, opening - arrivalMinutes) : 0;
+      waitingMinutes += wait;
+      elapsedMinutes += travelMinutes + wait + DEFAULT_DELIVERY_SERVICE_MINUTES;
+      if (legDistance) {
+        distance += legDistance;
+        previous = { latitude: Number(item.latitude), longitude: Number(item.longitude) };
+        locatedStops += 1;
+      }
     });
-    const serviceMinutes = items.length * DEFAULT_DELIVERY_SERVICE_MINUTES;
     const drivingMinutes = distance * 2;
-    return { distance: Number(distance.toFixed(1)), minutes: Math.round(serviceMinutes + drivingMinutes), locatedStops };
+    return { distance: Number(distance.toFixed(1)), minutes: Math.round(elapsedMinutes), drivingMinutes: Math.round(drivingMinutes), waitingMinutes: Math.round(waitingMinutes), locatedStops };
   }
 
   function formatLoadDuration(minutes: number) {
     return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
+  }
+
+  async function optimizeVehicle(key: string) {
+    const shipmentById = new Map(dayShipments.map((item: any) => [Number(item.id), item]));
+    const stops = (boardAssignments[key] || []).map((id) => shipmentById.get(Number(id))).filter(Boolean);
+    if (stops.length < 2) {
+      setMessage("Asigna al menos dos pedidos al camión para poder optimizar el orden.");
+      return;
+    }
+    setOptimizingVehicle(key);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch("/api/routes/optimize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Usuario local" },
+        body: JSON.stringify({
+          origin_latitude: origin.latitude,
+          origin_longitude: origin.longitude,
+          stops: stops.map((stop: any) => ({ shipment_id: Number(stop.id), latitude: stop.latitude, longitude: stop.longitude, opening_time: stop.opening_time || "", closing_time: stop.closing_time || "", client_name: stop.client_name || "" })),
+        }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "No se ha podido optimizar la ruta.");
+      setBoardAssignments((current) => ({ ...current, [key]: Array.isArray(body.shipment_ids) ? body.shipment_ids.map(Number).filter(Boolean) : current[key] || [] }));
+      if (body.estimate) setRoadEstimates((current) => ({ ...current, [key]: body.estimate }));
+      const lateStops = Number(body.estimate?.time_window_warnings?.length || 0);
+      setMessage(lateStops ? `Orden optimizado, pero ${lateStops} entrega${lateStops === 1 ? " queda" : "s quedan"} fuera de horario.` : "Orden optimizado: se acumulan carretera, esperas y 15 minutos por entrega.");
+    } catch (reason: any) {
+      setError(reason?.message || "No se ha podido optimizar la ruta.");
+    } finally {
+      setOptimizingVehicle("");
+    }
   }
 
   async function saveVehicleBoard() {
@@ -1769,7 +1813,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
         const displayedMinutes = roadStats?.total_minutes ?? planStats.minutes;
         const overDailyLimit = displayedMinutes > 600;
         return <section className="vehicle-load-column" key={key} onDragOver={(event) => allowShipmentDrop(event)} onDrop={(event) => { event.preventDefault(); moveShipment(readDraggedShipmentId(event), key); }}>
-          <header className="vehicle-load-column-head"><div><h3>{column.plate || column.name || `Camión ${key}`}</h3><span>{columnItems.length} pedidos</span><small className={overDailyLimit ? "is-over-limit" : ""}>{roadStats ? `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km carretera · ${formatLoadDuration(roadStats.driving_minutes)} conducción + ${roadStats.service_minutes} min entregas = ${formatLoadDuration(displayedMinutes)}` : roadEstimateLoading ? "Calculando tiempo real de carretera…" : `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km aprox. · ${formatLoadDuration(displayedMinutes)} (${columnItems.length} × ${DEFAULT_DELIVERY_SERVICE_MINUTES} min entrega)`}{overDailyLimit ? " · supera 10 h" : ""}</small></div><label>Conductor<input value={driverByVehicle[key] || column.driver || user?.username || ""} onChange={(event) => setDriverByVehicle((current) => ({ ...current, [key]: event.target.value }))} placeholder="Nombre" /></label></header>
+          <header className="vehicle-load-column-head"><div><h3>{column.plate || column.name || `Camión ${key}`}</h3><span>{columnItems.length} pedidos</span><small className={overDailyLimit ? "is-over-limit" : ""}>{roadStats ? `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km carretera · ${formatLoadDuration(roadStats.driving_minutes)} conducción + ${roadStats.waiting_minutes || 0} min espera + ${roadStats.service_minutes} min entregas = ${formatLoadDuration(displayedMinutes)}` : roadEstimateLoading ? "Calculando tiempo real de carretera…" : `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km aprox. · ${formatLoadDuration(planStats.drivingMinutes)} conducción + ${planStats.waitingMinutes} min espera + ${columnItems.length * DEFAULT_DELIVERY_SERVICE_MINUTES} min entregas = ${formatLoadDuration(displayedMinutes)}`}{overDailyLimit ? " · supera 10 h" : ""}</small></div><div className="vehicle-load-column-tools"><button type="button" className="button secondary vehicle-load-optimize" disabled={optimizingVehicle === key || columnItems.length < 2} onClick={() => void optimizeVehicle(key)}>{optimizingVehicle === key ? "Optimizando…" : "Optimizar orden"}</button><label>Conductor<input value={driverByVehicle[key] || column.driver || user?.username || ""} onChange={(event) => setDriverByVehicle((current) => ({ ...current, [key]: event.target.value }))} placeholder="Nombre" /></label></div></header>
           <div className="vehicle-load-column-list">{columnItems.length ? [renderDropSlot(key, `${key}-start`, Number(columnItems[0].id)), ...columnItems.flatMap((item: any, index: number) => [renderBoardCard(item, key, index, columnItems.length), renderDropSlot(key, `${key}-${item.id}-after`, Number(columnItems[index + 1]?.id) || undefined)])] : <p className="vehicle-load-column-empty">Suelta aquí los pedidos</p>}</div>
         </section>;
       })}

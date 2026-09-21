@@ -901,50 +901,133 @@ function shipmentHasCompletePreparedLines(shipment) {
     return Math.abs(prepared - requested) < 0.001;
   });
 }
-function optimizeStops(stops, originLat, originLon) {
+const DEFAULT_ROUTE_DEPARTURE_MINUTES = 8 * 60;
+const DEFAULT_TRAVEL_MINUTES_PER_KM = 2;
+const roadDurationMatrixCache = new Map();
+function routeClockMinutes(value) {
+  const match = String(value || "").match(/(?:T|^|\s)(\d{1,2}):(\d{2})/);
+  return match ? Number(match[1]) * 60 + Number(match[2]) : Number.POSITIVE_INFINITY;
+}
+const openingMinutes = routeClockMinutes;
+function routeTimeLabel(minutes) {
+  const normalized = Math.max(0, Math.round(Number(minutes) || 0));
+  return `${String(Math.floor(normalized / 60) % 24).padStart(2, "0")}:${String(normalized % 60).padStart(2, "0")}`;
+}
+function optimizeStops(stops, originLat, originLon, durationMatrix = null, departureMinutes = DEFAULT_ROUTE_DEPARTURE_MINUTES) {
   const remaining = [...stops];
   const ordered = [];
   let currentLat = Number(originLat), currentLon = Number(originLon);
   const originLatitude = Number(originLat), originLongitude = Number(originLon);
-  const openingMinutes = (value) => {
-    const match = String(value || "").match(/(?:T|^|\s)(\d{1,2}):(\d{2})/);
-    return match ? Number(match[1]) * 60 + Number(match[2]) : Number.POSITIVE_INFINITY;
-  };
+  let elapsedMinutes = 0;
+  let currentNode = 0;
   while (remaining.length) {
     let nextIndex = 0;
     if (Number.isFinite(currentLat) && Number.isFinite(currentLon)) {
-      const elapsedBeforeTravel = ordered.reduce((total, stop) => total + Number(stop.distance_km || 0) * 2 + 15, 0);
-      const departureMinutes = 8 * 60;
       const candidates = remaining.map((stop, index) => {
-        const distance = haversineKm(currentLat, currentLon, stop.latitude, stop.longitude);
-        const originDistance = haversineKm(originLatitude, originLongitude, stop.latitude, stop.longitude);
-        const arrival = departureMinutes + elapsedBeforeTravel + distance * 2;
-        const opening = openingMinutes(stop.opening_time);
-        const closing = openingMinutes(stop.closing_time);
-        const lateMinutes = closing !== Number.POSITIVE_INFINITY ? Math.max(0, arrival - closing) : 0;
-        const waitingMinutes = opening !== Number.POSITIVE_INFINITY ? Math.max(0, opening - arrival) : 0;
-        return { index, distance, originDistance, lateMinutes, waitingMinutes, opening };
+        const distance = Number.isFinite(Number(stop.latitude)) && Number.isFinite(Number(stop.longitude)) ? haversineKm(currentLat, currentLon, stop.latitude, stop.longitude) : Number.POSITIVE_INFINITY;
+        const matrixMinutes = durationMatrix?.[currentNode]?.[Number(stop._routeNode ?? index + 1)];
+        const travelMinutes = Number.isFinite(Number(matrixMinutes)) ? Math.max(0, Math.round(Number(matrixMinutes) / 60)) : distance * DEFAULT_TRAVEL_MINUTES_PER_KM;
+        const originDistance = Number.isFinite(distance) && Number.isFinite(originLatitude) && Number.isFinite(originLongitude) ? haversineKm(originLatitude, originLongitude, stop.latitude, stop.longitude) : Number.POSITIVE_INFINITY;
+        const arrival = departureMinutes + elapsedMinutes + travelMinutes;
+        const opening = routeClockMinutes(stop.opening_time);
+        const closing = routeClockMinutes(stop.closing_time);
+        const invalidWindow = closing !== Number.POSITIVE_INFINITY && opening !== Number.POSITIVE_INFINITY && closing < opening;
+        const waitingMinutes = !invalidWindow && opening !== Number.POSITIVE_INFINITY ? Math.max(0, opening - arrival) : 0;
+        const serviceStart = arrival + waitingMinutes;
+        const lateMinutes = invalidWindow ? Number.POSITIVE_INFINITY : closing !== Number.POSITIVE_INFINITY ? Math.max(0, serviceStart - closing) : 0;
+        return { index, distance, originDistance, travelMinutes, lateMinutes, waitingMinutes, opening, closing, invalidWindow, ready: waitingMinutes === 0 };
       });
       const onTime = candidates.filter((candidate) => candidate.lateMinutes === 0);
       const ready = onTime.filter((candidate) => candidate.waitingMinutes === 0);
       const pool = ready.length ? ready : onTime.length ? onTime : candidates;
-      pool.sort((a, b) => (a.lateMinutes - b.lateMinutes) || (b.originDistance - a.originDistance) || (b.distance - a.distance) || (a.opening - b.opening));
+      pool.sort((a, b) => (a.lateMinutes - b.lateMinutes) || Number(a.invalidWindow) - Number(b.invalidWindow) || (a.waitingMinutes - b.waitingMinutes) || (a.closing - b.closing) || (b.originDistance - a.originDistance) || (a.travelMinutes - b.travelMinutes));
       nextIndex = pool[0].index;
     }
+    const selected = remaining[nextIndex];
+    const selectedDistance = Number.isFinite(currentLat) && Number.isFinite(currentLon) && Number.isFinite(Number(selected?.latitude)) && Number.isFinite(Number(selected?.longitude)) ? haversineKm(currentLat, currentLon, selected.latitude, selected.longitude) : 0;
+    const selectedMatrixMinutes = durationMatrix?.[currentNode]?.[Number(selected?._routeNode ?? nextIndex + 1)];
+    const selectedTravelMinutes = Number.isFinite(Number(selectedMatrixMinutes)) ? Math.max(0, Math.round(Number(selectedMatrixMinutes) / 60)) : selectedDistance * DEFAULT_TRAVEL_MINUTES_PER_KM;
+    const selectedArrival = departureMinutes + elapsedMinutes + selectedTravelMinutes;
+    const selectedOpening = routeClockMinutes(selected?.opening_time);
+    const selectedClosing = routeClockMinutes(selected?.closing_time);
+    const selectedInvalidWindow = selectedClosing !== Number.POSITIVE_INFINITY && selectedOpening !== Number.POSITIVE_INFINITY && selectedClosing < selectedOpening;
+    const selectedWaitingMinutes = !selectedInvalidWindow && selectedOpening !== Number.POSITIVE_INFINITY ? Math.max(0, selectedOpening - selectedArrival) : 0;
     const next = remaining.splice(nextIndex, 1)[0];
-    next.distance_km = Number.isFinite(currentLat) && Number.isFinite(currentLon) ? Number(haversineKm(currentLat, currentLon, next.latitude, next.longitude).toFixed(2)) : 0;
+    next.distance_km = Number.isFinite(selectedDistance) ? Number(selectedDistance.toFixed(2)) : 0;
+    next.travel_minutes = Math.max(0, Math.round(selectedTravelMinutes));
+    next.waiting_minutes = Math.max(0, Math.round(selectedWaitingMinutes));
+    next.arrival_time = routeTimeLabel(selectedArrival);
+    next.service_start_time = routeTimeLabel(selectedArrival + selectedWaitingMinutes);
+    next.schedule_warning = selectedInvalidWindow ? "Horario inválido" : selectedClosing !== Number.POSITIVE_INFINITY && selectedArrival + selectedWaitingMinutes > selectedClosing ? "Llegada fuera de horario" : "";
     ordered.push(next);
+    elapsedMinutes += selectedTravelMinutes + selectedWaitingMinutes + DEFAULT_DELIVERY_SERVICE_MINUTES;
     currentLat = next.latitude; currentLon = next.longitude;
+    currentNode = Number(next._routeNode ?? currentNode + 1);
   }
-  return ordered.map((stop, index) => ({ ...stop, position: index + 1 }));
+  return ordered.map((stop, index) => { const { _routeNode, ...cleanStop } = stop; return { ...cleanStop, position: index + 1 }; });
+}
+async function calculateRoadDurationMatrix(origin, stops) {
+  const points = [origin, ...stops];
+  if (points.some((point) => !Number.isFinite(Number(point?.latitude)) || !Number.isFinite(Number(point?.longitude)))) return null;
+  const coordinates = points.map((point) => `${Number(point.longitude).toFixed(6)},${Number(point.latitude).toFixed(6)}`).join(";");
+  const cached = roadDurationMatrixCache.get(coordinates);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(`https://router.project-osrm.org/table/v1/driving/${coordinates}?annotations=duration`, { signal: controller.signal, headers: { Accept: "application/json" } });
+    if (!response.ok) throw new Error(`Servicio de matrices no disponible (${response.status})`);
+    const body = await response.json();
+    if (body?.code !== "Ok" || !Array.isArray(body?.durations)) throw new Error("No se ha encontrado una matriz de tiempos por carretera");
+    roadDurationMatrixCache.set(coordinates, { value: body.durations, expiresAt: Date.now() + 300000 });
+    return body.durations;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+async function optimizeStopsByRoadTimes(stops, originLat, originLon) {
+  const preparedStops = stops.map((stop, index) => ({ ...stop, _routeNode: index + 1 }));
+  let durationMatrix = null;
+  try { durationMatrix = await calculateRoadDurationMatrix({ latitude: originLat, longitude: originLon }, preparedStops); } catch {}
+  return optimizeStops(preparedStops, originLat, originLon, durationMatrix);
 }
 const roadRouteEstimateCache = new Map();
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
+function calculateSequentialRouteSchedule(stops, legMinutes, departureMinutes = DEFAULT_ROUTE_DEPARTURE_MINUTES) {
+  let elapsedMinutes = 0;
+  let drivingMinutes = 0;
+  let waitingMinutes = 0;
+  const schedule = [];
+  const warnings = [];
+  stops.forEach((stop, index) => {
+    const travelMinutes = Math.max(0, Math.round(Number(legMinutes[index] || 0)));
+    drivingMinutes += travelMinutes;
+    elapsedMinutes += travelMinutes;
+    const arrivalMinutes = departureMinutes + elapsedMinutes;
+    const opening = routeClockMinutes(stop.opening_time);
+    const closing = routeClockMinutes(stop.closing_time);
+    const invalidWindow = closing !== Number.POSITIVE_INFINITY && opening !== Number.POSITIVE_INFINITY && closing < opening;
+    const wait = !invalidWindow && opening !== Number.POSITIVE_INFINITY ? Math.max(0, opening - arrivalMinutes) : 0;
+    const serviceStart = arrivalMinutes + wait;
+    const late = invalidWindow || (closing !== Number.POSITIVE_INFINITY && serviceStart > closing);
+    waitingMinutes += wait;
+    elapsedMinutes += wait + DEFAULT_DELIVERY_SERVICE_MINUTES;
+    const entry = { shipment_id: stop.shipment_id || null, position: index + 1, arrival_time: routeTimeLabel(arrivalMinutes), service_start_time: routeTimeLabel(serviceStart), travel_minutes: travelMinutes, waiting_minutes: Math.round(wait), service_minutes: DEFAULT_DELIVERY_SERVICE_MINUTES, opening_time: stop.opening_time || "", closing_time: stop.closing_time || "", within_window: !late };
+    schedule.push(entry);
+    if (late) warnings.push({ ...entry, client_name: stop.client_name || "Cliente sin nombre", message: invalidWindow ? "Horario inválido: el cierre es anterior a la apertura." : `Llegada estimada fuera de horario (${entry.service_start_time}).` });
+  });
+  return { driving_minutes: drivingMinutes, waiting_minutes: Math.round(waitingMinutes), service_minutes: stops.length * DEFAULT_DELIVERY_SERVICE_MINUTES, total_minutes: Math.max(0, Math.round(elapsedMinutes)), schedule, time_window_warnings: warnings };
+}
 async function calculateRoadRouteEstimate(origin, stops) {
-  const points = [origin, ...stops].filter((point) => Number.isFinite(Number(point?.latitude)) && Number.isFinite(Number(point?.longitude)));
-  if (points.length < 2) return { provider: "OSRM", distance_km: 0, driving_minutes: 0, service_minutes: stops.length * DEFAULT_DELIVERY_SERVICE_MINUTES, total_minutes: stops.length * DEFAULT_DELIVERY_SERVICE_MINUTES, located_stops: Math.max(0, points.length - 1) };
+  const validStops = stops.filter((point) => Number.isFinite(Number(point?.latitude)) && Number.isFinite(Number(point?.longitude)));
+  const points = [origin, ...validStops].filter((point) => Number.isFinite(Number(point?.latitude)) && Number.isFinite(Number(point?.longitude)));
+  if (points.length < 2) {
+    const schedule = calculateSequentialRouteSchedule(stops, stops.map(() => 0));
+    return { provider: "OSRM", distance_km: 0, driving_minutes: schedule.driving_minutes, waiting_minutes: schedule.waiting_minutes, service_minutes: stops.length * DEFAULT_DELIVERY_SERVICE_MINUTES, total_minutes: schedule.total_minutes, located_stops: Math.max(0, points.length - 1), schedule: schedule.schedule, time_window_warnings: schedule.time_window_warnings };
+  }
   const coordinates = points.map((point) => `${Number(point.longitude).toFixed(6)},${Number(point.latitude).toFixed(6)}`).join(";");
-  const cached = roadRouteEstimateCache.get(coordinates);
+  const cacheKey = `${coordinates}|${validStops.map((stop) => `${stop.opening_time || ""}-${stop.closing_time || ""}`).join(";")}`;
+  const cached = roadRouteEstimateCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
@@ -954,15 +1037,22 @@ async function calculateRoadRouteEstimate(origin, stops) {
     const body = await response.json();
     const route = body?.routes?.[0];
     if (!route || body.code !== "Ok") throw new Error("No se ha encontrado una ruta por carretera");
+    const routeDrivingMinutes = Math.max(0, Math.round(Number(route.duration || 0) / 60));
+    const legMinutes = validStops.map((_stop, index) => Math.max(0, Math.round(Number(route.legs?.[index]?.duration || 0) / 60)));
+    const schedule = calculateSequentialRouteSchedule(validStops, legMinutes);
+    const drivingMinutes = schedule.driving_minutes || routeDrivingMinutes;
     const value = {
       provider: "OSRM",
       distance_km: Number((Number(route.distance || 0) / 1000).toFixed(1)),
-      driving_minutes: Math.max(0, Math.round(Number(route.duration || 0) / 60)),
+      driving_minutes: drivingMinutes,
+      waiting_minutes: schedule.waiting_minutes,
       service_minutes: stops.length * DEFAULT_DELIVERY_SERVICE_MINUTES,
-      total_minutes: Math.max(0, Math.round(Number(route.duration || 0) / 60) + stops.length * DEFAULT_DELIVERY_SERVICE_MINUTES),
+      total_minutes: drivingMinutes + schedule.waiting_minutes + stops.length * DEFAULT_DELIVERY_SERVICE_MINUTES,
       located_stops: points.length - 1,
+      schedule: schedule.schedule,
+      time_window_warnings: schedule.time_window_warnings,
     };
-    roadRouteEstimateCache.set(coordinates, { value, expiresAt: Date.now() + 300000 });
+    roadRouteEstimateCache.set(cacheKey, { value, expiresAt: Date.now() + 300000 });
     return value;
   } finally {
     clearTimeout(timeout);
@@ -1799,6 +1889,20 @@ export async function crmApiHandler(req, res) {
           return send(res, 201, db.prepare("SELECT vm.*,v.name vehicle_name,v.plate vehicle_plate FROM vehicle_maintenance vm JOIN vehicles v ON v.id=vm.vehicle_id WHERE vm.id=?").get(Number(created.lastInsertRowid)));
         }
       }
+      if (p[1] === "routes" && req.method === "POST" && p[2] === "optimize") {
+        const body = await read(req);
+        const origin = { latitude: Number(body.origin_latitude), longitude: Number(body.origin_longitude) };
+        const stops = Array.isArray(body.stops) ? body.stops.slice(0, 50) : [];
+        if (!Number.isFinite(origin.latitude) || !Number.isFinite(origin.longitude)) return send(res, 400, { error: "La salida no está geolocalizada" });
+        if (!stops.length) return send(res, 400, { error: "No hay pedidos asignados a este camión" });
+        try {
+          const orderedStops = await optimizeStopsByRoadTimes(stops, origin.latitude, origin.longitude);
+          const estimate = await calculateRoadRouteEstimate(origin, orderedStops);
+          return send(res, 200, { shipment_ids: orderedStops.map((stop) => Number(stop.shipment_id)).filter(Boolean), stops: orderedStops, estimate });
+        } catch (error) {
+          return send(res, 503, { error: error?.message || "No se ha podido optimizar la ruta" });
+        }
+      }
       if (p[1] === "routes" && req.method === "POST" && p[2] === "estimate") {
         const body = await read(req);
         const origin = { latitude: Number(body.origin_latitude), longitude: Number(body.origin_longitude) };
@@ -1881,7 +1985,7 @@ export async function crmApiHandler(req, res) {
         if (missing.length) return send(res, 400, { error: "Hay envíos sin geolocalizar", missing: missing.map((stop) => ({ shipment_id: stop.shipment_id, client_name: stop.client_name, address: stop.address })) });
         const originLat = body.origin_latitude === undefined ? stops[0].latitude : Number(body.origin_latitude);
         const originLon = body.origin_longitude === undefined ? stops[0].longitude : Number(body.origin_longitude);
-        const orderedStops = optimizeStops(stops, originLat, originLon);
+        const orderedStops = await optimizeStopsByRoadTimes(stops, originLat, originLon);
         const now = new Date().toISOString();
         const routeCode = `RUT-${String(body.route_date).replace(/[^0-9]/g, "")}-${String(Date.now()).slice(-5)}`;
         const vehicleId = Number(body.vehicle_id || 0) || null;
