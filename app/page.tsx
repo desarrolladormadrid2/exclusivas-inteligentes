@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.169";
+const APP_VERSION = "2.0.170";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 
@@ -2558,6 +2558,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<number | null>(null);
   const [bulkValidating, setBulkValidating] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState({ completed: 0, total: 0 });
   const [closing, setClosing] = useState(false);
   const [incidentLineId, setIncidentLineId] = useState<number | null>(null);
   const [incidentText, setIncidentText] = useState("");
@@ -2595,6 +2596,16 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
   };
   const lineIsValidated = (line: any) => Number(line.prepared || 0) === 1 && String(line.preparation_status || "") === "Preparado" && preparedQuantity(line) >= requestedQuantity(line) && requestedQuantity(line) > 0;
   const shipmentForOrder = (orderId: number) => items.find((row) => !row._virtual_order && Number(row.order_id) === Number(orderId));
+
+  async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = 15000) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(input, { ...init, signal: controller.signal });
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -2643,7 +2654,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
       : nextLines.length > 0 && nextLines.every((line) => lineIsValidated(line))
         ? "Preparado"
         : "Preparando";
-    const response = await fetch(`/api/shipments/${shipment.id}`, {
+    const response = await fetchWithTimeout(`/api/shipments/${shipment.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", "X-Actor": actor },
       body: JSON.stringify({ status: nextStatus, prepared_by: actor, preparation_closed_at: null, preparation_closed_by: null }),
@@ -2661,6 +2672,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
     const confirmed = window.confirm(`Vas a validar ${pendingValidationLines.length} líneas con la cantidad pedida.${incidentNote}\n\nEsta acción no exige escanear cada código de barras individualmente. ¿Quieres continuar?`);
     if (!confirmed) return;
     setBulkValidating(true);
+    setBulkProgress({ completed: 0, total: pendingValidationLines.length });
     setError("");
     setMessage("");
     try {
@@ -2679,13 +2691,15 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
           barcode_scanned_at: scannedCode ? now : null,
           barcode_scanned_by: scannedCode ? actor : null,
         };
-        const response = await fetch(`/api/order_lines/${line.id}`, {
+        const response = await fetchWithTimeout(`/api/order_lines/${line.id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json", "X-Actor": actor },
           body: JSON.stringify({ prepared: 1, prepared_quantity: requested, preparation_status: "Preparado", barcode_scanned_code: next.barcode_scanned_code, barcode_scan_status: next.barcode_scan_status, barcode_scanned_at: next.barcode_scanned_at, barcode_scanned_by: next.barcode_scanned_by }),
         });
         if (!response.ok) throw new Error(`No se pudo validar la línea ${line.id}.`);
         return next;
+      }).finally(() => {
+        setBulkProgress((current) => ({ ...current, completed: current.completed + 1 }));
       }));
       const successfulLines = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
       if (!successfulLines.length) throw new Error("No se pudo validar ninguna línea. Revisa la conexión y vuelve a intentarlo.");
@@ -2707,6 +2721,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
       setError(reason?.message || "No se pudieron validar todas las líneas.");
     } finally {
       setBulkValidating(false);
+      setBulkProgress({ completed: 0, total: 0 });
     }
   }
 
@@ -2924,7 +2939,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
         </div>
         </>
       )}
-       <footer className="collective-load-actions"><button type="button" className="button primary" disabled={loading || bulkValidating || savingId !== null || incidentSaving || !pendingValidationLines.length} onClick={() => void validateAllLines()}>{bulkValidating ? "Validando…" : "Validar todos"}</button><button type="button" className="button secondary collective-load-print" onClick={() => window.print()}>Imprimir listado</button><button type="button" className="button primary collective-load-close-action" disabled={!readyToClose || closing || bulkValidating} onClick={() => void closeCollectiveLoad()}>{closing ? "Mandando a cargar…" : "Mandar a cargar"}</button>{!embedded && <button type="button" className="button secondary" disabled={closing || bulkValidating} onClick={onClose}>Cerrar</button>}</footer>
+       <footer className="collective-load-actions"><button type="button" className="button primary" disabled={loading || bulkValidating || savingId !== null || incidentSaving || !pendingValidationLines.length} onClick={() => void validateAllLines()}>{bulkValidating ? `Validando… ${bulkProgress.completed}/${bulkProgress.total}` : "Validar todos"}</button><button type="button" className="button secondary collective-load-print" onClick={() => window.print()}>Imprimir listado</button><button type="button" className="button primary collective-load-close-action" disabled={!readyToClose || closing || bulkValidating} onClick={() => void closeCollectiveLoad()}>{closing ? "Mandando a cargar…" : "Mandar a cargar"}</button>{!embedded && <button type="button" className="button secondary" disabled={closing || bulkValidating} onClick={onClose}>Cerrar</button>}</footer>
        {incidentLineId !== null && (() => { const incidentLine = sourceLines.find((line) => Number(line.id) === incidentLineId); if (!incidentLine) return null; const product = getProduct(incidentLine); const requested = requestedQuantity(incidentLine); const quantity = Math.max(0, Number(drafts[String(incidentLine.id)] ?? defaultDraftQuantity(incidentLine)) || 0); const missing = Math.max(0, requested - quantity); const order = items.find((item) => Number(item.order_id || item._source_order_id) === Number(incidentLine.order_id)); return <div className="collective-load-incident-overlay" role="dialog" aria-modal="true" aria-label="Registrar incidencia" onMouseDown={(event) => event.target === event.currentTarget && !incidentSaving && setIncidentLineId(null)}><section className="collective-load-incident-modal" onClick={(event) => event.stopPropagation()}><header><div><p className="eyebrow">PREPARACIÓN · INCIDENCIA</p><h3>Registrar incidencia</h3><small>{order?.code || `Pedido #${incidentLine.order_id}`} · {product?.name || `Producto #${incidentLine.product_id}`}</small></div><button type="button" className="preview-close" aria-label="Cerrar" disabled={incidentSaving} onClick={() => setIncidentLineId(null)}>×</button></header><div className="collective-load-incident-summary"><b>Preparadas: {quantity} de {requested}</b><span>Faltan {missing} {quantityUnitLabel(incidentLine.quantity_unit || product?.unit)}</span></div><label className="collective-load-incident-text">Qué ha ocurrido<textarea value={incidentText} onChange={(event) => setIncidentText(event.target.value)} placeholder={`Ej.: solo hay ${quantity} unidades disponibles.`} rows={4} autoFocus /></label><p className="collective-load-incident-help">La incidencia quedará vinculada al pedido y la línea seguirá marcada en rojo hasta resolverla.</p>{error && <p className="collective-load-feedback error-message" role="alert">{error}</p>}<footer><button type="button" className="button secondary" disabled={incidentSaving} onClick={() => setIncidentLineId(null)}>Cancelar</button><button type="button" className="button danger" disabled={incidentSaving} onClick={() => void registerLineIncident(incidentLine)}>{incidentSaving ? "Registrando…" : "Confirmar incidencia"}</button></footer></section></div>; })()}
     </section>
   </div>;
