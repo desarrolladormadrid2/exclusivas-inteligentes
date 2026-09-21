@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.171";
+const APP_VERSION = "2.0.172";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 
@@ -1498,10 +1498,10 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
   const dayShipments = shipments
     .filter((item) => String(item.shipping_date || item.expected_delivery_at || item.delivery_date || item.preparation_date || "").slice(0, 10) === routeDate)
     .sort((a, b) => {
-      const closingOrder = receptionMinutes(b.closing_time) - receptionMinutes(a.closing_time);
+      const distanceOrder = Number(b.distance_km ?? Number.NEGATIVE_INFINITY) - Number(a.distance_km ?? Number.NEGATIVE_INFINITY);
       const openingOrder = receptionMinutes(b.opening_time) - receptionMinutes(a.opening_time);
-      const distanceOrder = Number(a.distance_km ?? Number.POSITIVE_INFINITY) - Number(b.distance_km ?? Number.POSITIVE_INFINITY);
-      return closingOrder || openingOrder || distanceOrder || String(a.address || "").localeCompare(String(b.address || ""), "es", { numeric: true });
+      const closingOrder = receptionMinutes(b.closing_time) - receptionMinutes(a.closing_time);
+      return distanceOrder || openingOrder || closingOrder || String(a.address || "").localeCompare(String(b.address || ""), "es", { numeric: true });
     })
     .map((item, index) => ({ ...item, load_position: index + 1 }));
   const assignedIds = new Set(Object.values(boardAssignments).flat().map(Number));
@@ -1619,7 +1619,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
   return <section className="vehicle-load-manager">
     <div className="vehicle-load-toolbar">
       <label>Fecha de carga<input type="date" value={routeDate} onChange={(event) => setRouteDate(event.target.value)} /></label>
-      <span className="vehicle-load-toolbar-summary"><b>{dayShipments.length} pedidos del día</b><small>{dayShipments.filter((item: any) => ["Preparado", "Preparado con incidencia"].includes(String(item.status || ""))).length} listos para cargar · horario primero, distancia después</small></span>
+      <span className="vehicle-load-toolbar-summary"><b>{dayShipments.length} pedidos del día</b><small>{dayShipments.filter((item: any) => ["Preparado", "Preparado con incidencia"].includes(String(item.status || ""))).length} listos para cargar · distancia primero, apertura de entrega después</small></span>
       <button type="button" className="button secondary" onClick={() => void load()}>Actualizar</button>
       <button type="button" className="button primary" disabled={saving || !assignedIds.size} onClick={() => void saveVehicleBoard()}>{saving ? "Guardando…" : "Guardar cargas"}</button>
     </div>
@@ -1636,7 +1636,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       })}
     </section>
     <section className="vehicle-load-unassigned panel">
-      <div className="panel-head"><div><h3>Pedidos del día</h3><p className="muted">Aquí aparecen todos. Arrástralos al camión, revisa el pedido y guarda la carga.</p></div><strong>{unassigned.length} sin asignar</strong></div>
+      <div className="panel-head"><div><h3>Pedidos del día</h3><p className="muted">Ordenados del más lejano al más cercano. Se muestra la ventana de recepción; arrastra los no asignados a un camión.</p></div><strong>{unassigned.length} sin asignar</strong></div>
       <div className="vehicle-load-dropzone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveShipment(Number(event.dataTransfer.getData("text/plain")) || draggedShipmentId || 0, "unassigned"); }}>
         {loading ? <div className="data-loading" role="status"><LoadingIndicator label="Cargando pedidos preparados…" /></div> : unassigned.length ? unassigned.map((item: any) => renderBoardCard(item, "unassigned")) : <p className="empty-state">Todos los pedidos están asignados a un camión.</p>}
       </div>

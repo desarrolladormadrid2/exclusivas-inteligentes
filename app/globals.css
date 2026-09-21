@@ -6051,6 +6051,7 @@ body:has(.warehouse-tablet-app) .settings-panel {
 .vehicle-load-order-button:disabled{color:#b9c3c7;background:#f7f9fa;cursor:default}
 .vehicle-load-print{width:145px;min-height:28px;margin:0;padding:5px 8px;border:1px solid #bd2027;background:#bd2027;color:#fff;font:inherit;font-size:10px;font-weight:700;cursor:pointer}
 .vehicle-load-print:hover{background:#a61920}
+.vehicle-load-unassigned .vehicle-load-dropzone{grid-template-columns:minmax(0,1fr)}
 @media(max-width:700px){.vehicle-load-toolbar{grid-template-columns:minmax(150px,1fr) auto auto}.vehicle-load-toolbar-summary{grid-column:1/-1;grid-row:2}.vehicle-load-board{grid-template-columns:1fr}.vehicle-load-column-head{align-items:stretch;flex-direction:column}.vehicle-load-column-head label{width:100%}.vehicle-load-dropzone{grid-template-columns:1fr;max-height:300px}.vehicle-load-board-card{grid-template-columns:minmax(0,1fr) 128px}.vehicle-load-confirm{width:128px}}
 
 /* Preparación del CRM: tablero sencillo por estado, separado de la hoja del almacén. */
