@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.177";
+const APP_VERSION = "2.0.178";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 
@@ -214,6 +214,7 @@ async function fetchCompactLookup(resource: string, actor: string, force = false
 function clearLookupMemoryCache() {
   lookupMemoryCache.clear();
 }
+const vehicleLoadMemoryCache = new Map<string, any>();
 function allowedModulesFor(user: any) {
   if (user?.role === "admin") return initialModules;
   if (user?.role === "repartidor") return [];
@@ -1403,7 +1404,20 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
   const [printShipmentId, setPrintShipmentId] = useState<number | null>(null);
   const [origin, setOrigin] = useState({ latitude: 40.4168, longitude: -3.7038, label: "Madrid (estimación)" });
 
-  async function load() {
+  async function load(force = false) {
+    const cached = vehicleLoadMemoryCache.get(routeDate);
+    if (cached && !force) {
+      setShipments(cached.shipments || []);
+      setOrders(cached.orders || []);
+      setInvoices(cached.invoices || []);
+      setProducts(cached.products || []);
+      setRoutes(cached.routes || []);
+      setVehicles(cached.vehicles || []);
+      setOrigin(cached.origin || { latitude: 40.4168, longitude: -3.7038, label: "Madrid (estimación)" });
+      setError("");
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -1446,6 +1460,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
         setProducts([]);
         setShipments([]);
         setBoardAssignments({});
+        vehicleLoadMemoryCache.set(routeDate, { shipments: [], orders: [], invoices: [], products: [], routes: Array.isArray(routeRows) ? routeRows : [], vehicles: Array.isArray(vehicleRows) ? vehicleRows : [], origin: nextOrigin });
         return;
       }
       const shipmentList = shipmentRows as any[];
@@ -1503,6 +1518,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
           };
         });
       setShipments(prepared);
+      vehicleLoadMemoryCache.set(routeDate, { shipments: prepared, orders: Array.isArray(orderRows) ? orderRows : [], invoices: Array.isArray(invoiceRows) ? invoiceRows : [], products: Array.isArray(products) ? products : [], routes: Array.isArray(routeRows) ? routeRows : [], vehicles: Array.isArray(vehicleRows) ? vehicleRows : [], origin: nextOrigin });
     } catch {
     setError("No se han podido cargar los pedidos del día.");
     } finally {
@@ -1618,7 +1634,10 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || "No se ha podido asignar la carga.");
-      setRoutes((current) => [...(body.routes || []), ...current.filter((route: any) => String(route.route_date || "").slice(0, 10) !== routeDate)]);
+      const nextRoutes = [...(body.routes || []), ...routes.filter((route: any) => String(route.route_date || "").slice(0, 10) !== routeDate)];
+      setRoutes(nextRoutes);
+      const cachedLoad = vehicleLoadMemoryCache.get(routeDate);
+      if (cachedLoad) vehicleLoadMemoryCache.set(routeDate, { ...cachedLoad, routes: nextRoutes });
       setMessage(`Carga guardada: ${columns.reduce((total, column) => total + column.shipment_ids.length, 0)} pedidos asignados.`);
     } catch (reason: any) {
       setError(reason?.message || "No se ha podido asignar la carga.");
@@ -1675,7 +1694,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
     <div className="vehicle-load-toolbar">
       <label>Fecha de carga<input type="date" value={routeDate} onChange={(event) => setRouteDate(event.target.value)} /></label>
       <span className="vehicle-load-toolbar-summary"><b>{dayShipments.length} pedidos del día</b><small>{dayShipments.filter((item: any) => ["Preparado", "Preparado con incidencia"].includes(String(item.status || ""))).length} listos para cargar · distancia primero, apertura de entrega después</small></span>
-      <button type="button" className="button secondary" onClick={() => void load()}>Actualizar</button>
+      <button type="button" className="button secondary" onClick={() => void load(true)} disabled={loading}>{loading ? "Actualizando…" : "Actualizar"}</button>
       <button type="button" className="button primary" disabled={saving || !assignedIds.size} onClick={() => void saveVehicleBoard()}>{saving ? "Guardando…" : "Guardar cargas"}</button>
     </div>
     <VehicleLoadPlanningMap locations={dayShipments} origin={origin} />
