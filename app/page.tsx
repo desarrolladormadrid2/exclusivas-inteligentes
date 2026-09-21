@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.174";
+const APP_VERSION = "2.0.175";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 
@@ -1212,8 +1212,30 @@ function IntegratedMap({ locations, radiusMeters = 150 }: { locations: any[]; ra
   </div>;
 }
 
+function isPlausibleRouteCoordinate(latitudeValue: any, longitudeValue: any, origin?: { latitude: number; longitude: number }) {
+  const latitude = Number(latitudeValue);
+  const longitude = Number(longitudeValue);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude === 0 || longitude === 0 || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return false;
+  // Las rutas actuales son nacionales. Evita que una coordenada demo o una
+  // latitud/longitud intercambiadas desplacen el mapa a otro continente.
+  const inSpain = latitude >= 35 && latitude <= 44.5 && longitude >= -10.5 && longitude <= 4.5;
+  if (!inSpain) return false;
+  if (origin && haversineKm(origin.latitude, origin.longitude, latitude, longitude) > 900) return false;
+  return true;
+}
+
+function cityFallbackCoordinates(cityValue: any) {
+  const city = String(cityValue || "").toLowerCase();
+  if (city.includes("palencia")) return { latitude: 42.0095, longitude: -4.5288 };
+  if (city.includes("madrid")) return { latitude: 40.4168, longitude: -3.7038 };
+  if (city.includes("getafe")) return { latitude: 40.3083, longitude: -3.7327 };
+  if (city.includes("alcobendas")) return { latitude: 40.546, longitude: -3.642 };
+  if (city.includes("frómista") || city.includes("fromista")) return { latitude: 42.2662, longitude: -4.4075 };
+  return null;
+}
+
 function VehicleLoadPlanningMap({ locations, origin }: { locations: any[]; origin: { latitude: number; longitude: number; label: string } }) {
-  const valid = locations.filter((location) => Number.isFinite(Number(location.latitude)) && Number.isFinite(Number(location.longitude)));
+  const valid = locations.filter((location) => isPlausibleRouteCoordinate(location.latitude, location.longitude, origin));
   if (!locations.length) return null;
   if (!valid.length) return <section className="vehicle-load-planning-map panel"><header className="vehicle-load-planning-head"><div><h3>Mapa de pedidos</h3><p className="muted">Geolocaliza las direcciones para dibujar la ruta.</p></div><strong>0/{locations.length} ubicados</strong></header><div className="vehicle-load-planning-empty">No hay pedidos geolocalizados para este día.</div></section>;
   const points = [{ latitude: origin.latitude, longitude: origin.longitude, name: origin.label, isOrigin: true }, ...valid];
@@ -1390,12 +1412,18 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       const routeRows = routesResponse.ok ? await routesResponse.json() : [];
       const vehicleRows = vehiclesResponse.ok ? await vehiclesResponse.json() : [];
       setVehicles(Array.isArray(vehicleRows) ? vehicleRows : []);
-      const warehouse = (Array.isArray(warehouses) ? warehouses : []).find((item: any) => Number.isFinite(Number(item.latitude)) && Number.isFinite(Number(item.longitude)) && Number(item.latitude) !== 0 && Number(item.longitude) !== 0)
-        || (Array.isArray(warehouses) ? warehouses : []).find((item: any) => /principal/i.test(String(item.name || "")))
-        || (Array.isArray(warehouses) ? warehouses : [])[0];
+      const warehouseRows = Array.isArray(warehouses) ? warehouses : [];
+      // La nave de Palencia debe ganar siempre a almacenes históricos de Madrid
+      // aunque estos últimos tengan coordenadas antiguas guardadas.
+      const warehouse = warehouseRows.find((item: any) => /palencia|inglaterra|34004/i.test(`${item.name || ""} ${item.address || ""}`))
+        || warehouseRows.find((item: any) => /principal/i.test(String(item.name || "")))
+        || warehouseRows.find((item: any) => isPlausibleRouteCoordinate(item.latitude, item.longitude))
+        || warehouseRows[0];
       const warehouseLatitude = Number(warehouse?.latitude);
       const warehouseLongitude = Number(warehouse?.longitude);
-      const warehouseHasCoordinates = Number.isFinite(warehouseLatitude) && Number.isFinite(warehouseLongitude) && warehouseLatitude !== 0 && warehouseLongitude !== 0;
+      const warehouseAddress = String(warehouse?.address || warehouse?.name || "");
+      const warehouseHasCoordinates = isPlausibleRouteCoordinate(warehouseLatitude, warehouseLongitude)
+        && (!/palencia|inglaterra|34004/i.test(warehouseAddress) || haversineKm(42.0095, -4.5288, warehouseLatitude, warehouseLongitude) <= 120);
       const warehouseLabel = [warehouse?.name || "Almacén", warehouse?.address || PRIMARY_WAREHOUSE_ADDRESS].filter(Boolean).join(" · ");
       const nextOrigin = warehouseHasCoordinates
         ? { latitude: warehouseLatitude, longitude: warehouseLongitude, label: warehouseLabel }
@@ -1439,9 +1467,12 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
         .map((item: any) => {
           const point = (Array.isArray(points) ? points : []).find((row: any) => Number(row.id) === Number(item.collection_point_id));
           const client = (Array.isArray(clients) ? clients : []).find((row: any) => Number(row.id) === Number(item.client_id));
-          const latitude = Number(item.latitude ?? point?.latitude ?? client?.latitude);
-          const longitude = Number(item.longitude ?? point?.longitude ?? client?.longitude);
-          const located = Number.isFinite(latitude) && Number.isFinite(longitude) && latitude !== 0 && longitude !== 0;
+          const rawLatitude = Number(item.latitude ?? point?.latitude ?? client?.latitude);
+          const rawLongitude = Number(item.longitude ?? point?.longitude ?? client?.longitude);
+          const exactCoordinates = isPlausibleRouteCoordinate(rawLatitude, rawLongitude, nextOrigin)
+            ? { latitude: rawLatitude, longitude: rawLongitude }
+            : cityFallbackCoordinates(item.delivery_city || point?.city || client?.city);
+          const located = Boolean(exactCoordinates && isPlausibleRouteCoordinate(exactCoordinates.latitude, exactCoordinates.longitude, nextOrigin));
           const loadLines = (Array.isArray(orderLines) ? orderLines : [])
             .filter((line: any) => Number(line.order_id) === Number(item.order_id))
             .map((line: any) => {
@@ -1458,9 +1489,10 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
             opening_time: item.delivery_window_start || item.opening_time || point?.opening_time || client?.opening_time || "",
             closing_time: item.delivery_window_end || item.closing_time || point?.closing_time || client?.closing_time || "",
             invoice_delivery_method: item.invoice_delivery_method || client?.invoice_delivery_method || "Pendiente de indicar",
-            latitude: located ? latitude : null,
-            longitude: located ? longitude : null,
-            distance_km: located ? Number(haversineKm(nextOrigin.latitude, nextOrigin.longitude, latitude, longitude).toFixed(1)) : null,
+            latitude: located ? exactCoordinates?.latitude : null,
+            longitude: located ? exactCoordinates?.longitude : null,
+            distance_km: located ? Number(haversineKm(nextOrigin.latitude, nextOrigin.longitude, exactCoordinates!.latitude, exactCoordinates!.longitude).toFixed(1)) : null,
+            coordinates_estimated: located && !isPlausibleRouteCoordinate(rawLatitude, rawLongitude, nextOrigin),
             load_lines: loadLines,
           };
         });
