@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.168";
+const APP_VERSION = "2.0.169";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 
@@ -2557,6 +2557,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
   const [editingLineIds, setEditingLineIds] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [bulkValidating, setBulkValidating] = useState(false);
   const [closing, setClosing] = useState(false);
   const [incidentLineId, setIncidentLineId] = useState<number | null>(null);
   const [incidentText, setIncidentText] = useState("");
@@ -2651,6 +2652,63 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
   }
 
   const readyToClose = sourceLines.length > 0 && sourceLines.every((line) => lineIsValidated(line) || String(line.preparation_status || "") === "Incidencia");
+  const pendingValidationLines = sourceLines.filter((line) => !lineIsValidated(line) && String(line.preparation_status || "") !== "Incidencia" && requestedQuantity(line) > 0);
+
+  async function validateAllLines() {
+    if (bulkValidating || savingId !== null || incidentSaving || !pendingValidationLines.length) return;
+    const incidentCount = sourceLines.filter((line) => String(line.preparation_status || "") === "Incidencia").length;
+    const incidentNote = incidentCount ? ` Se dejarán sin cambios ${incidentCount} líneas con incidencia.` : "";
+    const confirmed = window.confirm(`Vas a validar ${pendingValidationLines.length} líneas con la cantidad pedida.${incidentNote}\n\nEsta acción no exige escanear cada código de barras individualmente. ¿Quieres continuar?`);
+    if (!confirmed) return;
+    setBulkValidating(true);
+    setError("");
+    setMessage("");
+    try {
+      const now = new Date().toISOString();
+      const results = await Promise.allSettled(pendingValidationLines.map(async (line) => {
+        const requested = requestedQuantity(line);
+        const scannedCode = barcodeDraft(line);
+        const scannedStatus = barcodeCheck(line, scannedCode);
+        const next = {
+          ...line,
+          prepared_quantity: requested,
+          prepared: 1,
+          preparation_status: "Preparado",
+          barcode_scanned_code: scannedCode || null,
+          barcode_scan_status: scannedStatus,
+          barcode_scanned_at: scannedCode ? now : null,
+          barcode_scanned_by: scannedCode ? actor : null,
+        };
+        const response = await fetch(`/api/order_lines/${line.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", "X-Actor": actor },
+          body: JSON.stringify({ prepared: 1, prepared_quantity: requested, preparation_status: "Preparado", barcode_scanned_code: next.barcode_scanned_code, barcode_scan_status: next.barcode_scan_status, barcode_scanned_at: next.barcode_scanned_at, barcode_scanned_by: next.barcode_scanned_by }),
+        });
+        if (!response.ok) throw new Error(`No se pudo validar la línea ${line.id}.`);
+        return next;
+      }));
+      const successfulLines = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+      if (!successfulLines.length) throw new Error("No se pudo validar ninguna línea. Revisa la conexión y vuelve a intentarlo.");
+      const successfulById = new Map(successfulLines.map((line) => [Number(line.id), line]));
+      const nextSourceLines = sourceLines.map((line) => successfulById.get(Number(line.id)) || line);
+      setSourceLines(nextSourceLines);
+      setDrafts(() => Object.fromEntries(nextSourceLines.map((line) => [String(line.id), String(defaultDraftQuantity(line))])));
+      setEditingLineIds({});
+      const orderIdsToUpdate = Array.from(new Set(successfulLines.map((line) => Number(line.order_id)).filter(Boolean)));
+      const shipmentResults = await Promise.allSettled(orderIdsToUpdate.map((orderId) => updateShipmentStatus(orderId, nextSourceLines.filter((line) => Number(line.order_id) === orderId))));
+      const failedShipments = shipmentResults.filter((result) => result.status === "rejected").length;
+      const failedLines = pendingValidationLines.length - successfulLines.length;
+      if (failedLines || failedShipments) {
+        setError(`Se validaron ${successfulLines.length} líneas, pero quedaron ${failedLines + failedShipments} actualizaciones pendientes.`);
+      } else {
+        setMessage(`${successfulLines.length} líneas validadas correctamente. Revisa las incidencias antes de mandar a cargar.`);
+      }
+    } catch (reason: any) {
+      setError(reason?.message || "No se pudieron validar todas las líneas.");
+    } finally {
+      setBulkValidating(false);
+    }
+  }
 
   async function closeCollectiveLoad() {
     if (!readyToClose || closing) return;
@@ -2866,7 +2924,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
         </div>
         </>
       )}
-       <footer className="collective-load-actions"><button type="button" className="button secondary collective-load-print" onClick={() => window.print()}>Imprimir listado</button><button type="button" className="button primary collective-load-close-action" disabled={!readyToClose || closing} onClick={() => void closeCollectiveLoad()}>{closing ? "Mandando a cargar…" : "Mandar a cargar"}</button>{!embedded && <button type="button" className="button secondary" disabled={closing} onClick={onClose}>Cerrar</button>}</footer>
+       <footer className="collective-load-actions"><button type="button" className="button primary" disabled={loading || bulkValidating || savingId !== null || incidentSaving || !pendingValidationLines.length} onClick={() => void validateAllLines()}>{bulkValidating ? "Validando…" : "Validar todos"}</button><button type="button" className="button secondary collective-load-print" onClick={() => window.print()}>Imprimir listado</button><button type="button" className="button primary collective-load-close-action" disabled={!readyToClose || closing || bulkValidating} onClick={() => void closeCollectiveLoad()}>{closing ? "Mandando a cargar…" : "Mandar a cargar"}</button>{!embedded && <button type="button" className="button secondary" disabled={closing || bulkValidating} onClick={onClose}>Cerrar</button>}</footer>
        {incidentLineId !== null && (() => { const incidentLine = sourceLines.find((line) => Number(line.id) === incidentLineId); if (!incidentLine) return null; const product = getProduct(incidentLine); const requested = requestedQuantity(incidentLine); const quantity = Math.max(0, Number(drafts[String(incidentLine.id)] ?? defaultDraftQuantity(incidentLine)) || 0); const missing = Math.max(0, requested - quantity); const order = items.find((item) => Number(item.order_id || item._source_order_id) === Number(incidentLine.order_id)); return <div className="collective-load-incident-overlay" role="dialog" aria-modal="true" aria-label="Registrar incidencia" onMouseDown={(event) => event.target === event.currentTarget && !incidentSaving && setIncidentLineId(null)}><section className="collective-load-incident-modal" onClick={(event) => event.stopPropagation()}><header><div><p className="eyebrow">PREPARACIÓN · INCIDENCIA</p><h3>Registrar incidencia</h3><small>{order?.code || `Pedido #${incidentLine.order_id}`} · {product?.name || `Producto #${incidentLine.product_id}`}</small></div><button type="button" className="preview-close" aria-label="Cerrar" disabled={incidentSaving} onClick={() => setIncidentLineId(null)}>×</button></header><div className="collective-load-incident-summary"><b>Preparadas: {quantity} de {requested}</b><span>Faltan {missing} {quantityUnitLabel(incidentLine.quantity_unit || product?.unit)}</span></div><label className="collective-load-incident-text">Qué ha ocurrido<textarea value={incidentText} onChange={(event) => setIncidentText(event.target.value)} placeholder={`Ej.: solo hay ${quantity} unidades disponibles.`} rows={4} autoFocus /></label><p className="collective-load-incident-help">La incidencia quedará vinculada al pedido y la línea seguirá marcada en rojo hasta resolverla.</p>{error && <p className="collective-load-feedback error-message" role="alert">{error}</p>}<footer><button type="button" className="button secondary" disabled={incidentSaving} onClick={() => setIncidentLineId(null)}>Cancelar</button><button type="button" className="button danger" disabled={incidentSaving} onClick={() => void registerLineIncident(incidentLine)}>{incidentSaving ? "Registrando…" : "Confirmar incidencia"}</button></footer></section></div>; })()}
     </section>
   </div>;
