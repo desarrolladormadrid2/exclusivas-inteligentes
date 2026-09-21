@@ -3185,7 +3185,7 @@ export async function crmApiHandler(req, res) {
               shipmentNow.toISOString(),
               expected,
               client.address || "",
-              "Almacén Centro · Calle Logística 10, Madrid",
+              "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia",
               Math.max(1, Math.ceil(Number(d.quantity) / 20)),
               `Hoja de carga creada automáticamente para la salida. Producto: ${product?.name || "Producto"}.`,
               actor,

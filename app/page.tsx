@@ -6,8 +6,9 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.162";
+const APP_VERSION = "2.0.163";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
+const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 
 const WEEKDAY_OPTIONS = [
   { value: "1", label: "Lunes" },
@@ -1393,11 +1394,14 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       const warehouseLatitude = Number(warehouse?.latitude);
       const warehouseLongitude = Number(warehouse?.longitude);
       const warehouseHasCoordinates = Number.isFinite(warehouseLatitude) && Number.isFinite(warehouseLongitude) && warehouseLatitude !== 0 && warehouseLongitude !== 0;
+      const warehouseLabel = [warehouse?.name || "Almacén", warehouse?.address || PRIMARY_WAREHOUSE_ADDRESS].filter(Boolean).join(" · ");
       const nextOrigin = warehouseHasCoordinates
-        ? { latitude: warehouseLatitude, longitude: warehouseLongitude, label: warehouse.name || "Almacén" }
-        : /getafe/i.test(String(warehouse?.address || warehouse?.name || ""))
-          ? { latitude: 40.3083, longitude: -3.7327, label: "Getafe (estimación)" }
-          : { latitude: 40.4168, longitude: -3.7038, label: "Madrid (estimación)" };
+        ? { latitude: warehouseLatitude, longitude: warehouseLongitude, label: warehouseLabel }
+        : /palencia/i.test(String(warehouse?.address || warehouse?.name || ""))
+          ? { latitude: 42.0095, longitude: -4.5288, label: `${warehouseLabel} (estimación)` }
+          : /getafe/i.test(String(warehouse?.address || warehouse?.name || ""))
+            ? { latitude: 40.3083, longitude: -3.7327, label: `${warehouseLabel} (estimación)` }
+            : { latitude: 40.4168, longitude: -3.7038, label: `${warehouseLabel} (estimación)` };
       const prepared = (Array.isArray(shipmentRows) ? shipmentRows : [])
         .filter((item: any) => !["Cancelado", "Anulado"].includes(String(item.status || "")))
         .map((item: any) => {
@@ -5770,7 +5774,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     // Mientras el almacén no tenga coordenadas propias, usamos el centro de
     // su municipio para mostrar una estimación útil inmediatamente y dejamos
     // que la geocodificación la refine si el callejero reconoce la dirección.
-    const fallbackCoordinates = /getafe/i.test(previewWarehouseAddress) ? { latitude: 40.3083, longitude: -3.7327 } : { latitude: 40.4168, longitude: -3.7038 };
+    const fallbackCoordinates = /palencia/i.test(previewWarehouseAddress) ? { latitude: 42.0095, longitude: -4.5288 } : /getafe/i.test(previewWarehouseAddress) ? { latitude: 40.3083, longitude: -3.7327 } : { latitude: 40.4168, longitude: -3.7038 };
     setPreviewWarehouseCoordinates(fallbackCoordinates);
     setPreviewWarehouseDistanceKm(Number(haversineKm(fallbackCoordinates.latitude, fallbackCoordinates.longitude, previewLat, previewLon).toFixed(1)));
     void geocodeAddress(String(previewWarehouse?.address || previewWarehouse?.name || ""), "Madrid").then(async (geo) => {
@@ -10043,7 +10047,7 @@ function TabletOrderDemo({
         status: "Preparando",
         prepared_at: new Date().toISOString(),
         expected_delivery_at: `${deliveryDate}T12:00:00.000Z`,
-        origin_address: "Almacén Centro · Calle Logística 10, Madrid",
+        origin_address: PRIMARY_WAREHOUSE_ADDRESS,
         address: point?.address || deliveryAddress || client?.address || "Dirección del cliente",
         collection_point_id: pointId ? Number(pointId) : null,
         prepared_by: responsible,
