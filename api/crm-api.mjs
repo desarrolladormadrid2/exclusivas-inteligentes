@@ -1042,9 +1042,10 @@ async function createRouteAlternatives(stops, originLat, originLon) {
       columns.push({ shipment_ids: ordered.map((stop) => Number(stop.shipment_id)).filter(Boolean), stops: ordered, estimate });
     }
     const totalMinutes = Math.max(...columns.map((column) => Number(column.estimate.total_minutes || 0)), 0);
+    const combinedMinutes = columns.reduce((total, column) => total + Number(column.estimate.total_minutes || 0), 0);
     const totalDistance = columns.reduce((total, column) => total + Number(column.estimate.distance_km || 0), 0);
     const warnings = columns.flatMap((column) => column.estimate.time_window_warnings || []);
-    alternatives.push({ ...variant, total_minutes: totalMinutes, total_distance_km: Number(totalDistance.toFixed(1)), late_stops: warnings.length, columns });
+    alternatives.push({ ...variant, total_minutes: totalMinutes, combined_minutes: combinedMinutes, total_distance_km: Number(totalDistance.toFixed(1)), late_stops: warnings.length, columns });
   }
   return alternatives;
 }
