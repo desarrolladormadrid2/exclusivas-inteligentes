@@ -1011,8 +1011,8 @@ async function createRouteAlternatives(stops, originLat, originLon) {
   const variants = [
     { title: "Horario primero", description: "Prioriza las ventanas de recepción y reparte la carga de forma equilibrada.", strategy: "schedule", split: "balanced" },
     { title: "Ruta continua", description: "Mantiene una secuencia geográfica y divide los pedidos en dos bloques.", strategy: "schedule", split: "contiguous" },
-    { title: "Cierres más urgentes", description: "Atiende primero los clientes cuyo horario termina antes.", strategy: "closing", split: "balanced" },
-    { title: "Distancia alternativa", description: "Prueba una distribución distinta dando prioridad a los puntos más lejanos.", strategy: "farthest", split: "alternate" },
+    { title: "Cierres más urgentes", description: "Atiende primero los clientes cuyo horario termina antes.", strategy: "closing", split: "alternate" },
+    { title: "Distancia alternativa", description: "Prueba una distribución distinta dando prioridad a los puntos más cercanos para reducir saltos.", strategy: "nearest", split: "alternate" },
   ];
   const alternatives = [];
   for (const variant of variants) {
@@ -1036,7 +1036,7 @@ async function createRouteAlternatives(stops, originLat, originLon) {
     const columns = [];
     for (const shipmentIds of buckets) {
       const bucketStops = shipmentIds.map((id) => byId.get(id)).filter(Boolean).map((stop) => ({ ...stop }));
-      const ordered = bucketStops.length > 1 ? optimizeStops(bucketStops, originLat, originLon, durationMatrix) : bucketStops.map((stop, index) => ({ ...stop, position: index + 1 }));
+      const ordered = bucketStops.length > 1 ? optimizeStops(bucketStops, originLat, originLon, durationMatrix) : bucketStops.map((stop, index) => { const { _routeNode, ...cleanStop } = stop; return { ...cleanStop, position: index + 1 }; });
       const estimate = ordered.length ? await calculateRoadRouteEstimate({ latitude: originLat, longitude: originLon }, ordered) : { distance_km: 0, driving_minutes: 0, waiting_minutes: 0, service_minutes: 0, total_minutes: 0, time_window_warnings: [] };
       columns.push({ shipment_ids: ordered.map((stop) => Number(stop.shipment_id)).filter(Boolean), stops: ordered, estimate });
     }
