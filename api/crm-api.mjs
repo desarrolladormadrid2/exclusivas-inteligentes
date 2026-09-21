@@ -1011,12 +1011,13 @@ async function createRouteAlternatives(stops, originLat, originLon) {
   const variants = [
     { title: "Horario primero", description: "Prioriza las ventanas de recepción y reparte la carga de forma equilibrada.", strategy: "schedule", split: "balanced" },
     { title: "Ruta continua", description: "Mantiene una secuencia geográfica y divide los pedidos en dos bloques.", strategy: "schedule", split: "contiguous" },
-    { title: "Cierres más urgentes", description: "Atiende primero los clientes cuyo horario termina antes.", strategy: "closing", split: "alternate" },
-    { title: "Distancia alternativa", description: "Prueba una distribución distinta dando prioridad a los puntos más cercanos para reducir saltos.", strategy: "nearest", split: "alternate" },
+    { title: "Cierres más urgentes", description: "Atiende primero los clientes cuyo horario termina antes y los divide en dos bloques.", strategy: "closing", split: "contiguous" },
+    { title: "Distancia alternativa", description: "Prueba una distribución distinta dando prioridad a los puntos más cercanos para reducir saltos.", strategy: "nearest", split: "alternate", reverse: true },
   ];
   const alternatives = [];
   for (const variant of variants) {
     const seed = seedAlternativeOrder(preparedStops.map((stop) => ({ ...stop })), originLat, originLon, durationMatrix, variant.strategy);
+    if (variant.reverse) seed.reverse();
     const buckets = [[], []];
     if (variant.split === "contiguous") {
       const splitAt = Math.ceil(seed.length / 2);
