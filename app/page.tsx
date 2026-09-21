@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.179";
+const APP_VERSION = "2.0.180";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 
@@ -1405,6 +1405,8 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
   const [error, setError] = useState("");
   const [printShipmentId, setPrintShipmentId] = useState<number | null>(null);
   const [origin, setOrigin] = useState({ latitude: 40.4168, longitude: -3.7038, label: "Madrid (estimación)" });
+  const [roadEstimates, setRoadEstimates] = useState<Record<string, any>>({});
+  const [roadEstimateLoading, setRoadEstimateLoading] = useState(false);
 
   async function load(force = false) {
     const cached = vehicleLoadMemoryCache.get(routeDate);
@@ -1579,6 +1581,41 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
     .map((item, index) => ({ ...item, load_position: index + 1 }));
   const assignedIds = new Set(Object.values(boardAssignments).flat().map(Number));
   const unassigned = dayShipments.filter((item) => !assignedIds.has(Number(item.id)));
+  const vehicleColumnSignature = vehicleColumns.map((column: any) => String(column.id)).join(",");
+  const dayShipmentSignature = dayShipments.map((item: any) => `${item.id}:${item.latitude || ""}:${item.longitude || ""}`).join("|");
+  useEffect(() => {
+    const shipmentById = new Map(dayShipments.map((item: any) => [Number(item.id), item]));
+    const requests = vehicleColumns.map((column: any) => {
+      const key = String(column.id);
+      const stops = (boardAssignments[key] || []).map((id) => shipmentById.get(Number(id))).filter(Boolean);
+      return { key, stops };
+    }).filter((request) => request.stops.length);
+    if (!requests.length || !Number.isFinite(origin.latitude) || !Number.isFinite(origin.longitude)) {
+      setRoadEstimates({});
+      setRoadEstimateLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setRoadEstimateLoading(true);
+    Promise.all(requests.map(async ({ key, stops }) => {
+      try {
+        const response = await fetch("/api/routes/estimate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Usuario local" },
+          body: JSON.stringify({ origin_latitude: origin.latitude, origin_longitude: origin.longitude, stops: stops.map((stop: any) => ({ shipment_id: stop.id, latitude: stop.latitude, longitude: stop.longitude })) }),
+        });
+        const value = response.ok ? await response.json() : null;
+        return [key, value] as const;
+      } catch {
+        return [key, null] as const;
+      }
+    })).then((results) => {
+      if (cancelled) return;
+      setRoadEstimates(Object.fromEntries(results.filter(([, value]) => value)));
+      setRoadEstimateLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [boardAssignments, dayShipmentSignature, vehicleColumnSignature, origin.latitude, origin.longitude, user?.username]);
 
   function moveShipment(shipmentId: number, targetKey: string, beforeId?: number) {
     if (!shipmentId) return;
@@ -1726,9 +1763,12 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
         const key = String(column.id);
         const columnItems = (boardAssignments[key] || []).map((id) => shipmentById.get(Number(id))).filter(Boolean);
         const planStats = getVehiclePlanStats(columnItems);
-        const overDailyLimit = planStats.minutes > 600;
+        const roadStats = roadEstimates[key];
+        const displayedDistance = roadStats?.distance_km ?? planStats.distance;
+        const displayedMinutes = roadStats?.total_minutes ?? planStats.minutes;
+        const overDailyLimit = displayedMinutes > 600;
         return <section className="vehicle-load-column" key={key} onDragOver={(event) => allowShipmentDrop(event)} onDrop={(event) => { event.preventDefault(); moveShipment(readDraggedShipmentId(event), key); }}>
-          <header className="vehicle-load-column-head"><div><h3>{column.plate || column.name || `Camión ${key}`}</h3><span>{columnItems.length} pedidos</span><small className={overDailyLimit ? "is-over-limit" : ""}>{planStats.distance.toLocaleString("es-ES", { maximumFractionDigits: 1 })} km · {formatLoadDuration(planStats.minutes)}{overDailyLimit ? " · supera 10 h" : ""}</small></div><label>Conductor<input value={driverByVehicle[key] || column.driver || user?.username || ""} onChange={(event) => setDriverByVehicle((current) => ({ ...current, [key]: event.target.value }))} placeholder="Nombre" /></label></header>
+          <header className="vehicle-load-column-head"><div><h3>{column.plate || column.name || `Camión ${key}`}</h3><span>{columnItems.length} pedidos</span><small className={overDailyLimit ? "is-over-limit" : ""}>{roadStats ? `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km carretera · ${formatLoadDuration(displayedMinutes)}` : roadEstimateLoading ? "Calculando tiempo real de carretera…" : `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km aprox. · ${formatLoadDuration(displayedMinutes)}`}{overDailyLimit ? " · supera 10 h" : ""}</small></div><label>Conductor<input value={driverByVehicle[key] || column.driver || user?.username || ""} onChange={(event) => setDriverByVehicle((current) => ({ ...current, [key]: event.target.value }))} placeholder="Nombre" /></label></header>
           <div className="vehicle-load-column-list">{columnItems.length ? [renderDropSlot(key, `${key}-start`, Number(columnItems[0].id)), ...columnItems.flatMap((item: any, index: number) => [renderBoardCard(item, key, index, columnItems.length), renderDropSlot(key, `${key}-${item.id}-after`, Number(columnItems[index + 1]?.id) || undefined)])] : <p className="vehicle-load-column-empty">Suelta aquí los pedidos</p>}</div>
         </section>;
       })}

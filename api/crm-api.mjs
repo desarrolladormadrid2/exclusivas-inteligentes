@@ -938,6 +938,35 @@ function optimizeStops(stops, originLat, originLon) {
   }
   return ordered.map((stop, index) => ({ ...stop, position: index + 1 }));
 }
+const roadRouteEstimateCache = new Map();
+async function calculateRoadRouteEstimate(origin, stops) {
+  const points = [origin, ...stops].filter((point) => Number.isFinite(Number(point?.latitude)) && Number.isFinite(Number(point?.longitude)));
+  if (points.length < 2) return { provider: "OSRM", distance_km: 0, driving_minutes: 0, service_minutes: stops.length * 45, total_minutes: stops.length * 45, located_stops: Math.max(0, points.length - 1) };
+  const coordinates = points.map((point) => `${Number(point.longitude).toFixed(6)},${Number(point.latitude).toFixed(6)}`).join(";");
+  const cached = roadRouteEstimateCache.get(coordinates);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=false&steps=false`, { signal: controller.signal, headers: { Accept: "application/json" } });
+    if (!response.ok) throw new Error(`Servicio de rutas no disponible (${response.status})`);
+    const body = await response.json();
+    const route = body?.routes?.[0];
+    if (!route || body.code !== "Ok") throw new Error("No se ha encontrado una ruta por carretera");
+    const value = {
+      provider: "OSRM",
+      distance_km: Number((Number(route.distance || 0) / 1000).toFixed(1)),
+      driving_minutes: Math.max(0, Math.round(Number(route.duration || 0) / 60)),
+      service_minutes: stops.length * 45,
+      total_minutes: Math.max(0, Math.round(Number(route.duration || 0) / 60) + stops.length * 45),
+      located_stops: points.length - 1,
+    };
+    roadRouteEstimateCache.set(coordinates, { value, expiresAt: Date.now() + 300000 });
+    return value;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 if (!remoteMode) try {
   const automaticBackup = db.prepare("SELECT id FROM scheduled_tasks WHERE status='Activa' AND LOWER(title)=LOWER(?) LIMIT 1").get("Copia automática de Turso");
   if (!automaticBackup) {
@@ -1767,6 +1796,17 @@ export async function crmApiHandler(req, res) {
           const created = db.prepare("INSERT INTO vehicle_maintenance(vehicle_id,maintenance_date,maintenance_km,maintenance_type,amount,next_due_km,next_due_date,notes,status,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").run(vehicleId, date, km, String(body.maintenance_type || "Mantenimiento general").trim(), Math.max(0, Number(body.amount || 0)), nextKm, nextDate, String(body.notes || "").trim(), "Realizado", actor, now, now);
           db.prepare("UPDATE vehicles SET odometer_km=MAX(COALESCE(odometer_km,0),?),next_maintenance_km=?,next_maintenance_date=?,updated_at=? WHERE id=?").run(km, nextKm, nextDate, now, vehicleId);
           return send(res, 201, db.prepare("SELECT vm.*,v.name vehicle_name,v.plate vehicle_plate FROM vehicle_maintenance vm JOIN vehicles v ON v.id=vm.vehicle_id WHERE vm.id=?").get(Number(created.lastInsertRowid)));
+        }
+      }
+      if (p[1] === "routes" && req.method === "POST" && p[2] === "estimate") {
+        const body = await read(req);
+        const origin = { latitude: Number(body.origin_latitude), longitude: Number(body.origin_longitude) };
+        const stops = Array.isArray(body.stops) ? body.stops.slice(0, 50) : [];
+        if (!Number.isFinite(origin.latitude) || !Number.isFinite(origin.longitude)) return send(res, 400, { error: "La salida no está geolocalizada" });
+        try {
+          return send(res, 200, await calculateRoadRouteEstimate(origin, stops));
+        } catch (error) {
+          return send(res, 503, { error: error?.message || "No se ha podido calcular la ruta por carretera" });
         }
       }
       if (p[1] === "routes" && req.method === "GET") {
