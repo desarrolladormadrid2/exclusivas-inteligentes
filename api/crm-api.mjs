@@ -1012,7 +1012,7 @@ async function createRouteAlternatives(stops, originLat, originLon) {
     { title: "Horario primero", description: "Prioriza las ventanas de recepción y reparte la carga de forma equilibrada.", strategy: "schedule", split: "balanced" },
     { title: "Ruta continua", description: "Mantiene una secuencia geográfica y divide los pedidos en dos bloques.", strategy: "schedule", split: "contiguous" },
     { title: "Cierres más urgentes", description: "Atiende primero los clientes cuyo horario termina antes y los divide en dos bloques.", strategy: "closing", split: "contiguous" },
-    { title: "Distancia alternativa", description: "Prueba una distribución distinta dando prioridad a los puntos más cercanos para reducir saltos.", strategy: "nearest", split: "alternate", reverse: true },
+    { title: "Distancia alternativa", description: "Prueba una distribución distinta dando prioridad a los puntos más cercanos para reducir saltos.", strategy: "nearest", split: "alternate-middle", reverse: true },
   ];
   const alternatives = [];
   for (const variant of variants) {
@@ -1023,8 +1023,8 @@ async function createRouteAlternatives(stops, originLat, originLon) {
       const splitAt = Math.ceil(seed.length / 2);
       buckets[0] = seed.slice(0, splitAt).map((stop) => Number(stop.shipment_id));
       buckets[1] = seed.slice(splitAt).map((stop) => Number(stop.shipment_id));
-    } else if (variant.split === "alternate") {
-      seed.forEach((stop, index) => buckets[index % 2].push(Number(stop.shipment_id)));
+    } else if (variant.split === "alternate" || variant.split === "alternate-middle") {
+      seed.forEach((stop, index) => buckets[variant.split === "alternate-middle" ? (index + 1) % 2 : index % 2].push(Number(stop.shipment_id)));
     } else {
       const totals = [0, 0];
       seed.forEach((stop) => {

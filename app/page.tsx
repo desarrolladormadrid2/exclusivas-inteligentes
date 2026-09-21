@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.186";
+const APP_VERSION = "2.0.187";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
