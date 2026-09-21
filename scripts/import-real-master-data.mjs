@@ -14,6 +14,8 @@ if (!env.TURSO_DATABASE_URL || !env.TURSO_AUTH_TOKEN) throw new Error("Faltan la
 
 const source = JSON.parse(fs.readFileSync(inputPath, "utf8"));
 const sourceSystem = String(source.source_system || "BC_NAV_REAL");
+const sourceFiles = source.source_files || {};
+const clientSourceRows = new Map();
 const actor = "Importación datos reales · BC NAV";
 const now = new Date().toISOString();
 const client = createClient({ url: env.TURSO_DATABASE_URL, authToken: env.TURSO_AUTH_TOKEN });
@@ -33,6 +35,16 @@ function hash(payload) {
 }
 
 function sqlStatement(sql, args) {
+  if (sql.includes("INSERT INTO clients") && Array.isArray(args)) {
+    const nextArgs = [...args];
+    const sourceRow = clientSourceRows.get(String(nextArgs[10] || ""));
+    if (sourceRow) {
+      nextArgs[3] = sourceRow.address || "";
+      nextArgs[6] = sourceRow.city || "";
+      sql = sql.replace("name=excluded.name,phone=excluded.phone,", "name=excluded.name,phone=excluded.phone,address=excluded.address,city=excluded.city,");
+    }
+    return { sql, args: nextArgs };
+  }
   return { sql, args };
 }
 
@@ -75,7 +87,7 @@ async function saveImportRecords(batchInfo, entity, sourceFile, records) {
 
 async function supplierImport() {
   const rows = Array.isArray(source.suppliers) ? source.suppliers : [];
-  const sourceFile = "Proveedores.xlsx";
+  const sourceFile = String(sourceFiles.suppliers || "Proveedores.xlsx");
   const info = await createBatch("suppliers", sourceFile, rows.length, "Altas y actualización por código externo; se conservan duplicados de CIF.");
   const before = await existingMap("suppliers");
   const statements = rows.map((row) => sqlStatement(
@@ -95,9 +107,11 @@ async function supplierImport() {
 
 async function clientImport() {
   const rows = Array.isArray(source.clients) ? source.clients : [];
-  const sourceFile = "Clientes.xlsx";
+  const sourceFile = String(sourceFiles.clients || "Clientes.xlsx");
   const info = await createBatch("clients", sourceFile, rows.length, "Altas y bajas conservadas por código externo; se mantienen establecimientos con CIF compartido.");
   const before = await existingMap("clients");
+  clientSourceRows.clear();
+  rows.forEach((row) => clientSourceRows.set(String(row.source_code || ""), row));
   const statements = rows.map((row) => sqlStatement(
     `INSERT INTO clients(name,phone,email,address,tax_id,contact,city,payment_terms,credit_limit,active,external_code,source_system,payment_method_code,payment_terms_code,source_warehouse_code,source_created_at,source_closed_at,source_balance,source_overdue_balance,source_sales,source_payments,created_at,updated_at)
      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -117,7 +131,7 @@ async function productImport(supplierIds) {
   const rows = Array.isArray(source.products) ? source.products : [];
   const validRows = rows.filter((row) => row.valid && row.name);
   const skippedRows = rows.filter((row) => !row.valid || !row.name);
-  const sourceFile = "Productos (3).xlsx";
+  const sourceFile = String(sourceFiles.products || "Productos.xlsx");
   const info = await createBatch("products", sourceFile, rows.length, "Productos activos y dados de baja; el inventario se registra como carga inicial trazable.");
   const before = await existingMap("products");
   const warehouse = await execute("SELECT id FROM warehouses ORDER BY id LIMIT 1");

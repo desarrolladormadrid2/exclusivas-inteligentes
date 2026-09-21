@@ -113,6 +113,8 @@ def prepare(args: argparse.Namespace) -> dict:
             "source_code": code,
             "name": trade_name,
             "contact": person,
+            "address": text(value(row, "Dirección", "Direccion", "Domicilio")),
+            "city": text(value(row, "Población", "Poblacion", "Ciudad")),
             "tax_id": text(value(row, "CIF/NIF", "CIF")),
             "phone": text(value(row, "Nº teléfono", "Telefono")),
             "warehouse_code": text(value(row, "Cód. almacén", "Almacen")),
@@ -161,6 +163,11 @@ def prepare(args: argparse.Namespace) -> dict:
 
     return {
         "source_system": "BC_NAV_REAL",
+        "source_files": {
+            "clients": args.clients.name,
+            "products": args.products.name,
+            "suppliers": args.suppliers.name,
+        },
         "suppliers": suppliers,
         "clients": clients,
         "products": products,
