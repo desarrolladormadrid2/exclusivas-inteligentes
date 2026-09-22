@@ -452,6 +452,7 @@ db.exec(`CREATE TABLE IF NOT EXISTS audit_logs(id INTEGER PRIMARY KEY AUTOINCREM
 db.exec(`CREATE TABLE IF NOT EXISTS scheduled_tasks(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,action_text TEXT NOT NULL,schedule_type TEXT DEFAULT 'Unica',recurrence TEXT,next_run TEXT,status TEXT DEFAULT 'Activa',last_run TEXT,last_result TEXT,created_by TEXT DEFAULT 'Usuario local',created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS backup_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,created_at TEXT NOT NULL,created_by TEXT,source TEXT DEFAULT 'Turso',tables_json TEXT NOT NULL,data_base64 TEXT NOT NULL,checksum TEXT NOT NULL,status TEXT DEFAULT 'Disponible',restored_at TEXT,restored_by TEXT,size_bytes INTEGER DEFAULT 0);`);
 db.exec(`CREATE TABLE IF NOT EXISTS delivery_routes(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,route_date TEXT NOT NULL,driver TEXT,vehicle TEXT,status TEXT DEFAULT 'Planificada',radius_meters REAL DEFAULT 150,origin_address TEXT,origin_latitude REAL,origin_longitude REAL,notes TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
+db.exec(`CREATE TABLE IF NOT EXISTS delivery_route_positions(id INTEGER PRIMARY KEY AUTOINCREMENT,route_id INTEGER NOT NULL,latitude REAL NOT NULL,longitude REAL NOT NULL,accuracy_m REAL,speed_mps REAL,heading REAL,recorded_at TEXT NOT NULL,created_by TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS vehicles(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,name TEXT NOT NULL,plate TEXT UNIQUE,brand TEXT,model TEXT,active INTEGER DEFAULT 1,odometer_km REAL DEFAULT 0,maintenance_interval_km REAL DEFAULT 30000,maintenance_interval_days INTEGER DEFAULT 180,next_maintenance_km REAL,next_maintenance_date TEXT,notes TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS vehicle_trips(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,vehicle_id INTEGER NOT NULL,route_id INTEGER,route_date TEXT NOT NULL,route_code TEXT,driver TEXT,planned_distance_km REAL DEFAULT 0,start_km REAL,end_km REAL,distance_km REAL,status TEXT DEFAULT 'Planificada',notes TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS vehicle_refuels(id INTEGER PRIMARY KEY AUTOINCREMENT,vehicle_id INTEGER NOT NULL,trip_id INTEGER,fuel_date TEXT NOT NULL,station TEXT,liters REAL DEFAULT 0,amount REAL DEFAULT 0,ticket_reference TEXT,odometer_km REAL,notes TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
@@ -833,6 +834,7 @@ const tables = new Set([
   "import_records",
   "delivery_routes",
   "delivery_route_stops",
+  "delivery_route_positions",
   "vehicles",
   "vehicle_trips",
   "vehicle_refuels",
@@ -1998,6 +2000,23 @@ export async function crmApiHandler(req, res) {
         } catch (error) {
           return send(res, 503, { error: error?.message || "No se ha podido calcular la ruta por carretera" });
         }
+      }
+      if (p[1] === "routes" && p[2] && p[3] === "position" && req.method === "GET") {
+        const route = db.prepare("SELECT id FROM delivery_routes WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(p[2]));
+        if (!route) return send(res, 404, { error: "Ruta no encontrada" });
+        const position = db.prepare("SELECT * FROM delivery_route_positions WHERE route_id=? ORDER BY id DESC LIMIT 1").get(Number(p[2]));
+        return send(res, 200, position || null);
+      }
+      if (p[1] === "routes" && p[2] && p[3] === "position" && req.method === "POST") {
+        const routeId = Number(p[2]);
+        const route = db.prepare("SELECT id FROM delivery_routes WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(routeId);
+        if (!route) return send(res, 404, { error: "Ruta no encontrada" });
+        const body = await read(req);
+        const latitude = Number(body.latitude), longitude = Number(body.longitude);
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return send(res, 400, { error: "La posición GPS no es válida" });
+        const recordedAt = String(body.recorded_at || new Date().toISOString());
+        const result = db.prepare("INSERT INTO delivery_route_positions(route_id,latitude,longitude,accuracy_m,speed_mps,heading,recorded_at,created_by) VALUES(?,?,?,?,?,?,?,?)").run(routeId, latitude, longitude, Number.isFinite(Number(body.accuracy_m)) ? Number(body.accuracy_m) : null, Number.isFinite(Number(body.speed_mps)) ? Number(body.speed_mps) : null, Number.isFinite(Number(body.heading)) ? Number(body.heading) : null, recordedAt, actor);
+        return send(res, 200, db.prepare("SELECT * FROM delivery_route_positions WHERE id=?").get(Number(result.lastInsertRowid)));
       }
       if (p[1] === "routes" && req.method === "GET") {
         if (p[2]) return send(res, 200, getRouteWithStops(p[2]) || { error: "Ruta no encontrada" });

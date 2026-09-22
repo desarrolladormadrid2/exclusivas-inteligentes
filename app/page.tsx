@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.188";
+const APP_VERSION = "2.0.189";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
@@ -3485,6 +3485,214 @@ export function DeliverySignaturePanel({ shipment, actor, client, lines = [], pr
     <div className="delivery-signature-actions">{signatureStatus === "Firmado" ? <><button type="button" className="button primary" onClick={() => setSignedCopyOpen(true)}>Ver copia firmada</button><button type="button" className="button secondary" onClick={() => window.print()}>Imprimir copia</button></> : <><button type="button" className="button primary" disabled={saving} onClick={() => void confirmDelivery("Firmado")}>{saving ? "Guardando…" : "Confirmar entrega firmada"}</button><button type="button" className="button secondary" disabled={saving} onClick={() => void confirmDelivery("Sin firma")}>Entregar sin firma</button><button type="button" className="button ghost" disabled={saving} onClick={() => void confirmDelivery("Rechazó firmar")}>Cliente rechaza firmar</button></>}</div>
     {signedCopyOpen && <div className="delivery-signed-copy-overlay" role="dialog" aria-modal="true" aria-label="Copia firmada de la entrega" onMouseDown={(event) => event.target === event.currentTarget && setSignedCopyOpen(false)}><article className="delivery-signed-copy" onClick={(event) => event.stopPropagation()}><header><div><p className="eyebrow">JUSTIFICANTE DE ENTREGA</p><h3>{shipment.code || "Entrega"}</h3><small>{client?.name || "Cliente"}{client?.city ? ` · ${client.city}` : ""}</small></div><button type="button" className="preview-close" aria-label="Cerrar copia firmada" onClick={() => setSignedCopyOpen(false)}>×</button></header><div className="delivery-signed-copy-meta"><span><b>Estado</b>Entregado · {signatureStatus}</span><span><b>Recibe</b>{proof?.delivery_recipient_name || "No indicado"}</span><span><b>Fecha</b>{proof?.delivery_signature_at ? String(proof.delivery_signature_at).slice(0, 16).replace("T", " ") : "—"}</span><span><b>Registrado por</b>{proof?.delivery_signature_by || proof?.delivered_by || actor}</span><span><b>Dirección</b>{proof?.address || shipment.address || client?.address || "No indicada"}</span></div>{lines.length > 0 && <div className="delivery-signed-copy-lines"><b>Contenido de la entrega</b>{lines.map((line: any, index: number) => <div key={`${line.id || line.product_id}-${index}`}><span>{line.quantity || line.prepared_quantity || 0} {line.quantity_unit || "uds."}</span><strong>{line.product_name || products.find((product: any) => Number(product.id) === Number(line.product_id))?.name || `Producto #${line.product_id}`}</strong></div>)}</div>}{proof?.delivery_signature_note && <div className="delivery-signed-copy-note"><b>Observaciones</b><p>{proof.delivery_signature_note}</p></div>}<div className="delivery-signed-copy-signature"><b>Firma de quien recibe</b>{proof?.delivery_signature_data ? <img src={proof.delivery_signature_data} alt="Firma de recepción" /> : <span>Entrega registrada sin firma</span>}</div>{existingPhotos.length > 0 && <div className="delivery-signed-copy-photos"><b>Fotografías adjuntas</b><div>{existingPhotos.map((photo: any, index: number) => <img key={`${photo.name || "foto"}-${index}`} src={photo.thumbnail_url || photo.url || photo.data} alt={photo.name || `Fotografía ${index + 1}`} />)}</div></div>}<footer><button type="button" className="button secondary" onClick={() => setSignedCopyOpen(false)}>Cerrar</button><button type="button" className="button primary" onClick={() => window.print()}>Imprimir / guardar PDF</button></footer></article></div>}
   </section>;
+}
+
+function DriverPaymentPanel({ shipment, invoice, actor, onSaved }: { shipment: any; invoice?: any; actor: string; onSaved: (shipment: any) => void }) {
+  const [amount, setAmount] = useState(String(Number(shipment?.payment_received_amount || invoice?.amount || 0)));
+  const [method, setMethod] = useState(String(shipment?.payment_received_method || "Efectivo"));
+  const [reference, setReference] = useState(String(shipment?.payment_received_reference || ""));
+  const [photo, setPhoto] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const paymentStatus = String(shipment?.payment_received_status || "Pendiente");
+  async function selectPhoto(file?: File) {
+    if (!file) return;
+    if (file.size > 6 * 1024 * 1024) return setMessage("El justificante no puede superar 6 MB.");
+    const reader = new FileReader();
+    reader.onload = () => setPhoto({ name: file.name, mime: file.type || "image/jpeg", data: String(reader.result || "") });
+    reader.readAsDataURL(file);
+  }
+  async function savePayment() {
+    const parsedAmount = Number(String(amount).replace(",", "."));
+    if (!Number.isFinite(parsedAmount) || parsedAmount < 0) return setMessage("Indica un importe válido.");
+    setSaving(true); setMessage("");
+    try {
+      const response = await fetch(`/api/shipments/${shipment.id}/payment-receipt`, { method: "POST", headers: { "Content-Type": "application/json", "X-Actor": actor }, body: JSON.stringify({ payment_status: "Recibido", amount: parsedAmount, method, reference: reference.trim(), attachments: photo ? [photo] : [] }) });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "No se ha podido registrar el cobro.");
+      onSaved(body); setPhoto(null); setMessage("Cobro registrado correctamente.");
+    } catch (error: any) { setMessage(error?.message || "No se ha podido registrar el cobro."); }
+    finally { setSaving(false); }
+  }
+  return <section className="driver-payment-panel"><div className="driver-section-title"><div><b>Cobro del pedido</b><small>{paymentStatus === "Recibido" ? "Cobro registrado" : "Registra el importe y guarda el justificante."}</small></div><span className={`driver-payment-status${paymentStatus === "Recibido" ? " is-paid" : ""}`}>{paymentStatus === "Recibido" ? "Cobrado" : "Pendiente"}</span></div>{paymentStatus !== "Recibido" ? <><div className="driver-payment-fields"><label>Importe<input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} disabled={saving} /></label><label>Método<select value={method} onChange={(event) => setMethod(event.target.value)} disabled={saving}><option>Efectivo</option><option>Tarjeta</option><option>Transferencia</option><option>Otro</option></select></label><label>Referencia<input value={reference} onChange={(event) => setReference(event.target.value)} placeholder="Opcional" disabled={saving} /></label></div><label className="driver-photo-picker">Fotografiar justificante<input type="file" accept="image/*,application/pdf" capture="environment" onChange={(event) => { void selectPhoto(event.target.files?.[0]); event.currentTarget.value = ""; }} disabled={saving} /><small>{photo ? photo.name : "Opcional · recibo, comprobante o justificante"}</small></label><button type="button" className="button primary driver-full-action" onClick={() => void savePayment()} disabled={saving}>{saving ? "Guardando cobro…" : "Marcar como cobrado"}</button></> : <div className="driver-paid-summary"><b>{Number(shipment.payment_received_amount || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</b><span>{shipment.payment_received_method || "Método no indicado"}{shipment.payment_received_reference ? ` · ${shipment.payment_received_reference}` : ""}</span></div>}{message && <p className="driver-inline-message" role="status">{message}</p>}</section>;
+}
+
+/*
+function DriverRouteApp({ user }: { user: any }) {
+  const [routeDate, setRouteDate] = useState(() => tabletTodayInput());
+  const [routes, setRoutes] = useState<any[]>([]);
+  const [shipments, setShipments] = useState<any[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
+  const [lines, setLines] = useState<any[]>([]);
+  const [invoices, setInvoices] = useState<any[]>([]);
+  const [selectedRouteId, setSelectedRouteId] = useState("");
+  const [selectedStopId, setSelectedStopId] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [location, setLocation] = useState<any>(null);
+  const [gpsActive, setGpsActive] = useState(false);
+  const gpsWatchRef = useRef<number | null>(null);
+
+  const activeRoute = routes.find((route) => String(route.id) === String(selectedRouteId)) || routes[0] || null;
+  const stopRows = Array.isArray(activeRoute?.stops) ? activeRoute.stops : [];
+  const shipmentById = new Map(shipments.map((shipment) => [Number(shipment.id), shipment]));
+  const orderById = new Map(orders.map((order) => [Number(order.id), order]));
+  const selectedStop = stopRows.find((stop: any) => Number(stop.id) === Number(selectedStopId)) || stopRows.find((stop: any) => !["Entregado", "Cancelada"].includes(String(stop.status || ""))) || stopRows[0] || null;
+  const selectedShipment = selectedStop ? shipmentById.get(Number(selectedStop.shipment_id)) : null;
+  const selectedOrder = selectedShipment ? orderById.get(Number(selectedShipment.order_id)) : null;
+  const selectedLines = selectedShipment ? lines.filter((line) => Number(line.order_id) === Number(selectedShipment.order_id)) : [];
+  const selectedInvoice = selectedShipment ? invoices.find((invoice) => Number(invoice.order_id) === Number(selectedShipment.order_id)) : null;
+  const completedStops = stopRows.filter((stop: any) => String(stop.status || "") === "Entregado").length;
+
+  async function load() {
+    setLoading(true); setError("");
+    try {
+      const routeResponse = await fetch(`/api/routes?date=${encodeURIComponent(routeDate)}`);
+      const nextRoutes = routeResponse.ok ? await routeResponse.json() : [];
+      const routeList = Array.isArray(nextRoutes) ? nextRoutes : [];
+      const ids = [...new Set(routeList.flatMap((route: any) => (route.stops || []).map((stop: any) => Number(stop.shipment_id)).filter(Boolean)))];
+      const shipmentResponse = await fetch(`/api/shipments?date=${encodeURIComponent(routeDate)}`);
+      const shipmentRows = shipmentResponse.ok ? await shipmentResponse.json() : [];
+      const shipmentList = (Array.isArray(shipmentRows) ? shipmentRows : []).filter((item: any) => !ids.length || ids.includes(Number(item.id)));
+      const orderIds = [...new Set(shipmentList.map((item: any) => Number(item.order_id)).filter(Boolean))].join(",") || "0";
+      const [orderResponse, lineResponse, invoiceResponse] = await Promise.all([fetch(`/api/orders?ids=${orderIds}`), fetch(`/api/order_lines?order_ids=${orderIds}`), fetch(`/api/invoices?order_ids=${orderIds}`)]);
+      setRoutes(routeList); setShipments(shipmentList); setOrders(orderResponse.ok ? await orderResponse.json() : []); setLines(lineResponse.ok ? await lineResponse.json() : []); setInvoices(invoiceResponse.ok ? await invoiceResponse.json() : []);
+      setSelectedRouteId((current) => routeList.some((route: any) => String(route.id) === String(current)) ? current : String(routeList[0]?.id || ""));
+      setSelectedStopId(null);
+    } catch (caught: any) { setError(caught?.message || "No se ha podido cargar la ruta."); }
+    finally { setLoading(false); }
+  }
+  useEffect(() => { void load(); }, [routeDate]);
+  useEffect(() => () => { if (gpsWatchRef.current !== null) navigator.geolocation?.clearWatch(gpsWatchRef.current); }, []);
+  async function updateRoute(changes: any) {
+    if (!activeRoute?.id) return;
+    const response = await fetch(`/api/routes/${activeRoute.id}`, { method: "PUT", headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Repartidor" }, body: JSON.stringify(changes) });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || "No se ha podido actualizar la ruta.");
+    setRoutes((current) => current.map((route) => Number(route.id) === Number(body.id) ? body : route));
+    return body;
+  }
+  async function startGps() {
+    if (!activeRoute?.id || !navigator.geolocation) return setError("Este móvil no permite geolocalización desde el navegador.");
+    try { await updateRoute({ status: "En curso" }); } catch (caught: any) { return setError(caught?.message || "No se ha podido iniciar la ruta."); }
+    setGpsActive(true); setMessage("Ruta iniciada. El GPS se actualizará mientras esta pantalla esté abierta.");
+    gpsWatchRef.current = navigator.geolocation.watchPosition(async (position) => {
+      const next = { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy_m: position.coords.accuracy, speed_mps: position.coords.speed, heading: position.coords.heading, recorded_at: new Date(position.timestamp || Date.now()).toISOString() };
+      setLocation(next);
+      try { await fetch(`/api/routes/${activeRoute.id}/position`, { method: "POST", headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Repartidor" }, body: JSON.stringify(next) }); } catch {}
+    }, () => setError("No se ha podido obtener la ubicación. Revisa el permiso de localización del móvil."), { enableHighAccuracy: true, maximumAge: 15000, timeout: 15000 });
+  }
+  async function finishRoute() {
+    if (gpsWatchRef.current !== null) navigator.geolocation?.clearWatch(gpsWatchRef.current);
+    gpsWatchRef.current = null; setGpsActive(false);
+    try { await updateRoute({ status: "Completada" }); setMessage("Ruta finalizada."); } catch (caught: any) { setError(caught?.message || "No se ha podido finalizar la ruta."); }
+  }
+  async function updateStopStatus(stop: any, status: string) {
+    try {
+      const response = await fetch(`/api/routes/${activeRoute.id}/stops/${stop.id}`, { method: "PUT", headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Repartidor" }, body: JSON.stringify({ status }) });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "No se ha podido actualizar la parada.");
+      setRoutes((current) => current.map((route) => Number(route.id) === Number(body.id) ? body : route)); setMessage(status === "En entrega" ? "Parada marcada como en entrega." : "Estado actualizado.");
+    } catch (caught: any) { setError(caught?.message || "No se ha podido actualizar la parada."); }
+  }
+  function openInvoice() {
+    if (!selectedInvoice?.id) return setError("Este pedido todavía no tiene factura vinculada.");
+    const popup = window.open("about:blank", "_blank");
+    fetch(`/api/invoices/${selectedInvoice.id}/pdf`, { method: "POST", headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Repartidor" }, body: JSON.stringify({}) }).then((response) => response.json().then((body) => ({ response, body }))).then(({ response, body }) => { if (!response.ok) throw new Error(body.error || "No se ha podido generar la factura."); const url = body.share_url || `/api/invoices/share/${encodeURIComponent(body.share_token || "")}`; if (popup) popup.location.href = url; else window.open(url, "_blank"); }).catch((caught) => { popup?.close(); setError(caught?.message || "No se ha podido generar la factura."); });
+  }
+  function onDeliverySaved(updated: any) {
+    setShipments((current) => current.map((shipment) => Number(shipment.id) === Number(updated.id) ? { ...shipment, ...updated } : shipment));
+    if (selectedStop) void updateStopStatus(selectedStop, "Entregado");
+  }
+  const receiptClient = selectedStop ? { name: selectedStop.client_name, address: selectedStop.address, city: selectedStop.city } : undefined;
+  return <main className="driver-mobile-app"><header className="driver-mobile-header"><div><span className="driver-brand-mark">E</span><div><b>Reparto</b><small>{user?.username || "Conductor"}</small></div></div><button type="button" className="driver-refresh" onClick={() => void load()} aria-label="Actualizar">↻</button></header><section className="driver-mobile-toolbar"><label>Fecha<input type="date" value={routeDate} onChange={(event) => setRouteDate(event.target.value)} /></label><label>Camión<select value={selectedRouteId} onChange={(event) => { setSelectedRouteId(event.target.value); setSelectedStopId(null); }}><option value="">Selecciona una ruta</option>{routes.map((route) => <option value={route.id} key={route.id}>{route.vehicle || `Camión ${route.id}`} · {route.driver || "Sin conductor"}</option>)}</select></label></section>{loading ? <div className="driver-mobile-loading">Cargando la ruta…</div> : error ? <div className="driver-mobile-error" role="alert">{error}<button type="button" onClick={() => void load()}>Reintentar</button></div> : !activeRoute ? <div className="driver-mobile-empty"><b>No hay ruta asignada</b><span>Cuando administración guarde la carga del día aparecerá aquí.</span></div> : <><section className="driver-route-summary"><div><b>{activeRoute.vehicle || "Camión"}</b><span>{completedStops}/{stopRows.length} entregas completadas · {Number(activeRoute.total_distance_km || 0).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km · {Math.floor(Number(activeRoute.estimated_minutes || 0) / 60)} h {Number(activeRoute.estimated_minutes || 0) % 60} min</span></div><strong className={`driver-route-status status-${String(activeRoute.status || "Planificada").toLowerCase().replaceAll(" ", "-")}`}>{activeRoute.status || "Planificada"}</strong></div><div className="driver-route-actions">{activeRoute.status !== "Completada" && !gpsActive && activeRoute.status !== "En curso" && <button type="button" className="button primary" onClick={() => void startGps()}>Iniciar ruta y GPS</button>}{activeRoute.status === "En curso" && !gpsActive && <button type="button" className="button primary" onClick={() => void startGps()}>Reanudar GPS</button>}{activeRoute.status === "En curso" && <button type="button" className="button secondary" onClick={() => void finishRoute()}>Finalizar ruta</button>}{gpsActive && <span className="driver-gps-live">● GPS activo{location ? ` · ${Number(location.accuracy_m || 0).toFixed(0)} m` : ""}</span>}</div></section><nav className="driver-stop-list" aria-label="Paradas de la ruta">{stopRows.map((stop: any, index: number) => <button type="button" className={`driver-stop-card${Number(selectedStop?.id) === Number(stop.id) ? " is-selected" : ""}${stop.status === "Entregado" ? " is-complete" : ""}`} key={stop.id} onClick={() => setSelectedStopId(Number(stop.id))}><span className="driver-stop-number">{stop.status === "Entregado" ? "✓" : index + 1}</span><span><b>{stop.client_name || "Cliente"}</b><small>{[stop.address, stop.city].filter(Boolean).join(" · ")}</small><small>{stop.opening_time && stop.closing_time ? `Recepción ${String(stop.opening_time).slice(0, 5)}–${String(stop.closing_time).slice(0, 5)}` : "Horario pendiente"} · {stop.distance_km ? `${String(stop.distance_km).replace(".", ",")} km` : "Salida"}</small></span><em>{stop.status || "Pendiente"}</em></button>)}</nav>{selectedStop && selectedShipment && <section className="driver-stop-detail"><div className="driver-detail-head"><div><p className="eyebrow">PARADA {selectedStop.position || 1}</p><h2>{selectedStop.client_name}</h2><p>{[selectedStop.address, selectedStop.city].filter(Boolean).join(" · ")}</p><small>{selectedStop.opening_time && selectedStop.closing_time ? `Recepción ${String(selectedStop.opening_time).slice(0, 5)}–${String(selectedStop.closing_time).slice(0, 5)}` : "Horario pendiente"}</small></div><button type="button" className="button secondary" onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent([selectedStop.address, selectedStop.city].filter(Boolean).join(", "))}`, "_blank")}>Navegar</button></div><div className="driver-detail-actions"><button type="button" className="button secondary" onClick={() => void updateStopStatus(selectedStop, "En entrega")} disabled={selectedStop.status === "Entregado"}>Estoy en el cliente</button><button type="button" className="button ghost" onClick={() => void updateStopStatus(selectedStop, "Incidencia")}>Registrar incidencia</button></div><section className="driver-order-content"><div className="driver-section-title"><div><b>{selectedShipment.code}</b><small>Contenido del pedido para mostrar al cliente</small></div><button type="button" className="button secondary" onClick={openInvoice}>Factura</button></div>{selectedLines.length ? selectedLines.map((line: any, index: number) => <div className="driver-order-line" key={`${line.id}-${index}`}><span>{line.quantity || line.quantity_requested || 0} {line.quantity_unit || "uds."}</span><b>{line.product_name || `Producto #${line.product_id}`}</b></div>) : <p className="driver-muted">No hay líneas detalladas disponibles.</p>}{(selectedOrder?.driver_notes || selectedShipment.driver_notes || selectedStop.driver_notes) && <div className="driver-notes"><b>Indicaciones</b><span>{selectedOrder?.driver_notes || selectedShipment.driver_notes || selectedStop.driver_notes}</span></div>}</section><DriverPaymentPanel shipment={selectedShipment} invoice={selectedInvoice} actor={user?.username || "Repartidor"} onSaved={(updated) => setShipments((current) => current.map((shipment) => Number(shipment.id) === Number(updated.id) ? { ...shipment, ...updated } : shipment))} /><DeliverySignaturePanel shipment={selectedShipment} actor={user?.username || "Repartidor"} client={receiptClient} lines={selectedLines} onSaved={onDeliverySaved} /></section>}</>}{message && <p className="driver-mobile-message" role="status">{message}</p>}<footer className="driver-mobile-footer">{activeRoute ? `${activeRoute.code} · ${activeRoute.driver || user?.username || "Repartidor"}` : "Vista móvil de reparto"}</footer></main>;
+}
+
+*/
+
+function DriverRouteApp({ user }: { user: any }) {
+  const [routeDate, setRouteDate] = useState(() => tabletTodayInput());
+  const [routes, setRoutes] = useState<any[]>([]);
+  const [shipments, setShipments] = useState<any[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
+  const [lines, setLines] = useState<any[]>([]);
+  const [invoices, setInvoices] = useState<any[]>([]);
+  const [selectedRouteId, setSelectedRouteId] = useState("");
+  const [selectedStopId, setSelectedStopId] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [gpsActive, setGpsActive] = useState(false);
+  const [location, setLocation] = useState<any>(null);
+  const gpsWatchRef = useRef<number | null>(null);
+  const activeRoute = routes.find((route) => String(route.id) === String(selectedRouteId)) || routes[0] || null;
+  const stops = Array.isArray(activeRoute?.stops) ? activeRoute.stops : [];
+  const shipmentById = new Map(shipments.map((row) => [Number(row.id), row]));
+  const orderById = new Map(orders.map((row) => [Number(row.id), row]));
+  const selectedStop = stops.find((stop: any) => Number(stop.id) === Number(selectedStopId)) || stops.find((stop: any) => stop.status !== "Entregado") || stops[0];
+  const shipment = selectedStop ? shipmentById.get(Number(selectedStop.shipment_id)) : null;
+  const order = shipment ? orderById.get(Number(shipment.order_id)) : null;
+  const selectedLines = shipment ? lines.filter((line) => Number(line.order_id) === Number(shipment.order_id)) : [];
+  const invoice = shipment ? invoices.find((row) => Number(row.order_id) === Number(shipment.order_id)) : null;
+
+  async function load() {
+    setLoading(true); setError("");
+    try {
+      const routeResponse = await fetch(`/api/routes?date=${encodeURIComponent(routeDate)}`);
+      const routeRows = routeResponse.ok ? await routeResponse.json() : [];
+      const routeList = Array.isArray(routeRows) ? routeRows : [];
+      const ids = [...new Set(routeList.flatMap((route: any) => (route.stops || []).map((stop: any) => Number(stop.shipment_id)).filter(Boolean)))];
+      const shipmentResponse = await fetch(`/api/shipments?date=${encodeURIComponent(routeDate)}`);
+      const shipmentRows = shipmentResponse.ok ? await shipmentResponse.json() : [];
+      const shipmentList = (Array.isArray(shipmentRows) ? shipmentRows : []).filter((row: any) => !ids.length || ids.includes(Number(row.id)));
+      const orderIds = [...new Set(shipmentList.map((row: any) => Number(row.order_id)).filter(Boolean))].join(",") || "0";
+      const [orderResponse, linesResponse, invoiceResponse] = await Promise.all([fetch(`/api/orders?ids=${orderIds}`), fetch(`/api/order_lines?order_ids=${orderIds}`), fetch(`/api/invoices?order_ids=${orderIds}`)]);
+      setRoutes(routeList); setShipments(shipmentList); setOrders(orderResponse.ok ? await orderResponse.json() : []); setLines(linesResponse.ok ? await linesResponse.json() : []); setInvoices(invoiceResponse.ok ? await invoiceResponse.json() : []);
+      setSelectedRouteId((current) => routeList.some((row: any) => String(row.id) === String(current)) ? current : String(routeList[0]?.id || ""));
+      setSelectedStopId(null);
+    } catch (caught: any) { setError(caught?.message || "No se ha podido cargar la ruta."); }
+    finally { setLoading(false); }
+  }
+  useEffect(() => { void load(); }, [routeDate]);
+  useEffect(() => () => { if (gpsWatchRef.current !== null) navigator.geolocation?.clearWatch(gpsWatchRef.current); }, []);
+  async function updateRoute(changes: any) {
+    if (!activeRoute?.id) return;
+    const response = await fetch(`/api/routes/${activeRoute.id}`, { method: "PUT", headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Repartidor" }, body: JSON.stringify(changes) });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || "No se ha podido actualizar la ruta.");
+    setRoutes((current) => current.map((row) => Number(row.id) === Number(body.id) ? body : row));
+  }
+  function startGps() {
+    if (!activeRoute?.id || !navigator.geolocation) return setError("Este móvil no permite geolocalización.");
+    void updateRoute({ status: "En curso" }).then(() => {
+      setGpsActive(true); setMessage("Ruta iniciada. GPS activo mientras esta pantalla permanezca abierta.");
+      gpsWatchRef.current = navigator.geolocation.watchPosition(async (position) => {
+        const data = { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy_m: position.coords.accuracy, speed_mps: position.coords.speed, heading: position.coords.heading, recorded_at: new Date(position.timestamp || Date.now()).toISOString() };
+        setLocation(data);
+        try { await fetch(`/api/routes/${activeRoute.id}/position`, { method: "POST", headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Repartidor" }, body: JSON.stringify(data) }); } catch {}
+      }, () => setError("No se ha podido obtener la ubicación. Revisa el permiso del móvil."), { enableHighAccuracy: true, maximumAge: 15000, timeout: 15000 });
+    }).catch((caught) => setError(caught?.message || "No se ha podido iniciar la ruta."));
+  }
+  function finishRoute() {
+    if (gpsWatchRef.current !== null) navigator.geolocation?.clearWatch(gpsWatchRef.current);
+    gpsWatchRef.current = null; setGpsActive(false);
+    void updateRoute({ status: "Completada" }).then(() => setMessage("Ruta finalizada.")).catch((caught) => setError(caught?.message || "No se ha podido finalizar la ruta."));
+  }
+  async function updateStopStatus(stop: any, status: string) {
+    const response = await fetch(`/api/routes/${activeRoute.id}/stops/${stop.id}`, { method: "PUT", headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Repartidor" }, body: JSON.stringify({ status }) });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) return setError(body.error || "No se ha podido actualizar la parada.");
+    setRoutes((current) => current.map((row) => Number(row.id) === Number(body.id) ? body : row)); setMessage("Estado de la parada actualizado.");
+  }
+  function openInvoice() {
+    if (!invoice?.id) return setError("Este pedido todavía no tiene factura.");
+    const popup = window.open("about:blank", "_blank");
+    fetch(`/api/invoices/${invoice.id}/pdf`, { method: "POST", headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Repartidor" }, body: JSON.stringify({}) }).then(async (response) => { const body = await response.json(); if (!response.ok) throw new Error(body.error || "No se ha podido generar la factura."); return body; }).then((body) => { const url = body.share_url || `/api/invoices/share/${encodeURIComponent(body.share_token || "")}`; if (popup) popup.location.href = url; else window.open(url, "_blank"); }).catch((caught) => { popup?.close(); setError(caught?.message || "No se ha podido generar la factura."); });
+  }
+  function deliverySaved(updated: any) { setShipments((current) => current.map((row) => Number(row.id) === Number(updated.id) ? { ...row, ...updated } : row)); if (selectedStop) void updateStopStatus(selectedStop, "Entregado"); }
+  const actor = user?.username || "Repartidor";
+  return <main className="driver-mobile-app"><header className="driver-mobile-header"><div><span className="driver-brand-mark">E</span><div><b>Reparto</b><small>{actor}</small></div></div><button type="button" className="driver-refresh" onClick={() => void load()} aria-label="Actualizar">↻</button></header><section className="driver-mobile-toolbar"><label>Fecha<input type="date" value={routeDate} onChange={(event) => setRouteDate(event.target.value)} /></label><label>Camión<select value={selectedRouteId} onChange={(event) => { setSelectedRouteId(event.target.value); setSelectedStopId(null); }}><option value="">Selecciona una ruta</option>{routes.map((route) => <option value={route.id} key={route.id}>{route.vehicle || `Camión ${route.id}`} · {route.driver || "Sin conductor"}</option>)}</select></label></section>{loading ? <div className="driver-mobile-loading">Cargando la ruta…</div> : error ? <div className="driver-mobile-error" role="alert">{error}<button type="button" onClick={() => void load()}>Reintentar</button></div> : !activeRoute ? <div className="driver-mobile-empty"><b>No hay ruta asignada</b><span>Cuando administración guarde la carga del día aparecerá aquí.</span></div> : <><section className="driver-route-summary"><div className="driver-route-summary-main"><div><b>{activeRoute.vehicle || "Camión"}</b><span>{stops.filter((stop: any) => stop.status === "Entregado").length}/{stops.length} entregas completadas · {Number(activeRoute.total_distance_km || 0).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km · {Math.floor(Number(activeRoute.estimated_minutes || 0) / 60)} h {Number(activeRoute.estimated_minutes || 0) % 60} min</span></div><strong className="driver-route-status">{activeRoute.status || "Planificada"}</strong></div><div className="driver-route-actions">{activeRoute.status !== "Completada" && <button type="button" className="button primary" onClick={gpsActive ? finishRoute : startGps}>{gpsActive ? "Finalizar ruta" : activeRoute.status === "En curso" ? "Reanudar GPS" : "Iniciar ruta y GPS"}</button>}{gpsActive && <span className="driver-gps-live">● GPS activo{location ? ` · ${Number(location.accuracy_m || 0).toFixed(0)} m` : ""}</span>}</div></section><nav className="driver-stop-list" aria-label="Paradas de la ruta">{stops.map((stop: any, index: number) => <button type="button" className={`driver-stop-card${Number(selectedStop?.id) === Number(stop.id) ? " is-selected" : ""}${stop.status === "Entregado" ? " is-complete" : ""}`} key={stop.id} onClick={() => setSelectedStopId(Number(stop.id))}><span className="driver-stop-number">{stop.status === "Entregado" ? "✓" : index + 1}</span><span><b>{stop.client_name || "Cliente"}</b><small>{[stop.address, stop.city].filter(Boolean).join(" · ")}</small><small>{stop.opening_time && stop.closing_time ? `Recepción ${String(stop.opening_time).slice(0, 5)}–${String(stop.closing_time).slice(0, 5)}` : "Horario pendiente"} · {stop.distance_km ? `${String(stop.distance_km).replace(".", ",")} km` : "Salida"}</small></span><em>{stop.status || "Pendiente"}</em></button>)}</nav>{selectedStop && shipment && <section className="driver-stop-detail"><div className="driver-detail-head"><div><p className="eyebrow">PARADA {selectedStop.position || 1}</p><h2>{selectedStop.client_name}</h2><p>{[selectedStop.address, selectedStop.city].filter(Boolean).join(" · ")}</p><small>{selectedStop.opening_time && selectedStop.closing_time ? `Recepción ${String(selectedStop.opening_time).slice(0, 5)}–${String(selectedStop.closing_time).slice(0, 5)}` : "Horario pendiente"}</small></div><button type="button" className="button secondary" onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent([selectedStop.address, selectedStop.city].filter(Boolean).join(", "))}`, "_blank")}>Navegar</button></div><div className="driver-detail-actions"><button type="button" className="button secondary" onClick={() => void updateStopStatus(selectedStop, "En entrega")} disabled={selectedStop.status === "Entregado"}>Estoy en el cliente</button><button type="button" className="button ghost" onClick={() => void updateStopStatus(selectedStop, "Incidencia")}>Incidencia</button></div><section className="driver-order-content"><div className="driver-section-title"><div><b>{shipment.code}</b><small>Contenido para mostrar al cliente</small></div><button type="button" className="button secondary" onClick={openInvoice}>Factura</button></div>{selectedLines.length ? selectedLines.map((line: any, index: number) => <div className="driver-order-line" key={`${line.id}-${index}`}><span>{line.quantity || line.quantity_requested || 0} {line.quantity_unit || "uds."}</span><b>{line.product_name || `Producto #${line.product_id}`}</b></div>) : <p className="driver-muted">No hay líneas detalladas disponibles.</p>}{(order?.driver_notes || shipment.driver_notes || selectedStop.driver_notes) && <div className="driver-notes"><b>Indicaciones</b><span>{order?.driver_notes || shipment.driver_notes || selectedStop.driver_notes}</span></div>}</section><DriverPaymentPanel shipment={shipment} invoice={invoice} actor={actor} onSaved={(updated) => setShipments((current) => current.map((row) => Number(row.id) === Number(updated.id) ? { ...row, ...updated } : row))} /><DeliverySignaturePanel shipment={shipment} actor={actor} client={{ name: selectedStop.client_name, address: selectedStop.address, city: selectedStop.city }} lines={selectedLines} onSaved={deliverySaved} /></section>}</>}{message && <p className="driver-mobile-message" role="status">{message}</p>}<footer className="driver-mobile-footer">{activeRoute ? `${activeRoute.code} · ${activeRoute.driver || actor}` : "Vista móvil de reparto"}</footer></main>;
 }
 
 function GoodsReceiptForm({ lookups, actor, onCreated }: { lookups: any; actor: string; onCreated: (receipt: any) => void }) {
@@ -12766,5 +12974,6 @@ export default function Home({ routeMode = "crm" }: { routeMode?: keyof typeof r
   const path = typeof window !== "undefined" ? window.location.pathname.replace(/\/$/, "") : "";
   if (path === "/portal-ofertas") return <SupplierOfferPortal />;
   if (path === "/almacen") return <WarehouseTabletApp />;
+  if (path === "/reparto") return <DriverRouteApp user={{ username: "Repartidor" }} />;
   return <CrmHome routeMode={routeMode} />;
 }
