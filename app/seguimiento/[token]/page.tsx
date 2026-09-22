@@ -37,6 +37,16 @@ type TrackingData = {
     delivery_signature_note?: string;
     delivery_attachments_json?: string;
   };
+  route?: {
+    code?: string;
+    status?: string;
+    vehicle?: string;
+    driver?: string;
+    position?: number;
+    total_stops?: number;
+    completed_stops?: number;
+    current_position?: { latitude?: number; longitude?: number; accuracy_m?: number; speed_mps?: number; recorded_at?: string } | null;
+  } | null;
   lines: TrackingLine[];
 };
 
@@ -75,6 +85,18 @@ function proofPhotos(value?: string) {
   } catch { return []; }
 }
 
+function LiveRoutePanel({ route }: { route: TrackingData["route"] }) {
+  if (!route) return null;
+  const latitude = Number(route.current_position?.latitude);
+  const longitude = Number(route.current_position?.longitude);
+  const hasPosition = Number.isFinite(latitude) && Number.isFinite(longitude) && latitude !== 0 && longitude !== 0;
+  const delta = 0.018;
+  const mapSrc = hasPosition
+    ? `https://www.openstreetmap.org/export/embed.html?bbox=${longitude - delta}%2C${latitude - delta}%2C${longitude + delta}%2C${latitude + delta}&layer=mapnik&marker=${latitude}%2C${longitude}`
+    : "";
+  return <section className="tracking-live-route"><div className="tracking-live-route-head"><div><p className="tracking-eyebrow">SEGUIMIENTO EN RUTA</p><h2>{route.vehicle || "Vehículo de reparto"}</h2><p>{route.status === "En curso" && hasPosition ? "El camión está compartiendo su posición." : route.status === "Completada" ? "La ruta ha finalizado." : "La posición aparecerá cuando el conductor inicie la ruta."}</p></div><span className={hasPosition ? "is-live" : "is-pending"}>{hasPosition ? "● GPS activo" : "GPS pendiente"}</span></div><div className="tracking-live-route-meta"><span><b>Parada</b>{route.position || "—"} de {route.total_stops || "—"}</span><span><b>Completadas</b>{route.completed_stops || 0} de {route.total_stops || 0}</span><span><b>Conductor</b>{route.driver || "No indicado"}</span><span><b>Actualizado</b>{route.current_position?.recorded_at ? formatDate(route.current_position.recorded_at) : "Pendiente"}</span></div>{hasPosition ? <div className="tracking-live-map"><iframe title="Posición actual del camión" src={mapSrc} loading="lazy" /><a href={`https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`} target="_blank" rel="noreferrer">Abrir posición en Maps</a></div> : <div className="tracking-live-empty">La posición se actualizará automáticamente mientras el camión esté en ruta.</div>}</section>;
+}
+
 export default function ShipmentTrackingPage() {
   const [data, setData] = useState<TrackingData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -82,6 +104,7 @@ export default function ShipmentTrackingPage() {
   const [qrImage, setQrImage] = useState("");
 
   useEffect(() => {
+    let mounted = true;
     const segments = window.location.pathname.split("/").filter(Boolean);
     const token = segments[segments.length - 1] || "";
     if (!token) {
@@ -89,15 +112,19 @@ export default function ShipmentTrackingPage() {
       setLoading(false);
       return;
     }
-    fetch(`/api/public/shipments/${encodeURIComponent(decodeURIComponent(token))}`)
-      .then(async (response) => {
+    const load = async () => {
+      try {
+        const response = await fetch(`/api/public/shipments/${encodeURIComponent(decodeURIComponent(token))}`, { cache: "no-store" });
         const body = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(body.error || "No se ha podido cargar el envío.");
-        return body as TrackingData;
-      })
-      .then(setData)
-      .catch((reason) => setError(reason instanceof Error ? reason.message : "No se ha podido cargar el envío."))
-      .finally(() => setLoading(false));
+        if (mounted) { setData(body as TrackingData); setError(""); setLoading(false); }
+      } catch (reason) {
+        if (mounted) { setError(reason instanceof Error ? reason.message : "No se ha podido cargar el envío."); setLoading(false); }
+      }
+    };
+    void load();
+    const interval = window.setInterval(() => void load(), 30000);
+    return () => { mounted = false; window.clearInterval(interval); };
   }, []);
 
   useEffect(() => {
@@ -141,6 +168,7 @@ export default function ShipmentTrackingPage() {
           <section className="tracking-panel tracking-content-panel"><div className="tracking-panel-heading"><div><p className="tracking-eyebrow">CONTENIDO DEL ENVÍO</p><h2>{lines.length} referencias</h2></div></div>{lines.length ? <ul className="tracking-lines">{lines.map((line, index) => <li key={`${line.product_name || "producto"}-${index}`}><b>{lineQuantity(line)} {line.quantity_unit || "unidades"}</b><span>{line.product_name || "Producto sin identificar"}</span>{line.preparation_status && <small>{line.preparation_status}</small>}</li>)}</ul> : <p className="tracking-muted">El contenido aún no está disponible.</p>}</section>
         </div>
 
+        <LiveRoutePanel route={data.route} />
         {shipment.incidents && <aside className="tracking-incident"><b>Incidencia comunicada</b><p>{shipment.incidents}</p></aside>}
         {shipment.delivery_signature_status === "Firmado" && <section className="tracking-proof"><div className="tracking-proof-head"><div><p className="tracking-eyebrow">RECEPCIÓN CONFIRMADA</p><h2>Albarán firmado</h2><p>La entrega ha sido recibida y firmada por el cliente.</p></div><span>✓ Firmado</span></div><div className="tracking-proof-meta"><div><b>Recibe</b><span>{shipment.delivery_recipient_name || "No indicado"}</span></div><div><b>Fecha</b><span>{formatDate(shipment.delivery_signature_at) || "No indicada"}</span></div><div><b>Registrado por</b><span>{shipment.delivery_signature_by || "Reparto"}</span></div></div>{shipment.delivery_signature_note && <p className="tracking-proof-note"><b>Observaciones:</b> {shipment.delivery_signature_note}</p>}{shipment.delivery_signature_data && <div className="tracking-proof-signature"><b>Firma de recepción</b><img src={shipment.delivery_signature_data} alt="Firma del cliente" /></div>}{proofPhotos(shipment.delivery_attachments_json).length > 0 && <div className="tracking-proof-photos"><b>Fotografías de la entrega</b><div>{proofPhotos(shipment.delivery_attachments_json).map((photo: any, index: number) => <img key={`${photo.name || "foto"}-${index}`} src={photo.thumbnail_url || photo.url || photo.data} alt={photo.name || `Fotografía de la entrega ${index + 1}`} />)}</div></div>}</section>}
         <footer className="tracking-footer"><span>Información operativa · Exclusivas Inteligentes</span><a href="/web">Visitar la web</a></footer>

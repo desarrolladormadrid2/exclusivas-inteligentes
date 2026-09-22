@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { DeliverySignaturePanel } from "../page";
+import { DeliverySignaturePanel, DriverDailyClosingPanel } from "../page";
 import BarcodeScanner from "../components/BarcodeScanner";
 
 function todayInput() {
@@ -77,6 +77,7 @@ function DeliveryPaymentPanel({ shipment, actor, onSaved }: { shipment: any; act
   const [attachments, setAttachments] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [expanded, setExpanded] = useState(false);
   const existingAttachments = parsePaymentAttachments(shipment?.payment_received_attachments_json);
   const trackingToken = String(shipment?.public_tracking_token || "").trim();
   const shareUrl = trackingToken && typeof window !== "undefined" ? `${window.location.origin}/seguimiento/${encodeURIComponent(trackingToken)}` : "";
@@ -89,6 +90,7 @@ function DeliveryPaymentPanel({ shipment, actor, onSaved }: { shipment: any; act
     setNote(String(shipment?.payment_received_note || ""));
     setAttachments([]);
     setMessage("");
+    setExpanded(false);
   }, [shipment?.id]);
 
   async function readAttachments(files: FileList | null) {
@@ -135,8 +137,8 @@ function DeliveryPaymentPanel({ shipment, actor, onSaved }: { shipment: any; act
   }
 
   const allAttachments = [...existingAttachments, ...attachments];
-  return <section className="reparto-payment-panel" aria-label="Talón y cobro recibido">
-    <div className="reparto-payment-head"><div><p className="eyebrow">TALÓN Y COBRO</p><h3>Justificante de recepción</h3><span>Registra el importe, la forma de cobro y una foto o PDF del talón recibido. Si hay factura, también quedará reflejado en Cobros.</span></div><strong className={`reparto-payment-badge ${status === "Recibido" ? "received" : status === "No recibido" ? "missing" : "pending"}`}>{status}</strong></div>
+  return <section className={`reparto-payment-panel${expanded ? " is-expanded" : ""}`} aria-label="Talón y cobro recibido">
+    <div className="reparto-payment-head"><div><p className="eyebrow">TALÓN Y COBRO</p><h3>Justificante de recepción</h3><span>Registra el importe, la forma de cobro y una foto o PDF del talón recibido. Si hay factura, también quedará reflejado en Cobros.</span></div><strong className={`reparto-payment-badge ${status === "Recibido" ? "received" : status === "No recibido" ? "missing" : "pending"}`}>{status}</strong><button type="button" className="reparto-panel-toggle" onClick={() => setExpanded((current) => !current)}>{expanded ? "Ocultar" : "Abrir"}</button></div>
     <div className="reparto-payment-fields">
       <label>Estado<select value={status} onChange={(event) => setStatus(event.target.value)} disabled={saving}><option>Pendiente</option><option>Recibido</option><option>No recibido</option></select></label>
       <label>Importe recibido<input type="number" min="0" step="0.01" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0,00" disabled={saving} /></label>
@@ -163,6 +165,7 @@ function DeliveryExpensePanel({ actor }: { actor: string }) {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [expanded, setExpanded] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -202,8 +205,8 @@ function DeliveryExpensePanel({ actor }: { actor: string }) {
     finally { setSaving(false); }
   }
 
-  return <section className="reparto-expense-panel panel" aria-label="Gastos de ruta">
-    <header className="reparto-expense-head"><div><p className="eyebrow">GASTOS DE RUTA</p><h2>Subir un gasto</h2><span>Envía combustible, aparcamiento, comidas u otros gastos con una foto del ticket.</span></div><strong>Revisión pendiente</strong></header>
+  return <section className={`reparto-expense-panel panel${expanded ? " is-expanded" : ""}`} aria-label="Gastos de ruta">
+    <header className="reparto-expense-head"><div><p className="eyebrow">GASTOS DE RUTA</p><h2>Subir un gasto</h2><span>Envía combustible, aparcamiento, comidas u otros gastos con una foto del ticket.</span></div><strong>Revisión pendiente</strong><button type="button" className="reparto-panel-toggle" onClick={() => setExpanded((current) => !current)}>{expanded ? "Ocultar" : "Abrir"}</button></header>
     <form className="reparto-expense-form" onSubmit={(event) => void save(event)}>
       <div className="reparto-expense-fields"><label>Importe total *<input required type="number" min="0" step="0.01" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0,00 €" disabled={saving} /></label><label>Fecha *<input required type="date" value={date} onChange={(event) => setDate(event.target.value)} disabled={saving} /></label><label>Categoría<select value={category} onChange={(event) => setCategory(event.target.value)} disabled={saving}><option>Combustible</option><option>Aparcamiento</option><option>Comida</option><option>Peaje</option><option>Material</option><option>Otros</option></select></label><label>Forma de pago<select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)} disabled={saving}><option>Tarjeta</option><option>Efectivo</option><option>Transferencia</option><option>Otro</option></select></label><label>Comercio o proveedor<input value={vendor} onChange={(event) => setVendor(event.target.value)} placeholder="Ej. Gasolinera, restaurante…" disabled={saving} /></label><label className="reparto-expense-wide">Explicación del gasto *<textarea required rows={2} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Ej. Repostaje de la ruta Madrid · Toledo…" disabled={saving} /></label></div>
       <div className="reparto-expense-upload"><label>Ticket o factura<span className="reparto-expense-photo-button">📷 Hacer foto o subir ticket<input type="file" accept="image/*,.pdf" capture="environment" onChange={(event) => { readFile(event.target.files?.[0]); event.currentTarget.value = ""; }} disabled={saving} /></span><small>Haz una foto desde el móvil o sube un PDF · máximo 8 MB</small></label>{file && <div className="reparto-expense-file">{String(file.mime).includes("pdf") ? <b>PDF</b> : <img src={file.data} alt="Vista previa del justificante" />}<span>{file.name}</span><button type="button" onClick={() => setFile(null)} aria-label="Quitar justificante">×</button></div>}</div>
@@ -245,20 +248,22 @@ export default function RepartoPage() {
   async function load() {
     setLoading(true);
     try {
-      const [shipmentResponse, clientResponse, pointResponse, productResponse, routeResponse] = await Promise.all([
-        fetch("/api/shipments"),
-        fetch("/api/clients?view=lookup&limit=2000"),
-        fetch("/api/collection_points?view=lookup&limit=2000"),
-        fetch("/api/products?view=lookup&limit=2000"),
+      const [shipmentResponse, routeResponse] = await Promise.all([
+        fetch(`/api/shipments?date=${encodeURIComponent(date)}`),
         fetch(`/api/routes?date=${encodeURIComponent(date)}`),
       ]);
       const rawShipments = shipmentResponse.ok ? await shipmentResponse.json() : [];
+      const shipmentRows = Array.isArray(rawShipments) ? rawShipments : [];
+      const queryIds = (values: any[]) => [...new Set(values.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0))].join(",") || "0";
+      const [clientResponse, pointResponse] = await Promise.all([
+        fetch(`/api/clients?view=lookup&ids=${queryIds(shipmentRows.map((item: any) => item.client_id))}`),
+        fetch(`/api/collection_points?view=lookup&ids=${queryIds(shipmentRows.map((item: any) => item.collection_point_id))}`),
+      ]);
       const nextClients = clientResponse.ok ? await clientResponse.json() : [];
       const nextPoints = pointResponse.ok ? await pointResponse.json() : [];
       setClients(Array.isArray(nextClients) ? nextClients : []);
       setPoints(Array.isArray(nextPoints) ? nextPoints : []);
-      setProducts(productResponse.ok ? await productResponse.json() : []);
-      const nextShipments = (Array.isArray(rawShipments) ? rawShipments : []).map((item) => shipmentView(item, nextClients, nextPoints));
+      const nextShipments = shipmentRows.map((item) => shipmentView(item, nextClients, nextPoints));
       setShipments(nextShipments);
       const nextRoutes = routeResponse.ok ? await routeResponse.json() : [];
       setRoutes(Array.isArray(nextRoutes) ? nextRoutes : []);
@@ -290,9 +295,15 @@ export default function RepartoPage() {
     try {
       const response = await fetch(`/api/shipments/${item.id}`);
       const detail = response.ok ? await response.json() : item;
-      const lineResponse = detail.order_id ? await fetch("/api/order_lines?limit=5000") : null;
+      const lineResponse = detail.order_id ? await fetch(`/api/order_lines?order_ids=${encodeURIComponent(detail.order_id)}`) : null;
       const rawLines = lineResponse?.ok ? await lineResponse.json() : [];
-      const lines = (Array.isArray(rawLines) ? rawLines : []).filter((line: any) => Number(line.order_id) === Number(detail.order_id)).map((line: any) => ({ ...line, product_name: line.product_name || products.find((product) => Number(product.id) === Number(line.product_id))?.name || `Producto #${line.product_id}` }));
+      const lineRows = (Array.isArray(rawLines) ? rawLines : []).filter((line: any) => Number(line.order_id) === Number(detail.order_id));
+      const productIds = [...new Set(lineRows.map((line: any) => Number(line.product_id)).filter((value) => Number.isInteger(value) && value > 0))].join(",") || "0";
+      const productResponse = productIds !== "0" ? await fetch(`/api/products?view=lookup&ids=${productIds}`) : null;
+      const loadedProducts = productResponse?.ok ? await productResponse.json() : [];
+      const productRows = [...(Array.isArray(products) ? products : []), ...(Array.isArray(loadedProducts) ? loadedProducts : [])];
+      setProducts((current) => [...new Map(productRows.map((product: any) => [Number(product.id), product])).values()]);
+      const lines = lineRows.map((line: any) => ({ ...line, product_name: line.product_name || productRows.find((product: any) => Number(product.id) === Number(line.product_id))?.name || `Producto #${line.product_id}` }));
       setSelectedShipment(shipmentView({ ...item, ...detail }, clients, points));
       setSelectedLines(lines);
     } catch {
@@ -369,7 +380,7 @@ const response = await fetch("/api/returns", { method: "POST", headers: { "Conte
   }
 
   return <main className="reparto-page">
-    <header className="reparto-topbar"><a className="reparto-brand" href="/reparto"><span>E</span><div><b>Exclusivas</b><small>INTELIGENTES</small></div></a><div className="reparto-topbar-actions"><span className="reparto-connection"><i /> Modo reparto</span><button type="button" onClick={logout}>Cerrar sesión</button></div></header>
+    <header className="reparto-topbar"><a className="reparto-brand" href="/reparto"><span>E</span><div><b>Exclusivas</b><small>INTELIGENTES</small></div></a><div className="reparto-topbar-actions"><span className="reparto-connection"><i /> Modo reparto</span><button type="button" className="reparto-menu-link" onClick={() => document.querySelector(".reparto-route-picker")?.scrollIntoView({ behavior: "smooth", block: "start" })}>Rutas</button><a className="reparto-menu-link" href="/crm">CRM</a><button type="button" onClick={logout}>Salir</button></div></header>
     <div className="reparto-shell">
       <section className="reparto-head"><div><p className="eyebrow">OPERATIVA DE REPARTO</p><h1>Reparto de hoy</h1><p>Consulta tu ruta, abre cada entrega y registra la recepción desde el móvil.</p></div><div className="reparto-head-actions"><BarcodeScanner label="Escanear pedido" description="Apunta al QR o código de barras del pedido o de la etiqueta de envío." onDetected={(value) => void openScannedShipment(value)} disabled={loading} /><button type="button" className="reparto-refresh" onClick={() => void load()} disabled={loading}>↻ Actualizar</button></div></section>
       <section className="reparto-datebar"><button type="button" onClick={() => setDate(todayInput())} className={date === todayInput() ? "active" : ""}>Hoy <small>{dateLabel(todayInput())}</small></button><button type="button" onClick={() => setDate(offsetDate(1))} className={date === offsetDate(1) ? "active" : ""}>Mañana <small>{dateLabel(offsetDate(1))}</small></button><label>Otra fecha<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label></section>
@@ -377,6 +388,7 @@ const response = await fetch("/api/returns", { method: "POST", headers: { "Conte
       {message && <p className="reparto-message" role="status">{message}</p>}
       <div className="reparto-layout"><section className="reparto-stops panel"><div className="reparto-panel-head"><div><p className="eyebrow">{activeRoute ? activeRoute.code : "ORDEN SUGERIDO"}</p><h2>{activeRoute ? `Ruta de ${activeRoute.driver || "reparto"}` : "Entregas para hoy"}</h2><span>{activeRoute ? `${activeRoute.stops?.length || 0} paradas · ${activeRoute.vehicle || "Vehículo sin indicar"}` : "Ordenadas por horario de apertura"}</span></div>{activeRoute?.maps_url && <a className="button primary" href={activeRoute.maps_url} target="_blank" rel="noreferrer">Navegar toda la ruta</a>}</div>{loading ? <div className="reparto-loading" role="status">Cargando entregas…</div> : !routeStops.length ? <div className="reparto-empty"><b>No hay entregas para esta fecha.</b><span>Prueba otra fecha o vuelve al CRM para planificar la ruta.</span></div> : <ol className="reparto-stop-list">{routeStops.map((stop: any, index: number) => { const shipment = shipments.find((item) => Number(item.id) === Number(stop.shipment_id)) || stop; const done = ["Completada", "Entregado"].includes(String(stop.status || "")); const destination = mapsUrl({ ...shipment, ...stop }); return <li className={`reparto-stop${done ? " done" : ""}`} key={stop.id}><div className="reparto-stop-number">{done ? "✓" : stop.position || index + 1}</div><div className="reparto-stop-main"><div className="reparto-stop-title"><div><b>{stop.client_name || shipment.client_name}</b><small>{shipment.code || stop.shipment_code || "Envío"}</small></div><span className={`reparto-stop-status ${done ? "done" : "pending"}`}>{done ? "Completada" : stop.status || "Pendiente"}</span></div><p>{[stop.address || shipment.address, stop.city || shipment.city].filter(Boolean).join(" · ") || "Dirección no indicada"}</p><small className="reparto-stop-window">{stop.opening_time && stop.closing_time ? `Horario ${stop.opening_time}–${stop.closing_time}` : "Horario pendiente de indicar"}{stop.distance_km ? ` · ${stop.distance_km} km` : ""}</small><div className="reparto-stop-actions">{destination ? <a className="reparto-map-button" href={destination} target="_blank" rel="noreferrer">↗ Cómo llegar</a> : <span className="reparto-no-map">Ubicación sin dirección</span>}<button type="button" className="reparto-open-button" onClick={() => void openShipment(shipment)}>Abrir entrega</button><button type="button" className={`reparto-check-button${done ? " checked" : ""}`} onClick={() => void updateStop(stop, done ? "Pendiente" : "Completada")}>{done ? "Desmarcar" : "✓ Marcar parada"}</button>{activeRoute && <span className="reparto-reorder"><button type="button" aria-label="Subir parada" onClick={() => void moveStop(index, -1)} disabled={index === 0}>↑</button><button type="button" aria-label="Bajar parada" onClick={() => void moveStop(index, 1)} disabled={index === routeStops.length - 1}>↓</button></span>}</div></div></li>; })}</ol>}</section>
         <aside className="reparto-side"><section className="reparto-route-picker panel"><div className="reparto-panel-head compact"><div><p className="eyebrow">PLANIFICACIÓN</p><h2>Mis rutas</h2><span>Selecciona la ruta asignada</span></div></div>{routes.length ? routes.map((route) => <button type="button" key={route.id} className={`reparto-route-option${Number(route.id) === Number(activeRouteId) ? " active" : ""}`} onClick={() => setActiveRouteId(Number(route.id))}><span><b>{route.code}</b><small>{dateLabel(route.route_date)} · {route.driver || "Sin repartidor"}</small></span><strong>{route.stops?.length || 0}</strong></button>) : <p className="reparto-empty small">No hay una ruta planificada para esta fecha.</p>}<p className="reparto-plan-link reparto-driver-note">La planificación y los cambios de ruta los gestiona el equipo desde el CRM.</p></section><section className="reparto-help panel"><p className="eyebrow">SECUENCIA RECOMENDADA</p><h2>Una entrega cada vez</h2><p>Abre Maps para llegar, entra en la entrega para enseñar el pedido al cliente y registra firma, fotos o incidencias antes de continuar.</p></section></aside></div>
+      {activeRoute && <DriverDailyClosingPanel route={activeRoute} stops={routeStops} shipments={shipments} actor={actor} />}
       <DeliveryExpensePanel actor={actor} />
     </div>
     {selectedShipment && <div className="reparto-detail-overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setSelectedShipment(null)}><section className="reparto-detail-modal" role="dialog" aria-modal="true" aria-label={`Detalle del envío ${selectedShipment.code || ""}`}><header className="reparto-detail-head"><div><p className="eyebrow">ENTREGA · {selectedShipment.shipping_date ? dateLabel(selectedShipment.shipping_date) : ""}</p><h2>{selectedShipment.client_name}</h2><span>{selectedShipment.code} · {[selectedShipment.address, selectedShipment.city].filter(Boolean).join(" · ")}</span><div className="reparto-contact-line"><span>{clients.find((client) => Number(client.id) === Number(selectedShipment.client_id))?.phone || "Teléfono no indicado"}</span>{phoneUrl(clients.find((client) => Number(client.id) === Number(selectedShipment.client_id))?.phone) && <a href={phoneUrl(clients.find((client) => Number(client.id) === Number(selectedShipment.client_id))?.phone)}>Llamar</a>}{whatsappUrl(clients.find((client) => Number(client.id) === Number(selectedShipment.client_id))?.phone, selectedShipment) && <a href={whatsappUrl(clients.find((client) => Number(client.id) === Number(selectedShipment.client_id))?.phone, selectedShipment)} target="_blank" rel="noreferrer">WhatsApp</a>}</div></div><button type="button" className="reparto-close" onClick={() => setSelectedShipment(null)} aria-label="Cerrar detalle">×</button></header>{detailLoading ? <div className="reparto-loading">Cargando contenido del pedido…</div> : <><div className="reparto-detail-facts"><span><b>HORARIO</b>{selectedShipment.opening_time && selectedShipment.closing_time ? `${selectedShipment.opening_time}–${selectedShipment.closing_time}` : "Pendiente"}</span><span><b>BULTOS</b>{selectedShipment.packages || "—"}</span><span><b>ESTADO</b>{selectedShipment.status || "Pendiente"}</span></div><div className="reparto-detail-actions">{mapsUrl(selectedShipment) ? <a className="button primary" href={mapsUrl(selectedShipment)} target="_blank" rel="noreferrer">Cómo llegar con Maps</a> : <span className="reparto-no-map">Ubicación sin dirección</span>}<button type="button" className="button secondary" onClick={async () => { const address = [selectedShipment.address, selectedShipment.city].filter(Boolean).join(", "); if (!address) return setMessage("Este pedido no tiene una dirección indicada."); try { await navigator.clipboard.writeText(address); setMessage("Dirección copiada para usarla en el navegador o Maps."); } catch { setMessage("No se ha podido copiar la dirección."); } }}>Copiar dirección</button><button type="button" className="button secondary" onClick={() => { setReturnLine(selectedLines[0] || null); setReturnsOpen(true); }}>Tramitar devolución</button></div>{selectedShipment.incidents && <div className="reparto-incident"><b>Incidencias / indicaciones</b><p>{selectedShipment.incidents}</p></div>}<div className="reparto-lines"><h3>Contenido del pedido</h3>{selectedLines.length ? selectedLines.map((line) => <div key={line.id} className="reparto-line"><span>{line.quantity_requested || line.quantity} {line.quantity_unit || "uds."}</span><b>{line.product_name}</b><button type="button" onClick={() => { setReturnLine(line); setReturnsOpen(true); }}>Devolver</button></div>) : <p>No hay líneas cargadas para este pedido.</p>}</div><DeliverySignaturePanel shipment={selectedShipment} actor={actor} client={clients.find((client) => Number(client.id) === Number(selectedShipment.client_id))} lines={selectedLines} products={products} onSaved={(updated) => { setSelectedShipment((current: any) => ({ ...current, ...updated, status: updated.status || "Entregado" })); setShipments((current) => current.map((item) => Number(item.id) === Number(updated.id) ? { ...item, ...updated } : item)); const matchingStop = activeRoute && routeStops.find((stop: any) => Number(stop.shipment_id) === Number(updated.id)); if (matchingStop) void updateStop(matchingStop, "Completada"); }} /><DeliveryPaymentPanel shipment={selectedShipment} actor={actor} onSaved={(updated) => { setSelectedShipment((current: any) => ({ ...current, ...updated })); setShipments((current) => current.map((item) => Number(item.id) === Number(updated.id) ? { ...item, ...updated } : item)); }} /></>}</section></div>}

@@ -97,6 +97,9 @@ const migrationsByTable = {
   vehicle_maintenance: [
     ["table", "CREATE TABLE IF NOT EXISTS vehicle_maintenance(id INTEGER PRIMARY KEY AUTOINCREMENT,vehicle_id INTEGER NOT NULL,maintenance_date TEXT NOT NULL,maintenance_km REAL DEFAULT 0,maintenance_type TEXT NOT NULL,amount REAL DEFAULT 0,next_due_km REAL,next_due_date TEXT,notes TEXT,status TEXT DEFAULT 'Realizado',created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT)"],
   ],
+  driver_daily_closures: [
+    ["table", "CREATE TABLE IF NOT EXISTS driver_daily_closures(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,closure_date TEXT NOT NULL,driver TEXT,vehicle_id INTEGER,route_id INTEGER,route_code TEXT,status TEXT DEFAULT 'Pendiente de revisar',deliveries_total INTEGER DEFAULT 0,delivered_total INTEGER DEFAULT 0,incident_total INTEGER DEFAULT 0,pending_total INTEGER DEFAULT 0,cash_total REAL DEFAULT 0,card_total REAL DEFAULT 0,transfer_total REAL DEFAULT 0,other_total REAL DEFAULT 0,total_collected REAL DEFAULT 0,cash_handover_amount REAL,cash_difference REAL,km_start REAL,km_end REAL,distance_km REAL,fuel_liters REAL DEFAULT 0,fuel_amount REAL DEFAULT 0,fuel_station TEXT,fuel_reference TEXT,notes TEXT,reviewed_by TEXT,reviewed_at TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT)"],
+  ],
   delivery_route_stops: [
     ["table", "CREATE TABLE IF NOT EXISTS delivery_route_stops(id INTEGER PRIMARY KEY AUTOINCREMENT,route_id INTEGER NOT NULL,position INTEGER NOT NULL,shipment_id INTEGER,client_id INTEGER,collection_point_id INTEGER,client_name TEXT,address TEXT,city TEXT,latitude REAL,longitude REAL,distance_km REAL DEFAULT 0,status TEXT DEFAULT 'Pendiente',load_confirmed INTEGER DEFAULT 0,notes TEXT,driver_notes TEXT,invoice_delivery_method TEXT,created_at TEXT,updated_at TEXT)"],
     ["load_confirmed", "ALTER TABLE delivery_route_stops ADD COLUMN load_confirmed INTEGER DEFAULT 0"],
@@ -322,6 +325,8 @@ const migrationsByTable = {
     ["deleted", "ALTER TABLE payments ADD COLUMN deleted INTEGER DEFAULT 0"],
     ["created_at", "ALTER TABLE payments ADD COLUMN created_at TEXT"],
     ["updated_at", "ALTER TABLE payments ADD COLUMN updated_at TEXT"],
+    ["notes", "ALTER TABLE payments ADD COLUMN notes TEXT"],
+    ["reference", "ALTER TABLE payments ADD COLUMN reference TEXT"],
   ],
   import_batches: [
     ["table", "CREATE TABLE IF NOT EXISTS import_batches(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,source_system TEXT NOT NULL,source_file TEXT NOT NULL,entity TEXT NOT NULL,status TEXT DEFAULT 'Pendiente',rows_read INTEGER DEFAULT 0,rows_inserted INTEGER DEFAULT 0,rows_updated INTEGER DEFAULT 0,rows_skipped INTEGER DEFAULT 0,started_at TEXT,completed_at TEXT,notes TEXT,created_by TEXT DEFAULT 'Sistema',created_at TEXT)"],

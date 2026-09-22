@@ -99,6 +99,7 @@ const initialModules = [
   "Preparación de pedidos",
   "Lugares de recogida",
   "Carga de vehículos",
+  "Reparto",
   "Rutas",
   "Entradas",
   "Salidas",
@@ -1036,6 +1037,7 @@ const sidebarGroups = [
       "Almacenes",
       "Lugares de recogida",
       "Carga de vehículos",
+      "Reparto",
       "Rutas",
       "Entradas",
       "Salidas",
@@ -1054,7 +1056,7 @@ const sidebarGroups = [
 const routeModuleScopes: Record<string, string[]> = {
   crm: initialModules,
   comercial: ["Pedidos", "Clientes", "Contactos", "Presupuestos", "Albaranes", "Facturas", "Cobros", "Envíos"],
-  almacen: ["Preparación de pedidos", "Carga de vehículos", "Stock", "Productos", "Almacenes", "Rutas", "Entradas", "Salidas", "Devoluciones", "Envíos", "Pedidos", "Notas"],
+  almacen: ["Preparación de pedidos", "Carga de vehículos", "Reparto", "Stock", "Productos", "Almacenes", "Rutas", "Entradas", "Salidas", "Devoluciones", "Envíos", "Pedidos", "Notas"],
   web: ["Inicio", "Pedidos", "Clientes", "Productos"],
   ocr: ["OCR inteligente"],
 };
@@ -1114,6 +1116,7 @@ export function Sidebar({
   }, [active]);
   const canOpenCommercialView = user?.role === "admin" || allowedModulesFor(user).includes("Pedidos");
   const canOpenWarehouseView = user?.role === "admin" || allowedModulesFor(user).includes("Preparación de pedidos");
+  const canOpenRepartoView = user?.role === "admin" || allowedModulesFor(user).includes("Reparto");
   const canOpenWebView = user?.role === "admin" || allowedModulesFor(user).includes("Clientes");
   function drop(target: string) {
     if (!drag || drag === target) return;
@@ -1181,7 +1184,7 @@ export function Sidebar({
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={() => drop(m)}
                   className={active === m ? "nav-item active" : "nav-item"}
-                  onClick={() => { setActive(m); setMobileOpen(false); }}
+                  onClick={() => { setMobileOpen(false); if (m === "Reparto") { window.location.href = "/reparto"; return; } setActive(m); }}
                 >
                   {m}
                 </button>
@@ -1189,11 +1192,12 @@ export function Sidebar({
           </div>
         );
       })}
-      {mobileOpen && (canOpenCommercialView || canOpenWarehouseView || canOpenWebView) && (
+      {mobileOpen && (canOpenCommercialView || canOpenWarehouseView || canOpenRepartoView || canOpenWebView) && (
         <div className="sidebar-route-shortcuts" aria-label="Vistas operativas">
           <div className="side-label">VISTAS OPERATIVAS</div>
           {canOpenCommercialView && <a href="/comercial" onClick={() => setMobileOpen(false)}><ToolbarIcon name="commercial" /><span>Vista comercial</span></a>}
           {canOpenWarehouseView && <a href="/almacen" onClick={() => setMobileOpen(false)}><ToolbarIcon name="warehouse" /><span>Vista almacén</span></a>}
+          {canOpenRepartoView && <a href="/reparto" onClick={() => setMobileOpen(false)}><ToolbarIcon name="map" /><span>Reparto</span></a>}
           {canOpenWebView && <a href="/web" onClick={() => setMobileOpen(false)}><ToolbarIcon name="web" /><span>Web pública</span></a>}
         </div>
       )}
@@ -1286,8 +1290,13 @@ function RoutesManager({ user }: { user: any }) {
   async function load() {
     setLoading(true);
     try {
-      const [shipmentResponse, clientsResponse, pointsResponse, routesResponse] = await Promise.all([fetch("/api/shipments"), fetch("/api/clients?view=lookup&limit=500"), fetch("/api/collection_points?view=lookup&limit=500"), fetch("/api/routes")]);
+      const [shipmentResponse, routesResponse] = await Promise.all([fetch(`/api/shipments?date=${encodeURIComponent(routeDate)}`), fetch(`/api/routes?date=${encodeURIComponent(routeDate)}`)]);
       const shipmentRows = shipmentResponse.ok ? await shipmentResponse.json() : [];
+      const queryIds = (values: any[]) => [...new Set(values.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0))].join(",") || "0";
+      const [clientsResponse, pointsResponse] = await Promise.all([
+        fetch(`/api/clients?view=lookup&ids=${queryIds((Array.isArray(shipmentRows) ? shipmentRows : []).map((item: any) => item.client_id))}`),
+        fetch(`/api/collection_points?view=lookup&ids=${queryIds((Array.isArray(shipmentRows) ? shipmentRows : []).map((item: any) => item.collection_point_id))}`),
+      ]);
       const clients = clientsResponse.ok ? await clientsResponse.json() : [];
       const points = pointsResponse.ok ? await pointsResponse.json() : [];
       const enriched = (Array.isArray(shipmentRows) ? shipmentRows : []).filter((item) => !["Cancelado", "Entregado"].includes(String(item.status || ""))).map((item) => {
@@ -1332,6 +1341,7 @@ function VehicleOperationsPanel({ user, routeDate, vehicles, onReload }: { user:
   const [trips, setTrips] = useState<any[]>([]);
   const [refuels, setRefuels] = useState<any[]>([]);
   const [maintenance, setMaintenance] = useState<any[]>([]);
+  const [closures, setClosures] = useState<any[]>([]);
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
   const [vehicleFormOpen, setVehicleFormOpen] = useState(false);
   const [fuelFormOpen, setFuelFormOpen] = useState(false);
@@ -1345,10 +1355,11 @@ function VehicleOperationsPanel({ user, routeDate, vehicles, onReload }: { user:
   const [error, setError] = useState("");
   async function loadOperations() {
     try {
-      const [tripsResponse, refuelsResponse, maintenanceResponse] = await Promise.all([fetch(`/api/vehicle_trips?date=${encodeURIComponent(routeDate)}`), fetch("/api/vehicle_refuels"), fetch("/api/vehicle_maintenance")]);
+      const [tripsResponse, refuelsResponse, maintenanceResponse, closuresResponse] = await Promise.all([fetch(`/api/vehicle_trips?date=${encodeURIComponent(routeDate)}`), fetch("/api/vehicle_refuels"), fetch("/api/vehicle_maintenance"), fetch(`/api/driver_daily_closures?date=${encodeURIComponent(routeDate)}`)]);
       setTrips(tripsResponse.ok ? await tripsResponse.json() : []);
       setRefuels(refuelsResponse.ok ? await refuelsResponse.json() : []);
       setMaintenance(maintenanceResponse.ok ? await maintenanceResponse.json() : []);
+      setClosures(closuresResponse.ok ? await closuresResponse.json() : []);
     } catch { setError("No se ha podido cargar el control de kilómetros y mantenimiento."); }
   }
   useEffect(() => { void loadOperations(); }, [routeDate]);
@@ -1375,9 +1386,23 @@ function VehicleOperationsPanel({ user, routeDate, vehicles, onReload }: { user:
     event.preventDefault(); setSaving(true); setError(""); setMessage("");
     try { const response = await fetch("/api/vehicle_maintenance", { method: "POST", headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Usuario local" }, body: JSON.stringify(maintenanceDraft) }); const body = await response.json().catch(() => ({})); if (!response.ok) throw new Error(body.error || "No se pudo registrar el mantenimiento"); setMaintenanceFormOpen(false); setMaintenance((current) => [body, ...current]); setMessage("Mantenimiento registrado y próximo aviso recalculado."); onReload(); } catch (caught: any) { setError(caught?.message || "No se pudo registrar el mantenimiento."); } finally { setSaving(false); }
   }
+  async function reviewClosure(closure: any) {
+    setSaving(true); setError(""); setMessage("");
+    try {
+      const response = await fetch(`/api/driver_daily_closures/${closure.id}`, { method: "PUT", headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Usuario local" }, body: JSON.stringify({ status: "Revisado" }) });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "No se pudo revisar el cierre");
+      setClosures((current) => current.map((item) => Number(item.id) === Number(body.id) ? body : item));
+      setMessage("Cierre diario marcado como revisado.");
+    } catch (caught: any) { setError(caught?.message || "No se pudo revisar el cierre."); } finally { setSaving(false); }
+  }
   return <section className="vehicle-operations panel">
     <div className="panel-head"><div><h3>Control de flota</h3><p className="muted">Kilómetros, repostajes y mantenimiento de cada camión.</p></div><div className="vehicle-operations-actions"><button type="button" className="button secondary" onClick={() => { setVehicleFormOpen((current) => !current); setFuelFormOpen(false); setMaintenanceFormOpen(false); }}>{vehicleFormOpen ? "Cerrar" : "Añadir camión"}</button><button type="button" className="button secondary" disabled={!vehicles.length} onClick={() => { setFuelFormOpen((current) => !current); setVehicleFormOpen(false); setMaintenanceFormOpen(false); }}>{fuelFormOpen ? "Cerrar" : "Registrar gasoil"}</button><button type="button" className="button secondary" disabled={!vehicles.length} onClick={() => { setMaintenanceFormOpen((current) => !current); setVehicleFormOpen(false); setFuelFormOpen(false); }}>{maintenanceFormOpen ? "Cerrar" : "Registrar mantenimiento"}</button></div></div>
     {(error || message) && <p className={error ? "error-message" : "success-message"} role={error ? "alert" : "status"}>{error || message}</p>}
+    <div className="vehicle-daily-closures">
+      <div className="vehicle-subhead"><div><b>Cierres diarios de reparto</b><small>Entregas, incidencias, cobros, kilómetros y gasoil del {formatSpanishDateValue(routeDate, false)}.</small></div><span>{closures.length} cierre{closures.length === 1 ? "" : "s"}</span></div>
+      {closures.length ? closures.map((closure: any) => <article className="vehicle-daily-closure-row" key={closure.id}><div><b>{closure.vehicle_plate || closure.vehicle_name || "Camión"}</b><small>{closure.driver || "Sin repartidor"} · {closure.route_code || "Ruta"}</small><span>{closure.delivered_total}/{closure.deliveries_total} entregas · {closure.incident_total} incidencias · {Number(closure.distance_km || 0).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km</span></div><div><b>{Number(closure.total_collected || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</b><small>Efectivo {Number(closure.cash_total || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" })} · Tarjeta {Number(closure.card_total || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" })} · Transferencia {Number(closure.transfer_total || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</small><span>{Number(closure.fuel_liters || 0).toLocaleString("es-ES", { maximumFractionDigits: 1 })} l · {Number(closure.fuel_amount || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" })} gasoil · {Number(closure.fuel_cost_per_km || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}/km</span></div><strong className={`vehicle-daily-closure-status${closure.status === "Revisado" ? " is-reviewed" : ""}`}>{closure.status}</strong>{closure.status !== "Revisado" && <button type="button" className="button secondary" disabled={saving} onClick={() => void reviewClosure(closure)}>Marcar revisado</button>}</article>) : <p className="vehicle-daily-closure-empty">Todavía no hay cierres enviados para esta fecha.</p>}
+    </div>
     {vehicleFormOpen && <form className="vehicle-form" onSubmit={saveVehicle}><label>Nombre o referencia*<input required value={vehicleDraft.name} onChange={(event) => setVehicleDraft({ ...vehicleDraft, name: event.target.value })} placeholder="Camión reparto 1" /></label><label>Matrícula<input value={vehicleDraft.plate} onChange={(event) => setVehicleDraft({ ...vehicleDraft, plate: event.target.value })} placeholder="1234-ABC" /></label><label>Km actuales<input type="number" min="0" value={vehicleDraft.odometer_km} onChange={(event) => setVehicleDraft({ ...vehicleDraft, odometer_km: event.target.value })} /></label><label>Intervalo km mantenimiento<input type="number" min="1" value={vehicleDraft.maintenance_interval_km} onChange={(event) => setVehicleDraft({ ...vehicleDraft, maintenance_interval_km: event.target.value })} /></label><label>Intervalo días mantenimiento<input type="number" min="1" value={vehicleDraft.maintenance_interval_days} onChange={(event) => setVehicleDraft({ ...vehicleDraft, maintenance_interval_days: event.target.value })} /></label><label>Próximo mantenimiento<input type="date" value={vehicleDraft.next_maintenance_date} onChange={(event) => setVehicleDraft({ ...vehicleDraft, next_maintenance_date: event.target.value })} /></label><div className="vehicle-form-actions"><button type="submit" className="button primary" disabled={saving}>{saving ? "Guardando…" : "Guardar camión"}</button></div></form>}
     {fuelFormOpen && <form className="vehicle-form" onSubmit={saveFuel}><label>Camión*<select required value={fuelDraft.vehicle_id} onChange={(event) => chooseVehicle(event.target.value)}><option value="">Seleccionar camión…</option>{vehicles.map((vehicle: any) => <option key={vehicle.id} value={vehicle.id}>{vehicle.plate || vehicle.name}</option>)}</select></label><label>Fecha<input type="date" value={fuelDraft.fuel_date} onChange={(event) => setFuelDraft({ ...fuelDraft, fuel_date: event.target.value })} /></label><label>Importe (€)*<input type="number" min="0" step="0.01" required={!fuelDraft.liters} value={fuelDraft.amount} onChange={(event) => setFuelDraft({ ...fuelDraft, amount: event.target.value })} /></label><label>Litros<input type="number" min="0" step="0.01" value={fuelDraft.liters} onChange={(event) => setFuelDraft({ ...fuelDraft, liters: event.target.value })} /></label><label>N.º de ticket<input value={fuelDraft.ticket_reference} onChange={(event) => setFuelDraft({ ...fuelDraft, ticket_reference: event.target.value })} placeholder="Ticket / factura" /></label><label>Km al repostar<input type="number" min="0" value={fuelDraft.odometer_km} onChange={(event) => setFuelDraft({ ...fuelDraft, odometer_km: event.target.value })} /></label><label>Gasolinera<input value={fuelDraft.station} onChange={(event) => setFuelDraft({ ...fuelDraft, station: event.target.value })} /></label><div className="vehicle-form-actions"><button type="submit" className="button primary" disabled={saving}>{saving ? "Guardando…" : "Guardar repostaje"}</button></div></form>}
     {maintenanceFormOpen && <form className="vehicle-form" onSubmit={saveMaintenance}><label>Camión*<select required value={maintenanceDraft.vehicle_id} onChange={(event) => chooseVehicle(event.target.value)}><option value="">Seleccionar camión…</option>{vehicles.map((vehicle: any) => <option key={vehicle.id} value={vehicle.id}>{vehicle.plate || vehicle.name}</option>)}</select></label><label>Fecha<input type="date" value={maintenanceDraft.maintenance_date} onChange={(event) => setMaintenanceDraft({ ...maintenanceDraft, maintenance_date: event.target.value })} /></label><label>Tipo*<input required value={maintenanceDraft.maintenance_type} onChange={(event) => setMaintenanceDraft({ ...maintenanceDraft, maintenance_type: event.target.value })} /></label><label>Km del mantenimiento<input type="number" min="0" value={maintenanceDraft.maintenance_km} onChange={(event) => setMaintenanceDraft({ ...maintenanceDraft, maintenance_km: event.target.value })} /></label><label>Importe (€)<input type="number" min="0" step="0.01" value={maintenanceDraft.amount} onChange={(event) => setMaintenanceDraft({ ...maintenanceDraft, amount: event.target.value })} /></label><label>Próximo mantenimiento (km)<input type="number" min="0" value={maintenanceDraft.next_due_km} onChange={(event) => setMaintenanceDraft({ ...maintenanceDraft, next_due_km: event.target.value })} placeholder="Automático según intervalo" /></label><label>Próximo mantenimiento (fecha)<input type="date" value={maintenanceDraft.next_due_date} onChange={(event) => setMaintenanceDraft({ ...maintenanceDraft, next_due_date: event.target.value })} /></label><div className="vehicle-form-actions"><button type="submit" className="button primary" disabled={saving}>{saving ? "Guardando…" : "Guardar mantenimiento"}</button></div></form>}
@@ -1866,6 +1891,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
         {loading ? <div className="data-loading" role="status"><LoadingIndicator label="Cargando pedidos preparados…" /></div> : unassigned.length ? unassigned.map((item: any) => renderBoardCard(item, "unassigned")) : <p className="empty-state">Todos los pedidos están asignados a un camión.</p>}
       </div>
     </section>
+    <VehicleOperationsPanel user={user} routeDate={routeDate} vehicles={vehicles} onReload={() => void load(true)} />
     {routeAlternatives.length > 0 && <div className="preview-overlay vehicle-route-alternatives-overlay" role="dialog" aria-modal="true" aria-label="Alternativas de rutas" onClick={(event) => event.target === event.currentTarget && setRouteAlternatives([])}><div className="vehicle-route-alternatives-modal"><header><div><p className="eyebrow">PLANIFICACIÓN · 2 CAMIONES</p><h2>Elige una alternativa de reparto</h2><small>Ordenadas de mejor a peor: primero se respetan los horarios, después el menor tiempo y los menos kilómetros.</small></div><button type="button" className="preview-close" onClick={() => setRouteAlternatives([])} aria-label="Cerrar">×</button></header><div className="vehicle-route-alternatives-grid">{routeAlternatives.map((alternative: any, index: number) => <article className={`vehicle-route-alternative${alternative.recommended ? " is-recommended" : ""}`} key={`${alternative.title}-${index}`}><div className="vehicle-route-alternative-head"><div><b>{alternative.recommended ? "Recomendada" : `Alternativa ${index + 1}`}</b><h3>{alternative.title}</h3><small>{alternative.description}</small></div><strong>{formatLoadDuration(Number(alternative.total_minutes || 0))}</strong></div><div className="vehicle-route-alternative-summary"><span>{Number(alternative.total_distance_km || 0).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km sumados</span><span>{formatLoadDuration(Number(alternative.combined_minutes || 0))} los 2 camiones · {alternative.late_stops ? `${alternative.late_stops} fuera de horario` : "Horarios respetados"}</span></div><div className="vehicle-route-alternative-columns">{alternative.columns?.map((column: any, columnIndex: number) => <div key={columnIndex}><b>{vehicleColumns[columnIndex]?.plate || vehicleColumns[columnIndex]?.name || `Camión ${columnIndex + 1}`}</b><span>{column.shipment_ids?.length || 0} pedidos · {Number(column.estimate?.distance_km || 0).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km · {formatLoadDuration(Number(column.estimate?.total_minutes || 0))}</span><small>{Number(column.estimate?.driving_minutes || 0)} min carretera + {Number(column.estimate?.waiting_minutes || 0)} min espera + {Number(column.estimate?.service_minutes || 0)} min entregas</small><small>{(column.stops || []).map((stop: any) => stop.client_name || `Pedido ${stop.shipment_id}`).join(" → ") || "Sin pedidos"}</small></div>)}</div><button type="button" className="button primary" onClick={() => applyRouteAlternative(alternative)}>Usar esta alternativa</button></article>)}</div></div></div>}
     {printShipment && <ShipmentLabelModal shipment={printShipment} client={{ name: printShipment.client_name }} lines={Array.isArray(printShipment.load_lines) ? printShipment.load_lines : []} products={products} address={printShipment.address || ""} city={printShipment.city || ""} order={orders.find((item: any) => Number(item.id) === Number(printShipment.order_id))} invoice={invoices.find((item: any) => Number(item.order_id) === Number(printShipment.order_id))} onPrintInvoice={(invoice) => void printInvoiceDocument(invoice)} onClose={() => setPrintShipmentId(null)} />}
   </section>;
@@ -2904,46 +2930,27 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
     setMessage("");
     try {
       const now = new Date().toISOString();
-      const results = await Promise.allSettled(pendingValidationLines.map(async (line) => {
+      const lines = pendingValidationLines.map((line) => {
         const requested = requestedQuantity(line);
         const scannedCode = barcodeDraft(line);
         const scannedStatus = barcodeCheck(line, scannedCode);
-        const next = {
-          ...line,
-          prepared_quantity: requested,
-          prepared: 1,
-          preparation_status: "Preparado",
-          barcode_scanned_code: scannedCode || null,
-          barcode_scan_status: scannedStatus,
-          barcode_scanned_at: scannedCode ? now : null,
-          barcode_scanned_by: scannedCode ? actor : null,
-        };
-        const response = await fetchWithTimeout(`/api/order_lines/${line.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json", "X-Actor": actor },
-          body: JSON.stringify({ prepared: 1, prepared_quantity: requested, preparation_status: "Preparado", barcode_scanned_code: next.barcode_scanned_code, barcode_scan_status: next.barcode_scan_status, barcode_scanned_at: next.barcode_scanned_at, barcode_scanned_by: next.barcode_scanned_by }),
-        });
-        if (!response.ok) throw new Error(`No se pudo validar la línea ${line.id}.`);
-        return next;
-      }).finally(() => {
-        setBulkProgress((current) => ({ ...current, completed: current.completed + 1 }));
-      }));
-      const successfulLines = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
-      if (!successfulLines.length) throw new Error("No se pudo validar ninguna línea. Revisa la conexión y vuelve a intentarlo.");
-      const successfulById = new Map(successfulLines.map((line) => [Number(line.id), line]));
-      const nextSourceLines = sourceLines.map((line) => successfulById.get(Number(line.id)) || line);
+        return { id: Number(line.id), prepared_quantity: requested, barcode_scanned_code: scannedCode || null, barcode_scan_status: scannedStatus, barcode_scanned_at: scannedCode ? now : null, barcode_scanned_by: scannedCode ? actor : null };
+      });
+      const response = await fetchWithTimeout("/api/order_lines/bulk-validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Actor": actor },
+        body: JSON.stringify({ lines }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "No se pudieron validar todas las líneas.");
+      setBulkProgress({ completed: pendingValidationLines.length, total: pendingValidationLines.length });
+      const validatedLines = Array.isArray(payload.lines) ? payload.lines : [];
+      const validatedById = new Map(validatedLines.map((line: any) => [Number(line.id), line]));
+      const nextSourceLines = sourceLines.map((line) => validatedById.get(Number(line.id)) || line);
       setSourceLines(nextSourceLines);
       setDrafts(() => Object.fromEntries(nextSourceLines.map((line) => [String(line.id), String(defaultDraftQuantity(line))])));
       setEditingLineIds({});
-      const orderIdsToUpdate = Array.from(new Set(successfulLines.map((line) => Number(line.order_id)).filter(Boolean)));
-      const shipmentResults = await Promise.allSettled(orderIdsToUpdate.map((orderId) => updateShipmentStatus(orderId, nextSourceLines.filter((line) => Number(line.order_id) === orderId))));
-      const failedShipments = shipmentResults.filter((result) => result.status === "rejected").length;
-      const failedLines = pendingValidationLines.length - successfulLines.length;
-      if (failedLines || failedShipments) {
-        setError(`Se validaron ${successfulLines.length} líneas, pero quedaron ${failedLines + failedShipments} actualizaciones pendientes.`);
-      } else {
-        setMessage(`${successfulLines.length} líneas validadas correctamente. Revisa las incidencias antes de mandar a cargar.`);
-      }
+      setMessage(`${validatedLines.length || pendingValidationLines.length} líneas validadas correctamente. Revisa las incidencias antes de mandar a cargar.`);
     } catch (reason: any) {
       setError(reason?.message || "No se pudieron validar todas las líneas.");
     } finally {
@@ -2968,17 +2975,18 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
     setMessage("");
     try {
       const closedAt = new Date().toISOString();
-      const responses = await Promise.all(targets.map(async (shipment: any) => {
+      const shipments = targets.map((shipment: any) => {
         const lines = sourceLines.filter((line) => Number(line.order_id) === Number(shipment.order_id));
         const hasIncident = lines.some((line) => String(line.preparation_status || "") === "Incidencia");
-        const response = await fetch(`/api/shipments/${shipment.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json", "X-Actor": actor },
-          body: JSON.stringify({ status: hasIncident ? "Preparado con incidencia" : "Preparado", prepared_at: closedAt, prepared_by: actor, preparation_closed_at: closedAt, preparation_closed_by: actor }),
-        });
-        return response.ok;
-      }));
-      if (responses.some((ok) => !ok)) throw new Error("No se pudo cerrar uno de los pedidos preparados.");
+        return { id: Number(shipment.id), status: hasIncident ? "Preparado con incidencia" : "Preparado" };
+      });
+      const response = await fetch("/api/shipments/bulk-close-preparation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Actor": actor },
+        body: JSON.stringify({ shipments }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "No se pudo cerrar uno de los pedidos preparados.");
       setLoadSent(true);
       setMessage("Pedidos enviados a Carga de vehículos. Puedes continuar allí con la asignación al camión.");
       window.setTimeout(onClose, 1400);
@@ -3612,6 +3620,54 @@ function DriverRouteApp({ user }: { user: any }) {
 
 */
 
+export function DriverDailyClosingPanel({ route, stops, shipments, actor }: { route: any; stops: any[]; shipments: any[]; actor: string }) {
+  const [existing, setExisting] = useState<any>(null);
+  const [draft, setDraft] = useState<any>({ km_start: "", km_end: "", fuel_liters: "", fuel_amount: "", fuel_station: "", fuel_reference: "", cash_handover_amount: "", notes: "" });
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [expanded, setExpanded] = useState(false);
+  const stopShipmentIds = new Set(stops.map((stop: any) => Number(stop.shipment_id)));
+  const routeShipments = shipments.filter((shipment: any) => stopShipmentIds.has(Number(shipment.id)));
+  const paymentTotals = routeShipments.reduce((totals: any, shipment: any) => {
+    if (shipment.payment_received_status !== "Recibido") return totals;
+    const amount = Number(shipment.payment_received_amount || 0);
+    const method = String(shipment.payment_received_method || "Otro").toLowerCase();
+    if (method.includes("efect")) totals.cash += amount;
+    else if (method.includes("tarjet")) totals.card += amount;
+    else if (method.includes("transfer")) totals.transfer += amount;
+    else totals.other += amount;
+    totals.total += amount;
+    return totals;
+  }, { cash: 0, card: 0, transfer: 0, other: 0, total: 0 });
+  const delivered = stops.filter((stop: any) => ["Entregado", "Completada"].includes(String(stop.status || ""))).length;
+  const incidents = stops.filter((stop: any) => stop.status === "Incidencia").length;
+  useEffect(() => {
+    let cancelled = false;
+    setExisting(null); setMessage(""); setError("");
+    setDraft({ km_start: "", km_end: "", fuel_liters: "", fuel_amount: "", fuel_station: "", fuel_reference: "", cash_handover_amount: "", notes: "" });
+    if (!route?.id) return;
+    fetch(`/api/driver_daily_closures?route_id=${encodeURIComponent(route.id)}`, { cache: "no-store" }).then((response) => response.ok ? response.json() : []).then((rows) => {
+      if (cancelled) return;
+      const row = Array.isArray(rows) ? rows[0] : null;
+      if (row) { setExisting(row); setDraft({ km_start: row.km_start ?? "", km_end: row.km_end ?? "", fuel_liters: row.fuel_liters ?? "", fuel_amount: row.fuel_amount ?? "", fuel_station: row.fuel_station || "", fuel_reference: row.fuel_reference || "", cash_handover_amount: row.cash_handover_amount ?? "", notes: row.notes || "" }); }
+    }).catch(() => { if (!cancelled) setError("No se pudo cargar el cierre anterior de la ruta."); });
+    return () => { cancelled = true; };
+  }, [route?.id]);
+  function update(field: string, value: string) { setDraft((current: any) => ({ ...current, [field]: value })); }
+  async function submit(event: FormEvent) {
+    event.preventDefault(); setSaving(true); setMessage(""); setError("");
+    try {
+      const response = await fetch("/api/driver_daily_closures", { method: "POST", headers: { "Content-Type": "application/json", "X-Actor": actor }, body: JSON.stringify({ route_id: route.id, closure_date: route.route_date, driver: route.driver || actor, vehicle_id: route.vehicle_id, ...draft }) });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "No se pudo cerrar la jornada.");
+      setExisting(body); setMessage("Cierre diario guardado. Administración ya puede revisarlo.");
+    } catch (caught: any) { setError(caught?.message || "No se pudo cerrar la jornada."); }
+    finally { setSaving(false); }
+  }
+  return <section className={`driver-daily-closing${expanded ? " is-expanded" : ""}`}><div className="driver-section-title"><div><b>Cierre diario</b><small>Entrega, cobros, kilómetros y gasoil de {route?.route_date || "la ruta"}.</small></div><strong>{existing?.status || "Pendiente"}</strong><button type="button" className="reparto-panel-toggle" onClick={() => setExpanded((current) => !current)}>{expanded ? "Ocultar" : "Abrir"}</button></div><div className="driver-daily-summary"><span><b>{delivered}/{stops.length}</b> entregas</span><span><b>{incidents}</b> incidencias</span><span><b>{paymentTotals.total.toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</b> cobrado</span><span><b>{paymentTotals.cash.toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</b> efectivo</span><span><b>{paymentTotals.card.toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</b> tarjeta</span><span><b>{paymentTotals.transfer.toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</b> transferencia</span></div><form onSubmit={submit}><div className="driver-daily-fields"><label>Km inicial<input required type="number" min="0" step="0.1" value={draft.km_start} onChange={(event) => update("km_start", event.target.value)} /></label><label>Km final<input required type="number" min="0" step="0.1" value={draft.km_end} onChange={(event) => update("km_end", event.target.value)} /></label><label>Gasoil (litros)<input type="number" min="0" step="0.01" value={draft.fuel_liters} onChange={(event) => update("fuel_liters", event.target.value)} /></label><label>Gasoil (€)<input type="number" min="0" step="0.01" value={draft.fuel_amount} onChange={(event) => update("fuel_amount", event.target.value)} /></label><label>Gasolinera<input value={draft.fuel_station} onChange={(event) => update("fuel_station", event.target.value)} placeholder="Opcional" /></label><label>Ticket gasoil<input value={draft.fuel_reference} onChange={(event) => update("fuel_reference", event.target.value)} placeholder="Opcional" /></label><label>Efectivo entregado<input type="number" min="0" step="0.01" value={draft.cash_handover_amount} onChange={(event) => update("cash_handover_amount", event.target.value)} placeholder="Si procede" /></label><label className="driver-daily-wide">Observaciones<textarea rows={2} value={draft.notes} onChange={(event) => update("notes", event.target.value)} placeholder="Incidencias, gastos o aclaraciones…" /></label></div><button type="submit" className="button primary" disabled={saving}>{saving ? "Guardando cierre…" : existing ? "Actualizar cierre" : "Cerrar jornada"}</button></form>{(error || message) && <p className={error ? "driver-mobile-error" : "driver-mobile-message"} role={error ? "alert" : "status"}>{error || message}</p>}</section>;
+}
+
 function DriverRouteApp({ user }: { user: any }) {
   const [routeDate, setRouteDate] = useState(() => tabletTodayInput());
   const [routes, setRoutes] = useState<any[]>([]);
@@ -3691,9 +3747,12 @@ function DriverRouteApp({ user }: { user: any }) {
     const popup = window.open("about:blank", "_blank");
     fetch(`/api/invoices/${invoice.id}/pdf`, { method: "POST", headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Repartidor" }, body: JSON.stringify({}) }).then(async (response) => { const body = await response.json(); if (!response.ok) throw new Error(body.error || "No se ha podido generar la factura."); return body; }).then((body) => { const url = body.share_url || `/api/invoices/share/${encodeURIComponent(body.share_token || "")}`; if (popup) popup.location.href = url; else window.open(url, "_blank"); }).catch((caught) => { popup?.close(); setError(caught?.message || "No se ha podido generar la factura."); });
   }
-  function deliverySaved(updated: any) { setShipments((current) => current.map((row) => Number(row.id) === Number(updated.id) ? { ...row, ...updated } : row)); if (selectedStop) void updateStopStatus(selectedStop, "Entregado"); }
+  function deliverySaved(updated: any) {
+    setShipments((current) => current.map((row) => Number(row.id) === Number(updated.id) ? { ...row, ...updated } : row));
+    if (selectedStop) void updateStopStatus(selectedStop, updated.delivery_signature_status === "Rechazó firmar" ? "Incidencia" : "Entregado");
+  }
   const actor = user?.username || "Repartidor";
-  return <main className="driver-mobile-app"><header className="driver-mobile-header"><div><span className="driver-brand-mark">E</span><div><b>Reparto</b><small>{actor}</small></div></div><button type="button" className="driver-refresh" onClick={() => void load()} aria-label="Actualizar">↻</button></header><section className="driver-mobile-toolbar"><label>Fecha<input type="date" value={routeDate} onChange={(event) => setRouteDate(event.target.value)} /></label><label>Camión<select value={selectedRouteId} onChange={(event) => { setSelectedRouteId(event.target.value); setSelectedStopId(null); }}><option value="">Selecciona una ruta</option>{routes.map((route) => <option value={route.id} key={route.id}>{route.vehicle || `Camión ${route.id}`} · {route.driver || "Sin conductor"}</option>)}</select></label></section>{loading ? <div className="driver-mobile-loading">Cargando la ruta…</div> : error ? <div className="driver-mobile-error" role="alert">{error}<button type="button" onClick={() => void load()}>Reintentar</button></div> : !activeRoute ? <div className="driver-mobile-empty"><b>No hay ruta asignada</b><span>Cuando administración guarde la carga del día aparecerá aquí.</span></div> : <><section className="driver-route-summary"><div className="driver-route-summary-main"><div><b>{activeRoute.vehicle || "Camión"}</b><span>{stops.filter((stop: any) => stop.status === "Entregado").length}/{stops.length} entregas completadas · {Number(activeRoute.total_distance_km || 0).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km · {Math.floor(Number(activeRoute.estimated_minutes || 0) / 60)} h {Number(activeRoute.estimated_minutes || 0) % 60} min</span></div><strong className="driver-route-status">{activeRoute.status || "Planificada"}</strong></div><div className="driver-route-actions">{activeRoute.status !== "Completada" && <button type="button" className="button primary" onClick={gpsActive ? finishRoute : startGps}>{gpsActive ? "Finalizar ruta" : activeRoute.status === "En curso" ? "Reanudar GPS" : "Iniciar ruta y GPS"}</button>}{gpsActive && <span className="driver-gps-live">● GPS activo{location ? ` · ${Number(location.accuracy_m || 0).toFixed(0)} m` : ""}</span>}</div></section><nav className="driver-stop-list" aria-label="Paradas de la ruta">{stops.map((stop: any, index: number) => <button type="button" className={`driver-stop-card${Number(selectedStop?.id) === Number(stop.id) ? " is-selected" : ""}${stop.status === "Entregado" ? " is-complete" : ""}`} key={stop.id} onClick={() => setSelectedStopId(Number(stop.id))}><span className="driver-stop-number">{stop.status === "Entregado" ? "✓" : index + 1}</span><span><b>{stop.client_name || "Cliente"}</b><small>{[stop.address, stop.city].filter(Boolean).join(" · ")}</small><small>{stop.opening_time && stop.closing_time ? `Recepción ${String(stop.opening_time).slice(0, 5)}–${String(stop.closing_time).slice(0, 5)}` : "Horario pendiente"} · {stop.distance_km ? `${String(stop.distance_km).replace(".", ",")} km` : "Salida"}</small></span><em>{stop.status || "Pendiente"}</em></button>)}</nav>{selectedStop && shipment && <section className="driver-stop-detail"><div className="driver-detail-head"><div><p className="eyebrow">PARADA {selectedStop.position || 1}</p><h2>{selectedStop.client_name}</h2><p>{[selectedStop.address, selectedStop.city].filter(Boolean).join(" · ")}</p><small>{selectedStop.opening_time && selectedStop.closing_time ? `Recepción ${String(selectedStop.opening_time).slice(0, 5)}–${String(selectedStop.closing_time).slice(0, 5)}` : "Horario pendiente"}</small></div><button type="button" className="button secondary" onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent([selectedStop.address, selectedStop.city].filter(Boolean).join(", "))}`, "_blank")}>Navegar</button></div><div className="driver-detail-actions"><button type="button" className="button secondary" onClick={() => void updateStopStatus(selectedStop, "En entrega")} disabled={selectedStop.status === "Entregado"}>Estoy en el cliente</button><button type="button" className="button ghost" onClick={() => void updateStopStatus(selectedStop, "Incidencia")}>Incidencia</button></div><section className="driver-order-content"><div className="driver-section-title"><div><b>{shipment.code}</b><small>Contenido para mostrar al cliente</small></div><button type="button" className="button secondary" onClick={openInvoice}>Factura</button></div>{selectedLines.length ? selectedLines.map((line: any, index: number) => <div className="driver-order-line" key={`${line.id}-${index}`}><span>{line.quantity || line.quantity_requested || 0} {line.quantity_unit || "uds."}</span><b>{line.product_name || `Producto #${line.product_id}`}</b></div>) : <p className="driver-muted">No hay líneas detalladas disponibles.</p>}{(order?.driver_notes || shipment.driver_notes || selectedStop.driver_notes) && <div className="driver-notes"><b>Indicaciones</b><span>{order?.driver_notes || shipment.driver_notes || selectedStop.driver_notes}</span></div>}</section><DriverPaymentPanel shipment={shipment} invoice={invoice} actor={actor} onSaved={(updated) => setShipments((current) => current.map((row) => Number(row.id) === Number(updated.id) ? { ...row, ...updated } : row))} /><DeliverySignaturePanel shipment={shipment} actor={actor} client={{ name: selectedStop.client_name, address: selectedStop.address, city: selectedStop.city }} lines={selectedLines} onSaved={deliverySaved} /></section>}</>}{message && <p className="driver-mobile-message" role="status">{message}</p>}<footer className="driver-mobile-footer">{activeRoute ? `${activeRoute.code} · ${activeRoute.driver || actor}` : "Vista móvil de reparto"}</footer></main>;
+  return <main className="driver-mobile-app"><header className="driver-mobile-header"><div><span className="driver-brand-mark">E</span><div><b>Reparto</b><small>{actor}</small></div></div><button type="button" className="driver-refresh" onClick={() => void load()} aria-label="Actualizar">↻</button></header><section className="driver-mobile-toolbar"><label>Fecha<input type="date" value={routeDate} onChange={(event) => setRouteDate(event.target.value)} /></label><label>Camión<select value={selectedRouteId} onChange={(event) => { setSelectedRouteId(event.target.value); setSelectedStopId(null); }}><option value="">Selecciona una ruta</option>{routes.map((route) => <option value={route.id} key={route.id}>{route.vehicle || `Camión ${route.id}`} · {route.driver || "Sin conductor"}</option>)}</select></label></section>{loading ? <div className="driver-mobile-loading">Cargando la ruta…</div> : error ? <div className="driver-mobile-error" role="alert">{error}<button type="button" onClick={() => void load()}>Reintentar</button></div> : !activeRoute ? <div className="driver-mobile-empty"><b>No hay ruta asignada</b><span>Cuando administración guarde la carga del día aparecerá aquí.</span></div> : <><section className="driver-route-summary"><div className="driver-route-summary-main"><div><b>{activeRoute.vehicle || "Camión"}</b><span>{stops.filter((stop: any) => stop.status === "Entregado").length}/{stops.length} entregas completadas · {Number(activeRoute.total_distance_km || 0).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km · {Math.floor(Number(activeRoute.estimated_minutes || 0) / 60)} h {Number(activeRoute.estimated_minutes || 0) % 60} min</span></div><strong className="driver-route-status">{activeRoute.status || "Planificada"}</strong></div><div className="driver-route-actions">{activeRoute.status !== "Completada" && <button type="button" className="button primary" onClick={gpsActive ? finishRoute : startGps}>{gpsActive ? "Finalizar ruta" : activeRoute.status === "En curso" ? "Reanudar GPS" : "Iniciar ruta y GPS"}</button>}{gpsActive && <span className="driver-gps-live">● GPS activo{location ? ` · ${Number(location.accuracy_m || 0).toFixed(0)} m` : ""}</span>}</div></section><nav className="driver-stop-list" aria-label="Paradas de la ruta">{stops.map((stop: any, index: number) => <button type="button" className={`driver-stop-card${Number(selectedStop?.id) === Number(stop.id) ? " is-selected" : ""}${stop.status === "Entregado" ? " is-complete" : ""}`} key={stop.id} onClick={() => setSelectedStopId(Number(stop.id))}><span className="driver-stop-number">{stop.status === "Entregado" ? "✓" : index + 1}</span><span><b>{stop.client_name || "Cliente"}</b><small>{[stop.address, stop.city].filter(Boolean).join(" · ")}</small><small>{stop.opening_time && stop.closing_time ? `Recepción ${String(stop.opening_time).slice(0, 5)}–${String(stop.closing_time).slice(0, 5)}` : "Horario pendiente"} · {stop.distance_km ? `${String(stop.distance_km).replace(".", ",")} km` : "Salida"}</small></span><em>{stop.status || "Pendiente"}</em></button>)}</nav>{selectedStop && shipment && <section className="driver-stop-detail"><div className="driver-detail-head"><div><p className="eyebrow">PARADA {selectedStop.position || 1}</p><h2>{selectedStop.client_name}</h2><p>{[selectedStop.address, selectedStop.city].filter(Boolean).join(" · ")}</p><small>{selectedStop.opening_time && selectedStop.closing_time ? `Recepción ${String(selectedStop.opening_time).slice(0, 5)}–${String(selectedStop.closing_time).slice(0, 5)}` : "Horario pendiente"}</small></div><button type="button" className="button secondary" onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent([selectedStop.address, selectedStop.city].filter(Boolean).join(", "))}`, "_blank")}>Navegar</button></div><div className="driver-detail-actions"><button type="button" className="button secondary" onClick={() => void updateStopStatus(selectedStop, "En entrega")} disabled={selectedStop.status === "Entregado"}>Estoy en el cliente</button><button type="button" className="button ghost" onClick={() => void updateStopStatus(selectedStop, "Incidencia")}>Incidencia</button></div><section className="driver-order-content"><div className="driver-section-title"><div><b>{shipment.code}</b><small>Contenido para mostrar al cliente</small></div><button type="button" className="button secondary" onClick={openInvoice}>Factura</button></div>{selectedLines.length ? selectedLines.map((line: any, index: number) => <div className="driver-order-line" key={`${line.id}-${index}`}><span>{line.quantity || line.quantity_requested || 0} {line.quantity_unit || "uds."}</span><b>{line.product_name || `Producto #${line.product_id}`}</b></div>) : <p className="driver-muted">No hay líneas detalladas disponibles.</p>}{(order?.driver_notes || shipment.driver_notes || selectedStop.driver_notes) && <div className="driver-notes"><b>Indicaciones</b><span>{order?.driver_notes || shipment.driver_notes || selectedStop.driver_notes}</span></div>}</section><DriverPaymentPanel shipment={shipment} invoice={invoice} actor={actor} onSaved={(updated) => setShipments((current) => current.map((row) => Number(row.id) === Number(updated.id) ? { ...row, ...updated } : row))} /><DeliverySignaturePanel shipment={shipment} actor={actor} client={{ name: selectedStop.client_name, address: selectedStop.address, city: selectedStop.city }} lines={selectedLines} onSaved={deliverySaved} /></section>}<DriverDailyClosingPanel route={activeRoute} stops={stops} shipments={shipments} actor={actor} /></>}{message && <p className="driver-mobile-message" role="status">{message}</p>}<footer className="driver-mobile-footer">{activeRoute ? `${activeRoute.code} · ${activeRoute.driver || actor}` : "Vista móvil de reparto"}</footer></main>;
 }
 
 function GoodsReceiptForm({ lookups, actor, onCreated }: { lookups: any; actor: string; onCreated: (receipt: any) => void }) {
@@ -4285,7 +4344,10 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     if (showDeleted) params.set("include_deleted", "1");
     if (showInactive && ["suppliers", "clients", "products"].includes(c.api)) params.set("include_inactive", "1");
     if (preparationCacheDate && c.api === "shipments") params.set("preparation_date", preparationCacheDate);
-    fetchWithRetry("/api/" + c.api + (params.toString() ? `?${params.toString()}` : ""), {
+    if (forceRefresh) params.set("refresh", String(Date.now()));
+    const requestUrl = "/api/" + c.api + (params.toString() ? `?${params.toString()}` : "");
+    fetchWithRetry(requestUrl, {
+      cache: forceRefresh ? "no-store" : "default",
       headers: { "X-Actor": user?.username || "Usuario local" },
     })
       .then((r) => {
@@ -4335,8 +4397,9 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     const preparationQuery = active === "Preparación de pedidos" && preparationDateFilter
       ? { preparation_date: preparationDateFilter }
       : {};
+    const lookupQuery = lookupRefreshKey > 0 ? { ...preparationQuery, refresh: String(lookupRefreshKey) } : preparationQuery;
     Promise.allSettled(
-      lookupResources.map(async (resource) => [resource, await fetchCompactLookup(resource, user?.username || "Usuario local", false, ["orders", "shipments"].includes(resource) ? preparationQuery : {})] as const),
+      lookupResources.map(async (resource) => [resource, await fetchCompactLookup(resource, user?.username || "Usuario local", false, ["orders", "shipments"].includes(resource) ? lookupQuery : lookupRefreshKey > 0 ? { refresh: String(lookupRefreshKey) } : {})] as const),
     ).then((results) => setLookups((current: any) => {
       const next = { ...current };
       results.forEach((result) => { if (result.status === "fulfilled") next[result.value[0]] = result.value[1]; });
@@ -5560,9 +5623,11 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     setPreviewLines([]);
     if (active === "Pedidos") setPreviewInvoice(getOrderInvoice(row));
     if (active === "Cobros") {
+      const clientId = Number(row.client_id || 0);
+      const invoiceId = Number(row.invoice_id || row.id || 0);
       const [invoices, clients] = await Promise.all([
-        fetch("/api/invoices").then((r) => r.json()),
-        fetch("/api/clients").then((r) => r.json()),
+        fetch(`/api/invoices?ids=${invoiceId > 0 ? invoiceId : 0}`).then((r) => r.json()),
+        fetch(`/api/clients?view=lookup&ids=${clientId > 0 ? clientId : 0}`).then((r) => r.json()),
       ]);
       const invoice = (Array.isArray(invoices) ? invoices : []).find(
         (item: any) => Number(item.id) === Number(row.invoice_id),
@@ -5587,12 +5652,15 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
               ? "quote_lines"
           : "order_lines";
     const lineOwnerId = ["Preparación de pedidos", "Envíos"].includes(active) ? row.order_id : row.id;
-    const [clients, lines, products, sourceOrderLines] = await Promise.all([
-      fetch("/api/clients").then((r) => r.json()),
-      fetch("/api/" + lineTable).then((r) => r.json()),
-      fetch("/api/products").then((r) => r.json()),
+    const clientId = Number(row.client_id || 0);
+    const lineQuery = lineTable === "order_lines" && Number(lineOwnerId) > 0
+      ? `?order_ids=${encodeURIComponent(lineOwnerId)}`
+      : "";
+    const [clients, lines, sourceOrderLines] = await Promise.all([
+      fetch(`/api/clients?view=lookup&ids=${clientId > 0 ? clientId : 0}`).then((r) => r.json()),
+      fetch(`/api/${lineTable}${lineQuery}`).then((r) => r.json()),
       active === "Albaranes" && row.order_id
-        ? fetch("/api/order_lines").then((r) => r.json())
+        ? fetch(`/api/order_lines?order_ids=${encodeURIComponent(row.order_id)}`).then((r) => r.json())
         : Promise.resolve([]),
     ]);
     setPreviewClient(
@@ -5615,6 +5683,9 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       ? (Array.isArray(sourceOrderLines) ? sourceOrderLines : []).filter((x: any) => Number(x.order_id) === Number(row.order_id))
       : [];
     const selectedLines = fallbackOrderLines.length > ownLines.length ? fallbackOrderLines : ownLines;
+    const productIds = [...new Set(selectedLines.map((line: any) => Number(line.product_id)).filter((value) => Number.isInteger(value) && value > 0))].join(",") || "0";
+    const productResponse = await fetch(`/api/products?view=lookup&ids=${productIds}`);
+    const products = productResponse.ok ? await productResponse.json() : [];
     const productRows = Array.isArray(products) ? products : [];
     const preparedLines = selectedLines.map((line: any) => ({
       ...line,
@@ -6058,8 +6129,9 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       const noteData = await noteResponse.json().catch(() => ({}));
       if (!noteResponse.ok) throw new Error(noteData.error || "No se pudo crear la incidencia consolidada.");
       const nextLines = previewLines.map((line) => actionableLines.some((item) => item.id === line.id) ? { ...line, prepared: 0, preparation_status: "Incidencia" } : line);
-      const lineResponses = await Promise.all(actionableLines.map((line) => fetch(`/api/order_lines/${line.id}`, { method: "PUT", headers: actorHeaders, body: JSON.stringify({ ...line, prepared: 0, preparation_status: "Incidencia" }) })));
-      if (lineResponses.some((response) => !response.ok)) throw new Error("La incidencia se creó, pero no se pudieron actualizar todas las líneas del pedido.");
+      const linesResponse = await fetch("/api/order_lines/bulk-incident", { method: "POST", headers: actorHeaders, body: JSON.stringify({ lines: actionableLines.map((line) => ({ id: Number(line.id) })) }) });
+      const linesData = await linesResponse.json().catch(() => ({}));
+      if (!linesResponse.ok) throw new Error(linesData.error || "La incidencia se creó, pero no se pudieron actualizar todas las líneas del pedido.");
       const nextShipmentStatus = "Preparado con incidencia";
       if (preview?.id) {
         const shipmentResponse = await fetch(`/api/shipments/${preview.id}`, { method: "PUT", headers: actorHeaders, body: JSON.stringify({ ...preview, status: nextShipmentStatus, prepared_by: user?.username || "Usuario local" }) });
@@ -11780,7 +11852,7 @@ function WarehouseTabletApp() {
   return <main className="warehouse-tablet-app">
     <header className="warehouse-tablet-header">
       <a className="warehouse-tablet-brand" href="/almacen" aria-label="Vista almacén"><span className="warehouse-brand-mark">E</span><span><b>Exclusivas</b><small>Almacén operativo</small></span></a>
-      <div className="warehouse-tablet-header-actions"><span><b>{currentUser.username}</b><small>{currentUser.role === "admin" ? "Administrador" : "Almacén"}</small></span><div className="warehouse-tablet-quick-actions" aria-label="Acciones de la vista"><button type="button" className="warehouse-tablet-icon-button" onClick={printWarehouseView} aria-label="Imprimir vista" title="Imprimir vista"><ToolbarIcon name="print" /></button><button type="button" className="warehouse-tablet-icon-button" onClick={downloadWarehouseExcel} aria-label="Descargar Excel" title="Descargar Excel"><ToolbarIcon name="download" /></button></div><button type="button" className="button secondary" onClick={logout}>Salir</button></div>
+      <div className="warehouse-tablet-header-actions"><span><b>{currentUser.username}</b><small>{currentUser.role === "admin" ? "Administrador" : "Almacén"}</small></span><div className="warehouse-tablet-quick-actions" aria-label="Acciones de la vista"><button type="button" className="warehouse-tablet-icon-button" onClick={printWarehouseView} aria-label="Imprimir vista" title="Imprimir vista"><ToolbarIcon name="print" /></button><button type="button" className="warehouse-tablet-icon-button" onClick={downloadWarehouseExcel} aria-label="Descargar Excel" title="Descargar Excel"><ToolbarIcon name="download" /></button></div><a className="warehouse-reparto-link" href="/reparto">Reparto</a><button type="button" className="button secondary" onClick={logout}>Salir</button></div>
     </header>
     <nav className="warehouse-tablet-nav" aria-label="Secciones de almacén">{sections.map((section) => <button type="button" key={section.id} className={active === section.id ? "is-active" : ""} aria-pressed={active === section.id} onClick={() => setActive(section.id)}><b>{section.short}</b></button>)}</nav>
     <section className="warehouse-tablet-content">
@@ -11904,6 +11976,10 @@ function CrmHome({ routeMode = "crm" }: { routeMode?: keyof typeof routeModuleSc
     return () => window.clearInterval(timer);
   }, []);
   useEffect(() => {
+    if (active === "Reparto") {
+      window.location.href = "/reparto";
+      return;
+    }
     if (!allowedModules.includes(active)) setActive(allowedModules[0] || "Inicio");
   }, [active, currentUser]);
   useEffect(() => {

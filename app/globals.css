@@ -5393,6 +5393,7 @@ body:has(.reparto-page) .assistant-global{display:none !important}
 .tracking-proof-signature img{width:260px;height:100px;object-fit:contain;border:1px solid #d1dce1;background:#fff}
 .tracking-proof-photos>div{display:flex;gap:10px;flex-wrap:wrap}
 .tracking-proof-photos img{width:120px;height:86px;object-fit:cover;border:1px solid #d1dce1;background:#fff}
+.tracking-live-route{margin-top:16px;padding:20px;border:1px solid #cbd7dc;background:#f7fafb}.tracking-live-route-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.tracking-live-route-head h2{margin:8px 0 5px;font-size:23px;letter-spacing:-.05em}.tracking-live-route-head p{margin:0;color:#687982;font-size:12px}.tracking-live-route-head>span{padding:8px 10px;font-size:10px;font-weight:800;text-transform:uppercase}.tracking-live-route-head>span.is-live{background:#087f5b;color:#fff}.tracking-live-route-head>span.is-pending{background:#e9eef0;color:#687982}.tracking-live-route-meta{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:17px}.tracking-live-route-meta span{display:grid;gap:4px;padding:10px;background:#fff;border:1px solid #dbe4e7;color:#536873;font-size:11px}.tracking-live-route-meta b{color:#087f5b;font-size:9px;letter-spacing:.1em;text-transform:uppercase}.tracking-live-map{position:relative;margin-top:16px;height:260px;overflow:hidden;border:1px solid #cbd7dc;background:#eaf0f2}.tracking-live-map iframe{width:100%;height:100%;border:0}.tracking-live-map>a{position:absolute;right:10px;bottom:10px;padding:8px 10px;background:#bd2027;color:#fff;font-size:11px;font-weight:800;text-decoration:none}.tracking-live-empty{margin-top:16px;padding:18px;background:#fff;border:1px dashed #cbd7dc;color:#687982;font-size:12px}@media(max-width:700px){.tracking-live-route{padding:16px}.tracking-live-route-head{display:grid;gap:10px}.tracking-live-route-head>span{justify-self:start}.tracking-live-route-meta{grid-template-columns:1fr 1fr}.tracking-live-map{height:220px}}
 @media(max-width:700px){.tracking-proof{padding:16px}.tracking-proof-head{display:grid;gap:10px}.tracking-proof-head>span{justify-self:start}.tracking-proof-meta{grid-template-columns:1fr}.tracking-proof-signature img{width:100%}}
 .reparto-topbar-actions button{padding:0;border:0;background:transparent;color:#fff;cursor:pointer;font:inherit;font-size:inherit;font-weight:700}
 .reparto-expense-panel{display:grid;gap:0;margin-top:14px;border:1px solid #d3dee2;background:#fff}.reparto-expense-head{display:flex;align-items:start;justify-content:space-between;gap:15px;padding:17px;border-bottom:1px solid #e5ebed}.reparto-expense-head h2{margin:4px 0 5px;font-size:20px;font-weight:500;letter-spacing:-.03em}.reparto-expense-head span{display:block;max-width:650px;color:#71818a;font-size:11px;line-height:1.5}.reparto-expense-head>strong{flex:0 0 auto;padding:6px 8px;background:#fff4e6;color:#a45a00;font-size:9px;text-transform:uppercase}.reparto-expense-form{display:grid;gap:15px;padding:17px}.reparto-expense-fields{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:11px}.reparto-expense-fields label,.reparto-expense-upload label{display:grid;gap:5px;color:#526670;font-size:10px;font-weight:700}.reparto-expense-fields input,.reparto-expense-fields select,.reparto-expense-fields textarea,.reparto-expense-upload input{box-sizing:border-box;width:100%;min-height:34px;padding:8px;border:1px solid #cbd7dc;background:#fff;color:#26343d;font:inherit;font-weight:400}.reparto-expense-fields textarea{resize:vertical}.reparto-expense-wide{grid-column:span 2}.reparto-expense-upload{display:flex;align-items:center;justify-content:space-between;gap:15px;padding-top:14px;border-top:1px solid #e5ebed}.reparto-expense-upload>label{min-width:240px}.reparto-expense-upload small,.reparto-expense-history small{color:#87969e;font-size:9px;font-weight:400}.reparto-expense-file{display:flex;align-items:center;gap:8px;min-width:0}.reparto-expense-file img{width:52px;height:42px;object-fit:cover;border:1px solid #cbd7dc}.reparto-expense-file>b{display:grid;place-items:center;width:52px;height:42px;background:#f1f4f5;color:#bd2027;font-size:11px}.reparto-expense-file span{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#526670;font-size:10px}.reparto-expense-file button{border:0;background:none;color:#bd2027;cursor:pointer;font-size:17px}.reparto-expense-form>footer{display:flex;align-items:center;justify-content:space-between;gap:12px}.reparto-expense-form>footer>span{color:#71818a;font-size:10px}.reparto-expense-form>footer>span b{color:#26343d}.reparto-expense-message{margin:0;padding:9px 11px;border-left:3px solid #bd2027;background:#fff5f5;color:#a52323;font-size:11px}.reparto-expense-history{display:grid;grid-template-columns:220px repeat(5,minmax(0,1fr));border-top:1px solid #e5ebed}.reparto-expense-history>div{display:grid;align-content:center;gap:4px;padding:13px 17px;background:#f7f9f9}.reparto-expense-history>div>b{color:#26343d;font-size:11px}.reparto-expense-history>article{display:grid;gap:3px;padding:13px 11px;border-left:1px solid #e5ebed}.reparto-expense-history article span{color:#71818a;font-size:9px;text-transform:uppercase}.reparto-expense-history article>b{color:#26343d;font-size:14px}.reparto-expense-history article small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.reparto-expense-history article em{justify-self:start;padding:3px 5px;background:#fff4e6;color:#a45a00;font-size:9px;font-style:normal}
@@ -6229,4 +6230,61 @@ body:has(.warehouse-tablet-app) .settings-panel {
   body:has(.collective-load-overlay.is-embedded) .collective-load-simple-action {
     display: none !important;
   }
+}
+
+.vehicle-daily-closures{margin:0 14px 14px;border:1px solid #d7e0e4;background:#fff}.vehicle-subhead{display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border-bottom:1px solid #e8eef0}.vehicle-subhead div{display:grid;gap:3px}.vehicle-subhead small,.vehicle-daily-closure-row small,.vehicle-daily-closure-row span{display:block;color:#60747d;font-size:12px}.vehicle-subhead>span{font-size:12px;color:#60747d}.vehicle-daily-closure-row{display:grid;grid-template-columns:minmax(180px,1fr) minmax(220px,1fr) auto auto;gap:12px;align-items:center;padding:10px 12px;border-bottom:1px solid #edf1f2}.vehicle-daily-closure-row:last-child{border-bottom:0}.vehicle-daily-closure-row>div{display:grid;gap:3px}.vehicle-daily-closure-status{font-size:12px;color:#b4232b}.vehicle-daily-closure-status.is-reviewed{color:#087443}.vehicle-daily-closure-empty{margin:0;padding:12px;color:#60747d;font-size:13px}
+.driver-daily-closing{display:grid;gap:10px;margin:8px 12px 16px;padding:13px;border:1px solid #cbd7dc;background:#fff;border-radius:5px}.driver-daily-closing form{display:grid;gap:10px}.driver-daily-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.driver-daily-summary span{display:grid;gap:2px;padding:8px;background:#f4f7f8;color:#60747d;font-size:11px}.driver-daily-summary b{color:#172a32;font-size:14px}.driver-daily-fields{display:grid;grid-template-columns:1fr 1fr;gap:8px}.driver-daily-fields label{display:grid;gap:4px;color:#60747d;font-size:11px}.driver-daily-fields input,.driver-daily-fields textarea{width:100%;box-sizing:border-box}.driver-daily-wide{grid-column:1/-1}.driver-daily-closing>.driver-section-title>strong{font-size:12px;color:#b4232b}.driver-daily-closing>.driver-section-title>strong:not(:empty){color:#087443}
+.warehouse-reparto-link{display:inline-flex;align-items:center;min-height:34px;padding:0 11px;border:1px solid #b91c1c;background:#fff;color:#b91c1c;font-size:10px;font-weight:700;text-decoration:none;white-space:nowrap}.reparto-topbar-actions .reparto-menu-link{padding:0;border:0;background:none;color:#fff;cursor:pointer;font:inherit;font-size:11px;font-weight:700;text-decoration:none}
+@media(max-width:560px){.vehicle-daily-closure-row{grid-template-columns:1fr;gap:7px}.vehicle-daily-closure-row .button{justify-self:start}.driver-daily-summary{grid-template-columns:repeat(2,1fr)}}
+
+/* El móvil prioriza la siguiente acción y deja los formularios secundarios bajo demanda. */
+.reparto-panel-toggle{display:none;border:1px solid #cbd7dc;background:#fff;color:#bd2027;cursor:pointer;font:inherit;font-size:10px;font-weight:700;padding:6px 10px}
+@media(max-width:560px){
+  .reparto-shell{width:calc(100% - 16px);padding:12px 0 24px}
+  .reparto-head{gap:8px;margin-bottom:10px}
+  .reparto-head h1{font-size:27px}
+  .reparto-head p:not(.eyebrow){display:none}
+  .reparto-head-actions{width:100%;display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .reparto-head-actions .button,.reparto-head-actions button{width:100%;min-height:36px}
+  .reparto-datebar{margin-bottom:8px}
+  .reparto-datebar>button,.reparto-datebar>label{min-height:42px;padding:7px 9px}
+  .reparto-datebar small{display:none}
+  .reparto-kpis{margin-bottom:8px}
+  .reparto-kpis article{min-height:52px;padding:8px 9px;gap:3px}
+  .reparto-kpis strong{font-size:21px}
+  .reparto-kpis span{font-size:9px}
+  .reparto-next-stop{padding:10px}
+  .reparto-next-stop small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .reparto-panel-head{padding:11px 12px}
+  .reparto-panel-head h2{font-size:16px}
+  .reparto-panel-head span{font-size:10px}
+  .reparto-panel-head .button{width:auto;min-height:32px}
+  .reparto-stop-list{gap:5px;padding:7px}
+  .reparto-stop{padding:8px;gap:7px}
+  .reparto-stop-title{gap:5px}
+  .reparto-stop-title b{font-size:12px}
+  .reparto-stop-title small{display:none}
+  .reparto-stop-main>p{margin:4px 0 3px;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .reparto-stop-window{font-size:9px}
+  .reparto-stop-actions{gap:4px;margin-top:7px}
+  .reparto-stop-actions>button,.reparto-stop-actions>a{min-height:30px;padding:0 8px;font-size:9px}
+  .reparto-reorder button{width:28px;min-height:30px}
+  .reparto-help{display:none}
+  .reparto-payment-head,.reparto-expense-head,.driver-daily-closing>.driver-section-title{align-items:center}
+  .reparto-payment-head>div,.reparto-expense-head>div{min-width:0}
+  .reparto-payment-head span,.reparto-expense-head span,.driver-daily-closing>.driver-section-title small{display:none}
+  .reparto-payment-head h3,.reparto-expense-head h2{font-size:15px}
+  .reparto-panel-toggle{display:inline-block;justify-self:end;white-space:nowrap}
+  .reparto-payment-panel:not(.is-expanded)>:not(.reparto-payment-head),.reparto-expense-panel:not(.is-expanded)>:not(.reparto-expense-head),.driver-daily-closing:not(.is-expanded)>form{display:none}
+  .reparto-payment-panel:not(.is-expanded),.reparto-expense-panel:not(.is-expanded),.driver-daily-closing:not(.is-expanded){gap:0}
+  .reparto-payment-panel,.reparto-expense-panel{margin:10px 8px;padding:10px}
+  .reparto-expense-form{padding:10px}
+  .driver-daily-closing{margin:8px 8px 12px;padding:10px}
+  .driver-daily-summary{gap:5px}
+  .driver-daily-summary span{padding:6px;font-size:10px}
+  .driver-daily-summary b{font-size:13px}
+  .reparto-detail-head h2,.reparto-return-modal h2{font-size:19px}
+  .reparto-detail-head span{display:block;max-width:calc(100vw - 78px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .reparto-detail-actions{gap:5px}
+  .reparto-detail-actions .button{min-height:38px;padding:0 8px;font-size:10px}
 }

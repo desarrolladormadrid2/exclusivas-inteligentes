@@ -453,6 +453,7 @@ db.exec(`CREATE TABLE IF NOT EXISTS scheduled_tasks(id INTEGER PRIMARY KEY AUTOI
 db.exec(`CREATE TABLE IF NOT EXISTS backup_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,created_at TEXT NOT NULL,created_by TEXT,source TEXT DEFAULT 'Turso',tables_json TEXT NOT NULL,data_base64 TEXT NOT NULL,checksum TEXT NOT NULL,status TEXT DEFAULT 'Disponible',restored_at TEXT,restored_by TEXT,size_bytes INTEGER DEFAULT 0);`);
 db.exec(`CREATE TABLE IF NOT EXISTS delivery_routes(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,route_date TEXT NOT NULL,driver TEXT,vehicle TEXT,status TEXT DEFAULT 'Planificada',radius_meters REAL DEFAULT 150,origin_address TEXT,origin_latitude REAL,origin_longitude REAL,notes TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS delivery_route_positions(id INTEGER PRIMARY KEY AUTOINCREMENT,route_id INTEGER NOT NULL,latitude REAL NOT NULL,longitude REAL NOT NULL,accuracy_m REAL,speed_mps REAL,heading REAL,recorded_at TEXT NOT NULL,created_by TEXT);`);
+db.exec(`CREATE TABLE IF NOT EXISTS driver_daily_closures(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,closure_date TEXT NOT NULL,driver TEXT,vehicle_id INTEGER,route_id INTEGER,route_code TEXT,status TEXT DEFAULT 'Pendiente de revisar',deliveries_total INTEGER DEFAULT 0,delivered_total INTEGER DEFAULT 0,incident_total INTEGER DEFAULT 0,pending_total INTEGER DEFAULT 0,cash_total REAL DEFAULT 0,card_total REAL DEFAULT 0,transfer_total REAL DEFAULT 0,other_total REAL DEFAULT 0,total_collected REAL DEFAULT 0,cash_handover_amount REAL,cash_difference REAL,km_start REAL,km_end REAL,distance_km REAL,fuel_liters REAL DEFAULT 0,fuel_amount REAL DEFAULT 0,fuel_station TEXT,fuel_reference TEXT,notes TEXT,reviewed_by TEXT,reviewed_at TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS vehicles(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,name TEXT NOT NULL,plate TEXT UNIQUE,brand TEXT,model TEXT,active INTEGER DEFAULT 1,odometer_km REAL DEFAULT 0,maintenance_interval_km REAL DEFAULT 30000,maintenance_interval_days INTEGER DEFAULT 180,next_maintenance_km REAL,next_maintenance_date TEXT,notes TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS vehicle_trips(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,vehicle_id INTEGER NOT NULL,route_id INTEGER,route_date TEXT NOT NULL,route_code TEXT,driver TEXT,planned_distance_km REAL DEFAULT 0,start_km REAL,end_km REAL,distance_km REAL,status TEXT DEFAULT 'Planificada',notes TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS vehicle_refuels(id INTEGER PRIMARY KEY AUTOINCREMENT,vehicle_id INTEGER NOT NULL,trip_id INTEGER,fuel_date TEXT NOT NULL,station TEXT,liters REAL DEFAULT 0,amount REAL DEFAULT 0,ticket_reference TEXT,odometer_km REAL,notes TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
@@ -509,6 +510,9 @@ try { db.exec("ALTER TABLE orders ADD COLUMN stock_alert INTEGER DEFAULT 0"); } 
 db.exec(
   `CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT UNIQUE NOT NULL,password TEXT NOT NULL,role TEXT DEFAULT 'user',must_change INTEGER DEFAULT 1);CREATE TABLE IF NOT EXISTS suppliers(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,phone TEXT,email TEXT,address TEXT);CREATE TABLE IF NOT EXISTS warehouses(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,address TEXT);CREATE TABLE IF NOT EXISTS delivery_notes(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,order_id INTEGER,client_id INTEGER,status TEXT DEFAULT 'Pendiente');CREATE TABLE IF NOT EXISTS payments(id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_id INTEGER,amount REAL DEFAULT 0,payment_date TEXT DEFAULT CURRENT_DATE,method TEXT DEFAULT 'Transferencia');CREATE TABLE IF NOT EXISTS clients(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,phone TEXT,email TEXT,address TEXT);CREATE TABLE IF NOT EXISTS products(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,unit_price REAL DEFAULT 0,stock REAL DEFAULT 0);CREATE TABLE IF NOT EXISTS orders(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,client_id INTEGER,product_id INTEGER,quantity REAL DEFAULT 0,amount REAL DEFAULT 0,status TEXT DEFAULT 'Pendiente');CREATE TABLE IF NOT EXISTS quotes(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,client_id INTEGER,amount REAL DEFAULT 0,status TEXT DEFAULT 'Borrador');CREATE TABLE IF NOT EXISTS invoices(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,client_id INTEGER,amount REAL DEFAULT 0,status TEXT DEFAULT 'Pendiente');`,
 );
+for (const column of ["notes TEXT", "reference TEXT", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]) {
+  try { db.exec(`ALTER TABLE payments ADD COLUMN ${column}`); } catch {}
+}
 // Las cuentas del portal deben disponer de estas columnas tanto en una base
 // nueva como en instalaciones existentes. El bloque anterior a las tablas
 // base solo cubre instalaciones antiguas.
@@ -835,6 +839,7 @@ const tables = new Set([
   "delivery_routes",
   "delivery_route_stops",
   "delivery_route_positions",
+  "driver_daily_closures",
   "vehicles",
   "vehicle_trips",
   "vehicle_refuels",
@@ -1200,6 +1205,7 @@ for (const [name, table, columns] of [
   ["idx_product_lots_expiry", "product_lots", "product_id, expiry_date"],
   ["idx_purchase_suggestions_status", "purchase_suggestions", "status, created_at"],
   ["idx_vehicles_active", "vehicles", "active, name"],
+  ["idx_driver_daily_closures_date_route", "driver_daily_closures", "closure_date, route_id"],
   ["idx_vehicle_trips_vehicle_date", "vehicle_trips", "vehicle_id, route_date"],
   ["idx_vehicle_refuels_vehicle_date", "vehicle_refuels", "vehicle_id, fuel_date"],
   ["idx_vehicle_maintenance_vehicle_date", "vehicle_maintenance", "vehicle_id, maintenance_date"],
@@ -1334,7 +1340,7 @@ const lookupFields = {
   suppliers: ["id", "name", "tax_id", "contact", "phone", "email", "address", "city", "latitude", "longitude", "geocoding_status", "active", "minimum_order", "transport_cost", "lead_time_days", "reliability_percent", "rappel_percent", "external_code"],
   warehouses: ["id", "name", "address"],
   collection_points: ["id", "code", "name", "client_id", "address", "city", "contact", "phone", "email", "opening_hours", "opening_time", "closing_time", "geocoding_status", "latitude", "longitude"],
-  products: ["id", "name", "sku", "unit", "unit_price", "box_price", "pack4_price", "pack6_price", "pallet_price", "vat", "stock", "stock_reserved", "min_stock", "stock_min", "category", "brand", "format", "active", "product_status", "warehouse_id", "supplier_id", "primary_supplier_id", "warehouse_location", "cost_price", "photo_url", "photo_thumbnail_url", "photo_web_url"],
+  products: ["id", "name", "sku", "barcode", "unit", "unit_price", "box_price", "pack4_price", "pack6_price", "pallet_price", "vat", "stock", "stock_reserved", "min_stock", "stock_min", "category", "brand", "format", "active", "product_status", "warehouse_id", "supplier_id", "primary_supplier_id", "warehouse_location", "cost_price", "photo_url", "photo_thumbnail_url", "photo_web_url"],
   orders: ["id", "code", "client_id", "status", "amount", "created_at", "updated_at", "delivery_date", "preparation_date", "shipping_date", "address", "delivery_city", "collection_point_id", "urgent", "stock_alert", "loading_notes", "driver_notes"],
   shipments: ["id", "code", "order_id", "client_id", "collection_point_id", "status", "expected_delivery_at", "preparation_date", "address", "delivery_city", "delivery_window_start", "delivery_window_end", "carrier", "packages", "incidents", "notes", "driver_notes", "invoice_delivery_method", "prepared_at", "prepared_by", "preparation_closed_at", "preparation_closed_by", "shipped_at", "shipped_by", "departure_at", "delivered_at", "delivered_by", "delivery_signature_status", "delivery_recipient_name", "delivery_signature_at", "delivery_signature_by", "delivery_signature_note", "payment_received_status", "payment_received_amount", "payment_received_method", "payment_received_reference", "payment_received_note", "payment_received_at", "payment_received_by", "public_tracking_token"],
   order_lines: ["id", "order_id", "product_id", "quantity", "quantity_requested", "quantity_unit", "prepared", "prepared_quantity", "preparation_status", "incident_resolution"],
@@ -1381,6 +1387,19 @@ function lookupSelectFor(resource) {
 function queryBatch(statements) {
   if (remoteMode && typeof db.batch === "function") return db.batch(statements);
   return statements.map(({ sql, args = [] }) => db.prepare(sql).all(...args));
+}
+function writeBatch(statements) {
+  if (!statements.length) return [];
+  if (remoteMode && typeof db.batch === "function") return db.batch([{ sql: "BEGIN" }, ...statements, { sql: "COMMIT" }]);
+  db.exec("BEGIN");
+  try {
+    const results = statements.map(({ sql, args = [] }) => db.prepare(sql).run(...args));
+    db.exec("COMMIT");
+    return results;
+  } catch (error) {
+    try { db.exec("ROLLBACK"); } catch {}
+    throw error;
+  }
 }
 function invalidateReadCache(resource) {
   for (const key of readCache.keys()) {
@@ -1619,6 +1638,39 @@ function getRouteWithStops(id) {
   }
   return { ...route, vehicle_name: vehicle?.name || "", vehicle_plate: vehicle?.plate || "", vehicle: route.vehicle || vehicle?.plate || vehicle?.name || "", vehicle_summary: vehicle ? { ...vehicle, ...vehicleMaintenanceState(vehicle) } : null, vehicle_trip: vehicleTrip, stops, maps_url: mapsUrl, total_distance_km: Number(totalDistanceKm.toFixed(1)), estimated_minutes: Math.max(0, Math.round(elapsedMinutes)), time_window_warnings: warnings };
 }
+function getRouteCloseSummary(routeId) {
+  const stops = db.prepare("SELECT id,shipment_id,status FROM delivery_route_stops WHERE route_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY position").all(Number(routeId));
+  const shipmentIds = stops.map((stop) => Number(stop.shipment_id)).filter(Boolean);
+  const shipments = shipmentIds.length ? db.prepare(`SELECT id,payment_received_status,payment_received_amount,payment_received_method FROM shipments WHERE id IN (${shipmentIds.map(() => "?").join(",")}) AND CAST(COALESCE(deleted,0) AS INTEGER)=0`).all(...shipmentIds) : [];
+  const paymentTotals = { cash: 0, card: 0, transfer: 0, other: 0 };
+  for (const shipment of shipments) {
+    if (String(shipment.payment_received_status || "") !== "Recibido") continue;
+    const amount = Number(shipment.payment_received_amount || 0);
+    const method = String(shipment.payment_received_method || "").toLowerCase();
+    if (method.includes("efectivo")) paymentTotals.cash += amount;
+    else if (method.includes("tarjeta")) paymentTotals.card += amount;
+    else if (method.includes("transfer")) paymentTotals.transfer += amount;
+    else paymentTotals.other += amount;
+  }
+  return {
+    deliveries_total: stops.length,
+    delivered_total: stops.filter((stop) => ["Entregado", "Completada"].includes(String(stop.status || ""))).length,
+    incident_total: stops.filter((stop) => String(stop.status || "") === "Incidencia").length,
+    pending_total: stops.filter((stop) => !["Entregado", "Completada", "Incidencia"].includes(String(stop.status || ""))).length,
+    cash_total: Number(paymentTotals.cash.toFixed(2)),
+    card_total: Number(paymentTotals.card.toFixed(2)),
+    transfer_total: Number(paymentTotals.transfer.toFixed(2)),
+    other_total: Number(paymentTotals.other.toFixed(2)),
+    total_collected: Number((paymentTotals.cash + paymentTotals.card + paymentTotals.transfer + paymentTotals.other).toFixed(2)),
+  };
+}
+function enrichDailyClosure(row) {
+  if (!row) return null;
+  const vehicle = row.vehicle_id ? db.prepare("SELECT name,plate FROM vehicles WHERE id=?").get(Number(row.vehicle_id)) : null;
+  const distance = Number(row.distance_km || 0);
+  const fuelAmount = Number(row.fuel_amount || 0);
+  return { ...row, vehicle_name: vehicle?.name || "", vehicle_plate: vehicle?.plate || "", fuel_cost_per_km: distance > 0 ? Number((fuelAmount / distance).toFixed(3)) : 0, payment_summary: { cash: Number(row.cash_total || 0), card: Number(row.card_total || 0), transfer: Number(row.transfer_total || 0), other: Number(row.other_total || 0) } };
+}
 function ensureShipmentTrackingToken(id) {
   const shipmentId = Number(id);
   if (!Number.isInteger(shipmentId) || shipmentId <= 0) return "";
@@ -1722,6 +1774,18 @@ export async function crmApiHandler(req, res) {
           LEFT JOIN products p ON p.id=ol.product_id
           WHERE ol.order_id=? ORDER BY ol.id`).all(Number(shipment.order_id || 0));
         const linesWithLots = attachOrderLineLotsBatch(lines);
+        const routeStop = db.prepare(`
+          SELECT rs.route_id,rs.position,rs.status stop_status,r.code route_code,r.status route_status,
+                 r.vehicle,r.driver,
+                 (SELECT COUNT(*) FROM delivery_route_stops all_stops WHERE all_stops.route_id=rs.route_id AND CAST(COALESCE(all_stops.deleted,0) AS INTEGER)=0) total_stops,
+                 (SELECT COUNT(*) FROM delivery_route_stops completed_stops WHERE completed_stops.route_id=rs.route_id AND CAST(COALESCE(completed_stops.deleted,0) AS INTEGER)=0 AND completed_stops.status IN ('Entregado','Completada','Incidencia')) completed_stops
+          FROM delivery_route_stops rs
+          JOIN delivery_routes r ON r.id=rs.route_id AND CAST(COALESCE(r.deleted,0) AS INTEGER)=0
+          WHERE rs.shipment_id=? AND CAST(COALESCE(rs.deleted,0) AS INTEGER)=0
+          ORDER BY rs.id DESC LIMIT 1`).get(Number(shipment.id));
+        const currentPosition = routeStop?.route_id
+          ? db.prepare("SELECT latitude,longitude,accuracy_m,speed_mps,heading,recorded_at FROM delivery_route_positions WHERE route_id=? ORDER BY id DESC LIMIT 1").get(Number(routeStop.route_id))
+          : null;
         return send(res, 200, {
           shipment: {
             code: shipment.code,
@@ -1745,6 +1809,16 @@ export async function crmApiHandler(req, res) {
             client_name: shipment.client_name || "Cliente",
             location_name: shipment.location_name || "",
           },
+          route: routeStop ? {
+            code: routeStop.route_code || "",
+            status: routeStop.route_status || "Planificada",
+            vehicle: routeStop.vehicle || "",
+            driver: routeStop.driver || "",
+            position: Number(routeStop.position || 0),
+            total_stops: Number(routeStop.total_stops || 0),
+            completed_stops: Number(routeStop.completed_stops || 0),
+            current_position: currentPosition || null,
+          } : null,
           lines: linesWithLots,
         });
       }
@@ -1893,6 +1967,75 @@ export async function crmApiHandler(req, res) {
           recordAudit(actor, "DELETE", `vehicles/${id}`, "Dar de baja vehículo");
           return send(res, 200, { ok: true, id });
         }
+      }
+      if (p[1] === "driver_daily_closures") {
+        if (req.method === "GET") {
+          const params = new URL(req.url, "http://local").searchParams;
+          const conditions = ["CAST(COALESCE(ddc.deleted,0) AS INTEGER)=0"];
+          const args = [];
+          if (params.get("date")) { conditions.push("ddc.closure_date=?"); args.push(String(params.get("date")).slice(0, 10)); }
+          if (params.get("route_id")) { conditions.push("ddc.route_id=?"); args.push(Number(params.get("route_id"))); }
+          if (params.get("vehicle_id")) { conditions.push("ddc.vehicle_id=?"); args.push(Number(params.get("vehicle_id"))); }
+          const rows = db.prepare(`SELECT ddc.* FROM driver_daily_closures ddc WHERE ${conditions.join(" AND ")} ORDER BY ddc.closure_date DESC,ddc.id DESC LIMIT 200`).all(...args);
+          return send(res, 200, rows.map(enrichDailyClosure));
+        }
+        const body = await read(req);
+        const id = Number(p[2] || 0);
+        if (req.method === "PUT") {
+          const current = db.prepare("SELECT * FROM driver_daily_closures WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(id);
+          if (!current) return send(res, 404, { error: "Cierre diario no encontrado" });
+          const status = String(body.status || "").trim();
+          if (!["Pendiente de revisar", "Revisado", "Devuelto"].includes(status)) return send(res, 400, { error: "El estado del cierre no es válido" });
+          const now = new Date().toISOString();
+          db.prepare("UPDATE driver_daily_closures SET status=?,reviewed_by=?,reviewed_at=?,updated_at=? WHERE id=?").run(status, actor, now, now, id);
+          recordAudit(actor, "PUT", `driver_daily_closures/${id}`, "Revisar cierre diario", JSON.stringify({ status }));
+          return send(res, 200, enrichDailyClosure(db.prepare("SELECT * FROM driver_daily_closures WHERE id=?").get(id)));
+        }
+        if (req.method === "POST") {
+          const routeId = Number(body.route_id || 0) || null;
+          const route = routeId ? db.prepare("SELECT * FROM delivery_routes WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(routeId) : null;
+          if (!route) return send(res, 400, { error: "Selecciona una ruta válida para cerrar la jornada" });
+          const closureDate = String(body.closure_date || route.route_date || new Date().toISOString()).slice(0, 10);
+          if (String(route.route_date || "").slice(0, 10) !== closureDate) return send(res, 400, { error: "La fecha del cierre no coincide con la fecha de la ruta" });
+          const vehicleId = Number(body.vehicle_id || route.vehicle_id || 0) || null;
+          const vehicle = vehicleId ? db.prepare("SELECT id FROM vehicles WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(vehicleId) : null;
+          if (!vehicle) return send(res, 400, { error: "La ruta no tiene un camión válido" });
+          const kmStart = body.km_start === "" || body.km_start === null || body.km_start === undefined ? null : Number(body.km_start);
+          const kmEnd = body.km_end === "" || body.km_end === null || body.km_end === undefined ? null : Number(body.km_end);
+          if (!Number.isFinite(kmStart) || !Number.isFinite(kmEnd)) return send(res, 400, { error: "Indica los kilómetros iniciales y finales para cerrar la jornada" });
+          if (kmEnd < kmStart) return send(res, 400, { error: "Los kilómetros finales no pueden ser menores que los iniciales" });
+          const fuelLiters = Math.max(0, Number(body.fuel_liters || 0));
+          const fuelAmount = Math.max(0, Number(body.fuel_amount || 0));
+          if (!fuelLiters && !fuelAmount && String(body.fuel_station || body.fuel_reference || "").trim()) return send(res, 400, { error: "Indica litros o importe del gasoil" });
+          const summary = getRouteCloseSummary(routeId);
+          const cashHandover = body.cash_handover_amount === "" || body.cash_handover_amount === null || body.cash_handover_amount === undefined ? null : Number(body.cash_handover_amount);
+          if (cashHandover !== null && (!Number.isFinite(cashHandover) || cashHandover < 0)) return send(res, 400, { error: "El efectivo entregado no es válido" });
+          const now = new Date().toISOString();
+          const existing = db.prepare("SELECT * FROM driver_daily_closures WHERE route_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 1").get(routeId);
+          const code = existing?.code || String(body.code || `CIERRE-${closureDate.replaceAll("-", "")}-${routeId}`);
+          const distance = Number((kmEnd - kmStart).toFixed(1));
+          const values = [closureDate, String(body.driver || route.driver || actor).trim(), vehicleId, routeId, String(route.code || ""), "Pendiente de revisar", summary.deliveries_total, summary.delivered_total, summary.incident_total, summary.pending_total, summary.cash_total, summary.card_total, summary.transfer_total, summary.other_total, summary.total_collected, cashHandover, cashHandover === null ? null : Number((cashHandover - summary.cash_total).toFixed(2)), kmStart, kmEnd, distance, fuelLiters, fuelAmount, String(body.fuel_station || "").trim(), String(body.fuel_reference || "").trim(), String(body.notes || "").trim(), existing?.created_by || actor, existing?.created_at || now, now];
+          let closureId;
+          if (existing) {
+            db.prepare("UPDATE driver_daily_closures SET closure_date=?,driver=?,vehicle_id=?,route_id=?,route_code=?,status=?,deliveries_total=?,delivered_total=?,incident_total=?,pending_total=?,cash_total=?,card_total=?,transfer_total=?,other_total=?,total_collected=?,cash_handover_amount=?,cash_difference=?,km_start=?,km_end=?,distance_km=?,fuel_liters=?,fuel_amount=?,fuel_station=?,fuel_reference=?,notes=?,created_by=?,created_at=?,updated_at=? WHERE id=?").run(...values, Number(existing.id));
+            closureId = Number(existing.id);
+          } else {
+            const created = db.prepare("INSERT INTO driver_daily_closures(code,closure_date,driver,vehicle_id,route_id,route_code,status,deliveries_total,delivered_total,incident_total,pending_total,cash_total,card_total,transfer_total,other_total,total_collected,cash_handover_amount,cash_difference,km_start,km_end,distance_km,fuel_liters,fuel_amount,fuel_station,fuel_reference,notes,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(code, ...values);
+            closureId = Number(created.lastInsertRowid);
+          }
+          const trip = db.prepare("SELECT * FROM vehicle_trips WHERE route_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 1").get(routeId);
+          if (trip) db.prepare("UPDATE vehicle_trips SET start_km=?,end_km=?,distance_km=?,status='Completada',updated_at=? WHERE id=?").run(kmStart, kmEnd, distance, now, Number(trip.id));
+          updateVehicleOdometer(vehicleId, kmEnd);
+          if (fuelLiters || fuelAmount) {
+            const fuelNote = `Cierre diario ${code}`;
+            const existingFuel = db.prepare("SELECT id FROM vehicle_refuels WHERE vehicle_id=? AND fuel_date=? AND notes=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 LIMIT 1").get(vehicleId, closureDate, fuelNote);
+            if (existingFuel) db.prepare("UPDATE vehicle_refuels SET trip_id=?,liters=?,amount=?,station=?,ticket_reference=?,odometer_km=?,updated_at=? WHERE id=?").run(trip?.id || null, fuelLiters, fuelAmount, String(body.fuel_station || "").trim(), String(body.fuel_reference || "").trim(), kmEnd, now, Number(existingFuel.id));
+            else db.prepare("INSERT INTO vehicle_refuels(vehicle_id,trip_id,fuel_date,station,liters,amount,ticket_reference,odometer_km,notes,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").run(vehicleId, trip?.id || null, closureDate, String(body.fuel_station || "").trim(), fuelLiters, fuelAmount, String(body.fuel_reference || "").trim(), kmEnd, fuelNote, actor, now, now);
+          }
+          recordAudit(actor, "POST", `driver_daily_closures/${closureId}`, "Cerrar jornada de reparto", JSON.stringify({ route_id: routeId, vehicle_id: vehicleId, distance_km: distance, fuel_amount: fuelAmount, total_collected: summary.total_collected }));
+          return send(res, 201, enrichDailyClosure(db.prepare("SELECT * FROM driver_daily_closures WHERE id=?").get(closureId)));
+        }
+        return send(res, 405, { error: "Método no permitido" });
       }
       if (p[1] === "vehicle_trips") {
         if (req.method === "GET") {
@@ -2130,6 +2273,10 @@ export async function crmApiHandler(req, res) {
       }
       if (p[1] === "routes" && req.method === "PUT" && p[2]) {
         const body = await read(req);
+        if (body.status === "Completada") {
+          const pendingStops = db.prepare("SELECT COUNT(*) AS total FROM delivery_route_stops WHERE route_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 AND COALESCE(status,'Pendiente') NOT IN ('Entregado','Completada','Incidencia')").get(Number(p[2]));
+          if (Number(pendingStops?.total || 0) > 0) return send(res, 409, { error: `No se puede cerrar la ruta: quedan ${Number(pendingStops.total)} parada(s) sin resolver. Marca la entrega o registra una incidencia.` });
+        }
         if (body.vehicle_id !== undefined) {
           const selectedVehicle = Number(body.vehicle_id || 0) || null;
           const vehicle = selectedVehicle ? db.prepare("SELECT name,plate FROM vehicles WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(selectedVehicle) : null;
@@ -2201,6 +2348,140 @@ export async function crmApiHandler(req, res) {
       const t = p[1];
       if (p[0] !== "api")
         return send(res, 404, { error: "Recurso no encontrado" });
+      if (t === "order_lines" && p[2] === "bulk-validate" && req.method === "POST") {
+        const body = await read(req);
+        const incoming = Array.isArray(body.lines) ? body.lines : [];
+        const uniqueLines = Array.from(new Map(incoming.map((line) => [Number(line?.id), line])).values());
+        const lineIds = uniqueLines.map((line) => Number(line?.id)).filter((id) => Number.isInteger(id) && id > 0);
+        if (!lineIds.length) return send(res, 400, { error: "No hay líneas para validar" });
+        if (lineIds.length > 1000) return send(res, 400, { error: "No se pueden validar más de 1.000 líneas en una sola operación" });
+        const marks = lineIds.map(() => "?").join(",");
+        const currentLines = db.prepare(`SELECT * FROM order_lines WHERE id IN (${marks})`).all(...lineIds);
+        const currentById = new Map(currentLines.map((line) => [Number(line.id), line]));
+        if (currentLines.length !== lineIds.length) return send(res, 400, { error: "Una de las líneas ya no está disponible" });
+        const now = new Date().toISOString();
+        const preparedById = new Map();
+        for (const input of uniqueLines) {
+          const id = Number(input?.id);
+          const current = currentById.get(id);
+          if (!current) return send(res, 400, { error: `No se encontró la línea ${id}` });
+          const requested = Number(input.prepared_quantity ?? current.quantity_requested ?? current.quantity ?? 0);
+          if (!Number.isFinite(requested) || requested < 0 || requested > Number(current.quantity || requested) + 0.0001) {
+            return send(res, 400, { error: `La cantidad preparada de la línea ${id} no es válida` });
+          }
+          const scannedCode = String(input.barcode_scanned_code || "").trim() || null;
+          preparedById.set(id, {
+            ...current,
+            prepared: 1,
+            prepared_quantity: requested,
+            preparation_status: "Preparado",
+            barcode_scanned_code: scannedCode,
+            barcode_scan_status: String(input.barcode_scan_status || "pending"),
+            barcode_scanned_at: scannedCode ? String(input.barcode_scanned_at || now) : null,
+            barcode_scanned_by: scannedCode ? String(input.barcode_scanned_by || actor) : null,
+            updated_at: now,
+          });
+        }
+        const orderIds = Array.from(new Set(currentLines.map((line) => Number(line.order_id)).filter(Boolean)));
+        const orderMarks = orderIds.map(() => "?").join(",");
+        const allOrderLines = orderIds.length
+          ? db.prepare(`SELECT id,order_id,quantity,quantity_requested,prepared,prepared_quantity,preparation_status FROM order_lines WHERE order_id IN (${orderMarks})`).all(...orderIds)
+          : [];
+        const orderLinesByOrder = new Map();
+        for (const line of allOrderLines) {
+          const list = orderLinesByOrder.get(Number(line.order_id)) || [];
+          list.push(preparedById.get(Number(line.id)) || line);
+          orderLinesByOrder.set(Number(line.order_id), list);
+        }
+        const shipments = orderIds.length
+          ? db.prepare(`SELECT id,order_id FROM shipments WHERE order_id IN (${orderMarks}) AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC`).all(...orderIds)
+          : [];
+        const shipmentByOrder = new Map();
+        for (const shipment of shipments) if (!shipmentByOrder.has(Number(shipment.order_id))) shipmentByOrder.set(Number(shipment.order_id), shipment);
+        const statements = [];
+        for (const line of preparedById.values()) {
+          statements.push({
+            sql: "UPDATE order_lines SET prepared=?,prepared_quantity=?,preparation_status=?,barcode_scanned_code=?,barcode_scan_status=?,barcode_scanned_at=?,barcode_scanned_by=?,updated_at=? WHERE id=?",
+            args: [line.prepared, line.prepared_quantity, line.preparation_status, line.barcode_scanned_code, line.barcode_scan_status, line.barcode_scanned_at, line.barcode_scanned_by, now, line.id],
+          });
+        }
+        const updatedShipments = [];
+        for (const orderId of orderIds) {
+          const lines = orderLinesByOrder.get(orderId) || [];
+          const hasIncident = lines.some((line) => String(line.preparation_status || "") === "Incidencia");
+          const allReady = lines.length > 0 && lines.every((line) => {
+            const requested = Number(line.quantity_requested ?? line.quantity ?? 0);
+            const prepared = Number(line.prepared_quantity || 0);
+            return String(line.preparation_status || "") === "Incidencia" || (Number(line.prepared || 0) === 1 && String(line.preparation_status || "") === "Preparado" && prepared >= requested && requested > 0);
+          });
+          const shipment = shipmentByOrder.get(orderId);
+          if (!shipment) continue;
+          const status = hasIncident ? "Preparado con incidencia" : allReady ? "Preparado" : "Preparando";
+          updatedShipments.push({ ...shipment, status, prepared_by: actor, preparation_closed_at: null, preparation_closed_by: null, updated_at: now });
+          statements.push({ sql: "UPDATE shipments SET status=?,prepared_by=?,preparation_closed_at=NULL,preparation_closed_by=NULL,updated_at=? WHERE id=?", args: [status, actor, now, shipment.id] });
+        }
+        statements.push({ sql: "INSERT INTO audit_logs(actor,method,resource,action,details,created_at) VALUES(?,?,?,?,?,?)", args: [actor, "POST", "order_lines/bulk-validate", "Validación masiva de preparación", JSON.stringify({ line_ids: lineIds, order_ids: orderIds }), now] });
+        try {
+          writeBatch(statements);
+        } catch (error) {
+          return send(res, 500, { error: error?.message || "No se pudieron validar las líneas" });
+        }
+        invalidateRelatedReadCaches("order_lines");
+        invalidateReadCache("shipments");
+        return send(res, 200, { ok: true, validated_count: preparedById.size, lines: [...preparedById.values()], shipments: updatedShipments });
+      }
+      if (t === "order_lines" && p[2] === "bulk-incident" && req.method === "POST") {
+        const body = await read(req);
+        const incoming = Array.isArray(body.lines) ? body.lines : [];
+        const lineIds = Array.from(new Set(incoming.map((line) => Number(line?.id)).filter((id) => Number.isInteger(id) && id > 0)));
+        if (!lineIds.length) return send(res, 400, { error: "No hay líneas para registrar como incidencia" });
+        if (lineIds.length > 1000) return send(res, 400, { error: "No se pueden registrar más de 1.000 incidencias en una sola operación" });
+        const marks = lineIds.map(() => "?").join(",");
+        const currentLines = db.prepare(`SELECT * FROM order_lines WHERE id IN (${marks})`).all(...lineIds);
+        if (currentLines.length !== lineIds.length) return send(res, 400, { error: "Una de las líneas ya no está disponible" });
+        const now = new Date().toISOString();
+        const statements = lineIds.map((id) => ({ sql: "UPDATE order_lines SET prepared=0,preparation_status='Incidencia',updated_at=? WHERE id=?", args: [now, id] }));
+        statements.push({ sql: "INSERT INTO audit_logs(actor,method,resource,action,details,created_at) VALUES(?,?,?,?,?,?)", args: [actor, "POST", "order_lines/bulk-incident", "Incidencia masiva de preparación", JSON.stringify({ line_ids: lineIds }), now] });
+        try {
+          writeBatch(statements);
+        } catch (error) {
+          return send(res, 500, { error: error?.message || "No se pudieron registrar las incidencias" });
+        }
+        invalidateRelatedReadCaches("order_lines");
+        return send(res, 200, { ok: true, incident_count: currentLines.length, lines: currentLines.map((line) => ({ ...line, prepared: 0, preparation_status: "Incidencia", updated_at: now })) });
+      }
+      if (t === "shipments" && p[2] === "bulk-close-preparation" && req.method === "POST") {
+        const body = await read(req);
+        const incoming = Array.isArray(body.shipments) ? body.shipments : [];
+        const uniqueShipments = Array.from(new Map(incoming.map((shipment) => [Number(shipment?.id), shipment])).values());
+        const shipmentIds = uniqueShipments.map((shipment) => Number(shipment?.id)).filter((id) => Number.isInteger(id) && id > 0);
+        if (!shipmentIds.length) return send(res, 400, { error: "No hay pedidos preparados para mandar a cargar" });
+        if (shipmentIds.length > 500) return send(res, 400, { error: "No se pueden cerrar más de 500 pedidos en una sola operación" });
+        const marks = shipmentIds.map(() => "?").join(",");
+        const currentShipments = db.prepare(`SELECT id,order_id FROM shipments WHERE id IN (${marks}) AND CAST(COALESCE(deleted,0) AS INTEGER)=0`).all(...shipmentIds);
+        if (currentShipments.length !== shipmentIds.length) return send(res, 400, { error: "Uno de los pedidos preparados ya no está disponible" });
+        const currentById = new Map(currentShipments.map((shipment) => [Number(shipment.id), shipment]));
+        const now = new Date().toISOString();
+        const statements = [];
+        const updatedShipments = [];
+        for (const input of uniqueShipments) {
+          const id = Number(input?.id);
+          const current = currentById.get(id);
+          if (!current) return send(res, 400, { error: `No se encontró la nota de carga ${id}` });
+          const status = String(input.status || "Preparado");
+          if (!["Preparado", "Preparado con incidencia"].includes(status)) return send(res, 400, { error: "El estado de carga no es válido" });
+          statements.push({ sql: "UPDATE shipments SET status=?,prepared_at=?,prepared_by=?,preparation_closed_at=?,preparation_closed_by=?,updated_at=? WHERE id=?", args: [status, now, actor, now, actor, now, id] });
+          updatedShipments.push({ ...current, status, prepared_at: now, prepared_by: actor, preparation_closed_at: now, preparation_closed_by: actor, updated_at: now });
+        }
+        statements.push({ sql: "INSERT INTO audit_logs(actor,method,resource,action,details,created_at) VALUES(?,?,?,?,?,?)", args: [actor, "POST", "shipments/bulk-close-preparation", "Mandar pedidos a carga", JSON.stringify({ shipment_ids: shipmentIds }), now] });
+        try {
+          writeBatch(statements);
+        } catch (error) {
+          return send(res, 500, { error: error?.message || "No se pudieron mandar todos los pedidos a cargar" });
+        }
+        invalidateRelatedReadCaches("shipments");
+        return send(res, 200, { ok: true, closed_count: updatedShipments.length, shipments: updatedShipments });
+      }
       if (t === "public_promotions" && req.method === "GET") {
         const now = new Date().toISOString();
         const promotions = db.prepare("SELECT * FROM web_promotions WHERE status='Publicada' AND CAST(COALESCE(deleted,0) AS INTEGER)=0 AND start_at<=? AND end_at>=? ORDER BY CASE promotion_type WHEN 'flash' THEN 1 WHEN 'week' THEN 2 WHEN 'month' THEN 3 ELSE 4 END,id DESC").all(now, now);
@@ -2556,6 +2837,10 @@ export async function crmApiHandler(req, res) {
         );
         if (!result.changes) return send(res, 404, { error: "No se pudo confirmar la entrega" });
         if (shipment.order_id) db.prepare("UPDATE orders SET status='Entregado',updated_at=? WHERE id=?").run(now, Number(shipment.order_id));
+        // Sincroniza la parada aunque el cliente rechace firmar: la entrega
+        // queda hecha, pero la ruta conserva la incidencia para seguimiento.
+        const routeStopStatus = signatureStatus === "Rechazó firmar" ? "Incidencia" : "Entregado";
+        db.prepare("UPDATE delivery_route_stops SET status=?,updated_at=? WHERE shipment_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").run(routeStopStatus, now, shipmentId);
         recordAudit(actor, "POST", `shipments/${shipmentId}/delivery-confirmation`, "Confirmar entrega", JSON.stringify({ shipment_id: shipmentId, order_id: shipment.order_id || null, signature_status: signatureStatus, recipient_name: recipientName || null, note: note || null }));
         invalidateRelatedReadCaches("shipments");
         invalidateRelatedReadCaches("orders");
