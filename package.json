@@ -1,6 +1,6 @@
 {
   "name": "site-creator-vinext-starter",
-  "version": "2.0.190",
+  "version": "2.0.191",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -17,6 +17,8 @@
     "db:geolocalizar": "node scripts/geocode-locations.mjs",
     "db:migrate-remote": "node scripts/migrate-remote-schema.mjs",
     "db:migrar-turso": "node scripts/migrar-a-turso.mjs",
+    "db:sync-local": "node scripts/sync-turso-to-local.mjs",
+    "db:benchmark": "node scripts/benchmark-database-modes.mjs",
     "test": "npm run build && node --test tests/rendered-html.test.mjs tests/netlify-adapter.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"

@@ -405,14 +405,38 @@ function documentShareUrl(req, type, token) {
   const protocol = host.startsWith("localhost") || host.startsWith("127.") ? "http" : "https";
   return `${protocol}://${host}/api/documents/${encodeURIComponent(type)}/share/${encodeURIComponent(token)}`;
 }
-const remoteMode = process.env.DATABASE_MODE === "remote";
+let remoteMode = process.env.DATABASE_MODE === "remote";
 if (!remoteMode && !existsSync(dir)) mkdirSync(dir);
-const db = remoteMode
+const localDatabase = new DatabaseSync(join(dir, "excluvas.sqlite"));
+let remoteDatabase = null;
+let db = remoteMode
   ? createRemoteDatabaseSync({ url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN })
-  : new DatabaseSync(join(dir, "excluvas.sqlite"));
+  : localDatabase;
+function databaseSource() {
+  return remoteMode ? "Turso" : "SQLite local";
+}
+function localDatabaseReady() {
+  try {
+    return ["users", "clients", "products", "orders"].every((table) => Boolean(localDatabase.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(table)));
+  } catch {
+    return false;
+  }
+}
+function selectDatabaseMode(mode) {
+  const nextMode = String(mode || "").toLowerCase() === "remote" ? "remote" : "local";
+  if (nextMode === "local" && !localDatabaseReady()) throw new Error("La copia local no está preparada. Sincroniza Turso antes de cambiar a SQLite local.");
+  if (nextMode === "remote") {
+    if (!process.env.TURSO_DATABASE_URL || !process.env.TURSO_AUTH_TOKEN) throw new Error("Turso no está configurado en este equipo.");
+    if (!remoteDatabase) remoteDatabase = createRemoteDatabaseSync({ url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN });
+  }
+  remoteMode = nextMode === "remote";
+  db = remoteMode ? remoteDatabase : localDatabase;
+  readCache.clear();
+  return { mode: remoteMode ? "remote" : "local", source: databaseSource(), local_ready: localDatabaseReady(), turso_configured: Boolean(process.env.TURSO_DATABASE_URL && process.env.TURSO_AUTH_TOKEN) };
+}
 // Ajustes de SQLite para el uso local habitual: lecturas ágiles, escrituras
 // concurrentes sin bloquear la aplicación y menos trabajo de disco.
-if (!remoteMode) db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-64000; PRAGMA foreign_keys=ON;");
+localDatabase.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-64000; PRAGMA foreign_keys=ON;");
 db.exec(`CREATE TABLE IF NOT EXISTS purchase_orders(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,supplier_id INTEGER,status TEXT DEFAULT 'Borrador',order_date TEXT DEFAULT CURRENT_DATE,expected_date TEXT,amount REAL DEFAULT 0,notes TEXT);`);
 for (const column of ["updated_at TEXT", "stock_applied_at TEXT", "stock_applied_by TEXT", "supplier_invoice_code TEXT", "invoice_date TEXT", "payment_terms_snapshot TEXT", "payment_due_date TEXT", "payment_status TEXT DEFAULT 'Pendiente'", "payment_paid_at TEXT", "payment_reference TEXT"]) {
   try { db.exec(`ALTER TABLE purchase_orders ADD COLUMN ${column}`); } catch {}
@@ -1299,6 +1323,7 @@ async function sendInvoiceEmail(invoice, pdf, shareUrl, recipient) {
 }
 const readCache = new Map();
 const READ_CACHE_MS = 60000;
+const REMOTE_READ_CACHE_MS = 5000;
 const listColumnsCache = new Map();
 const schemaColumnsCache = new Map();
 function hasColumn(resource, column) {
@@ -1418,21 +1443,17 @@ function invalidateRelatedReadCaches(resource) {
   }
 }
 function cachedRows(resource, includeDeleted, includeInactive) {
-  // Turso es compartido por varias instancias serverless. Una caché local
-  // podría devolver reservas de stock obsoletas después de una escritura
-  // realizada por otra instancia.
-  if (remoteMode) return null;
   const key = `${resource}:${includeDeleted ? 1 : 0}:${includeInactive ? 1 : 0}`;
   const cached = readCache.get(key);
-  if (!cached || Date.now() - cached.createdAt > READ_CACHE_MS) {
+  const maxAge = remoteMode ? REMOTE_READ_CACHE_MS : READ_CACHE_MS;
+  if (!cached || Date.now() - cached.createdAt > maxAge || cached.source !== (remoteMode ? "remote" : "local")) {
     if (cached) readCache.delete(key);
     return null;
   }
   return cached.rows;
 }
 function storeRows(resource, includeDeleted, includeInactive, rows) {
-  if (remoteMode) return rows;
-  readCache.set(`${resource}:${includeDeleted ? 1 : 0}:${includeInactive ? 1 : 0}`, { createdAt: Date.now(), rows });
+  readCache.set(`${resource}:${includeDeleted ? 1 : 0}:${includeInactive ? 1 : 0}`, { createdAt: Date.now(), rows, source: remoteMode ? "remote" : "local" });
   return rows;
 }
 function recordAudit(actor, method, resource, action, details = "") {
@@ -1748,7 +1769,24 @@ export async function crmApiHandler(req, res) {
       .filter(Boolean);
     try {
       if (p[1] === "version" && req.method === "GET") {
-        return send(res, 200, { ok: true, version: APP_VERSION, environment: process.env.NODE_ENV || "production" });
+        return send(res, 200, { ok: true, version: APP_VERSION, environment: process.env.NODE_ENV || "production", database: databaseSource() });
+      }
+      if (p[1] === "runtime" && p[2] === "database" && req.method === "GET") {
+        return send(res, 200, {
+          ok: true,
+          mode: remoteMode ? "remote" : "local",
+          source: databaseSource(),
+          local_ready: localDatabaseReady(),
+          turso_configured: Boolean(process.env.TURSO_DATABASE_URL && process.env.TURSO_AUTH_TOKEN),
+          switch_allowed: process.env.NODE_ENV !== "production" || process.env.DATABASE_MODE_SWITCH === "1",
+        });
+      }
+      if (p[1] === "runtime" && p[2] === "database" && req.method === "POST") {
+        if (process.env.NODE_ENV === "production" && process.env.DATABASE_MODE_SWITCH !== "1") return send(res, 403, { error: "El cambio de base de datos está desactivado en producción." });
+        const body = await read(req);
+        if (body.confirm !== "CAMBIAR_BASE_DATOS") return send(res, 400, { error: "Confirma el cambio de base de datos." });
+        try { return send(res, 200, { ok: true, ...selectDatabaseMode(body.mode) }); }
+        catch (error) { return send(res, 409, { error: error?.message || "No se pudo cambiar la base de datos." }); }
       }
       const actor = req.headers["x-actor"] || "Usuario local";
       if (p[1] === "public" && p[2] === "shipments" && p[3] && req.method === "GET") {
@@ -3444,6 +3482,7 @@ export async function crmApiHandler(req, res) {
         };
         const limitValue = query.has("limit") ? Math.min(parsePageValue(query.get("limit"), 0), 5000) : null;
         const offsetValue = query.has("offset") ? parsePageValue(query.get("offset"), 0) : 0;
+        const bypassReadCache = query.has("refresh") || query.get("cache") === "no-store";
         if (p[2] && Number.isInteger(Number(p[2]))) {
           const source = t === "orders"
             ? `orders LEFT JOIN clients AS order_client ON order_client.id=orders.client_id`
@@ -3464,7 +3503,7 @@ export async function crmApiHandler(req, res) {
         if (t === "purchase_orders" && !isLookup && !includeDeleted && limitValue === null && offsetValue === 0) {
           return send(res, 200, getPurchaseOrderRows());
         }
-        const cached = !isLookup && limitValue === null && offsetValue === 0
+        const cached = !bypassReadCache && !isLookup && limitValue === null && offsetValue === 0
           ? cachedRows(t, includeDeleted, includeInactive)
           : null;
         if (cached) return send(res, 200, t === "shipments" ? cached.map(attachShipmentTrackingToken) : t === "order_lines" ? attachOrderLineLotsBatch(cached) : cached);

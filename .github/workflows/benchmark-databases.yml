@@ -1,0 +1,44 @@
+name: Benchmark local and Turso databases
+
+on:
+  workflow_dispatch:
+    inputs:
+      sync_local:
+        description: "Actualizar la copia SQLite del miniPC desde Turso antes de medir"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: powershell -ExecutionPolicy Bypass -File {0}
+
+jobs:
+  benchmark:
+    runs-on: [self-hosted, Windows, exclusivas-inteligentes]
+    timeout-minutes: 20
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install dependencies
+        shell: powershell -ExecutionPolicy Bypass -Command "& '{0}'"
+        run: npm ci
+
+      - name: Sincronizar copia local desde Turso
+        if: ${{ inputs.sync_local }}
+        working-directory: C:\Users\luism\Desktop\exclusivas-inteligentes
+        env:
+          SYNC_ENV_FILE: C:\Users\luism\Desktop\exclusivas-inteligentes\.env.local
+        shell: powershell -ExecutionPolicy Bypass -Command "& '{0}'"
+        run: node scripts/sync-turso-to-local.mjs
+
+      - name: Comparar tiempos local y Turso
+        working-directory: C:\Users\luism\Desktop\exclusivas-inteligentes
+        shell: powershell -ExecutionPolicy Bypass -Command "& '{0}'"
+        run: node scripts/benchmark-database-modes.mjs

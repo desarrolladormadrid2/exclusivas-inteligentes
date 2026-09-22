@@ -20,6 +20,8 @@ export default function SettingsPanel() {
   const [open, setOpen] = useState(false);
   const [prefs, setPrefs] = useState<any>(defaults);
   const [saved, setSaved] = useState(false);
+  const [databaseStatus, setDatabaseStatus] = useState<any>(null);
+  const [databaseSwitching, setDatabaseSwitching] = useState(false);
   useEffect(() => {
     setPublicPortal(["/portal-pedidos", "/web"].includes(window.location.pathname.replace(/\/$/, "")));
     try {
@@ -29,6 +31,7 @@ export default function SettingsPanel() {
       setPrefs(p);
       apply(p);
     } catch {}
+    fetch("/api/runtime/database").then((response) => response.ok ? response.json() : null).then((status) => { if (status) setDatabaseStatus(status); }).catch(() => {});
   }, []);
   if (publicPortal) return null;
   function update(k: string, v: any) {
@@ -47,6 +50,23 @@ export default function SettingsPanel() {
     localStorage.setItem("excluvas.home", JSON.stringify(prefs));
     window.dispatchEvent(new CustomEvent("excluvas-config-changed", { detail: prefs }));
     setSaved(true);
+  }
+  async function switchDatabase(mode: string) {
+    if (!databaseStatus?.switch_allowed || mode === databaseStatus.mode) return;
+    const label = mode === "remote" ? "Turso" : "SQLite local";
+    if (!window.confirm(`Vas a cambiar las consultas a ${label}. ¿Continuar?`)) return;
+    setDatabaseSwitching(true);
+    try {
+      const response = await fetch("/api/runtime/database", { method: "POST", headers: { "Content-Type": "application/json", "X-Actor": "Administrador" }, body: JSON.stringify({ mode, confirm: "CAMBIAR_BASE_DATOS" }) });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "No se pudo cambiar la base de datos.");
+      setDatabaseStatus(body);
+      window.dispatchEvent(new CustomEvent("excluvas-database-changed", { detail: body }));
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "No se pudo cambiar la base de datos.");
+    } finally {
+      setDatabaseSwitching(false);
+    }
   }
   return (
     <>
@@ -131,11 +151,12 @@ export default function SettingsPanel() {
           <h3>Base de datos</h3>
           <div className="settings-storage">
             <div className="storage-head">
-              <span>Base de datos local</span>
-              <b>Activa</b>
+              <span>Fuente actual</span>
+              <b>{databaseStatus?.source || "Comprobando…"}</b>
             </div>
             <div className="storage-bar"><i /></div>
-            <small>SQLite · persistencia habilitada</small>
+            {databaseStatus?.switch_allowed ? <label className="settings-field">Usar consultas en<select value={databaseStatus.mode} disabled={databaseSwitching} onChange={(event) => void switchDatabase(event.target.value)}><option value="local">SQLite local</option><option value="remote" disabled={!databaseStatus.turso_configured}>Turso</option></select></label> : <small>La fuente se controla desde el entorno de producción. El botón de actualización siempre fuerza una consulta nueva.</small>}
+            {databaseStatus?.mode === "local" && !databaseStatus?.local_ready && <small className="settings-note">Primero hay que sincronizar una copia local de Turso.</small>}
           </div>
           <button className="settings-backup" onClick={() => window.open("/api/backup", "_blank")}>Descargar copia de seguridad</button>
           <small className="settings-note">Guarda esta copia en un lugar seguro antes de mover el CRM a otro equipo.</small>
