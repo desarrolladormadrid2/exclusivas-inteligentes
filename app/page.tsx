@@ -3503,6 +3503,7 @@ function DriverPaymentPanel({ shipment, invoice, actor, onSaved }: { shipment: a
     reader.readAsDataURL(file);
   }
   async function savePayment() {
+    if (!invoice?.id) return setMessage("Genera primero la factura para poder registrar el cobro.");
     const parsedAmount = Number(String(amount).replace(",", "."));
     if (!Number.isFinite(parsedAmount) || parsedAmount < 0) return setMessage("Indica un importe válido.");
     setSaving(true); setMessage("");
