@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.189";
+const APP_VERSION = "2.0.193";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
@@ -6608,7 +6608,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   ].map((column) => ({ ...column, rows: sortedRows.filter((row) => preparationStatusGroup(row) === column.key) }));
   const preparationClient = (row: any) => row.client_name || getClient(row.client_id)?.name || "Cliente sin nombre";
   const preparationAddress = (row: any) => [row.address, row.delivery_city || row.city].filter(Boolean).join(" · ") || "Dirección no indicada";
-  const currentListKey = `${active}|${showDeleted ? "deleted" : "active"}|${showInactive ? "all-statuses" : "active-only"}`;
+  const currentListKey = `${active}|${active === "Preparación de pedidos" ? preparationDateFilter || "all-dates" : ""}|${showDeleted ? "deleted" : "active"}|${showInactive ? "all-statuses" : "active-only"}`;
   const listIsReady = loadedListKey === currentListKey;
   useEffect(() => {
     setPage(1);
