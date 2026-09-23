@@ -6,7 +6,13 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.200";
+declare global {
+  interface Window {
+    L?: any;
+  }
+}
+
+const APP_VERSION = "2.0.201";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
@@ -1245,29 +1251,103 @@ function cityFallbackCoordinates(cityValue: any) {
   return null;
 }
 
+function loadVehicleLeaflet() {
+  if (typeof window === "undefined") return Promise.reject(new Error("El mapa solo se carga en el navegador"));
+  if (window.L) return Promise.resolve(window.L);
+  const cssId = "vehicle-leaflet-css";
+  if (!document.getElementById(cssId)) {
+    const link = document.createElement("link");
+    link.id = cssId;
+    link.rel = "stylesheet";
+    link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+    document.head.appendChild(link);
+  }
+  const existing = document.querySelector<HTMLScriptElement>('script[data-vehicle-leaflet="true"]');
+  if (existing) return new Promise((resolve, reject) => { existing.addEventListener("load", () => resolve(window.L)); existing.addEventListener("error", reject); });
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    script.async = true;
+    script.dataset.vehicleLeaflet = "true";
+    script.onload = () => resolve(window.L);
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+}
+
+function VehicleLoadLeafletMap({ points, origin, selectedStopId, onSelect }: { points: any[]; origin: { latitude: number; longitude: number; label: string }; selectedStopId: number | null; onSelect: (id: number) => void }) {
+  const mapElementRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<any>(null);
+  const markersRef = useRef<Record<string, any>>({});
+  const positionsRef = useRef<Record<string, [number, number]>>({});
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
+  const pointsKey = points.map((point) => `${point.id}:${point.latitude}:${point.longitude}`).join("|");
+  const markerIcon = (L: any, label: string, selected = false, isOrigin = false) => L.divIcon({ className: "vehicle-load-leaflet-icon", html: `<span class="vehicle-load-leaflet-marker${selected ? " is-selected" : ""}${isOrigin ? " is-origin" : ""}">${label}</span>`, iconSize: [24, 24], iconAnchor: [12, 12] });
+  useEffect(() => {
+    let disposed = false;
+    const setup = async () => {
+      try {
+        const L = await loadVehicleLeaflet();
+        if (disposed || !mapElementRef.current) return;
+        const map = L.map(mapElementRef.current, { zoomControl: true, scrollWheelZoom: true });
+        mapRef.current = map;
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© Colaboradores de OpenStreetMap" }).addTo(map);
+        const routeCoordinates: [number, number][] = [[Number(origin.latitude), Number(origin.longitude)], ...points.map((point) => [Number(point.latitude), Number(point.longitude)] as [number, number])];
+        L.polyline(routeCoordinates, { color: "#bd2027", weight: 2, opacity: 0.82 }).addTo(map);
+        map.fitBounds(L.latLngBounds(routeCoordinates), { padding: [30, 30], maxZoom: 14 });
+        L.marker(routeCoordinates[0], { icon: markerIcon(L, "N", false, true), interactive: false }).addTo(map);
+        const nextMarkers: Record<string, any> = {};
+        const nextPositions: Record<string, [number, number]> = {};
+        points.forEach((point, index) => {
+          const id = String(point.id);
+          const position: [number, number] = [Number(point.latitude), Number(point.longitude)];
+          const marker = L.marker(position, { icon: markerIcon(L, String(index + 1)) }).addTo(map);
+          marker.bindTooltip(`${index + 1}. ${point.client_name || "Pedido"}`);
+          marker.on("click", () => onSelectRef.current(Number(point.id)));
+          nextMarkers[id] = marker;
+          nextPositions[id] = position;
+        });
+        markersRef.current = nextMarkers;
+        positionsRef.current = nextPositions;
+      } catch {
+        if (!disposed && mapElementRef.current) mapElementRef.current.innerHTML = "<span class=\"vehicle-load-leaflet-error\">No se ha podido cargar el mapa.</span>";
+      }
+    };
+    void setup();
+    return () => {
+      disposed = true;
+      mapRef.current?.remove();
+      mapRef.current = null;
+      markersRef.current = {};
+      positionsRef.current = {};
+    };
+  // The key keeps the map instance stable when only the selected stop changes.
+  }, [pointsKey, origin.latitude, origin.longitude]);
+  useEffect(() => {
+    const L = window.L;
+    if (!L) return;
+    Object.entries(markersRef.current).forEach(([id, marker]) => {
+      const point = points.find((item) => String(item.id) === id);
+      marker.setIcon(markerIcon(L, String(Math.max(1, points.indexOf(point) + 1)), Number(selectedStopId) === Number(id)));
+    });
+    const position = selectedStopId === null ? null : positionsRef.current[String(selectedStopId)];
+    if (position && mapRef.current) mapRef.current.flyTo(position, Math.max(mapRef.current.getZoom(), 14), { duration: 0.35 });
+  }, [selectedStopId, points]);
+  return <div ref={mapElementRef} className="vehicle-load-leaflet-canvas" aria-label="Mapa interactivo de la zona de entregas" />;
+}
+
 function VehicleLoadPlanningMap({ locations, origin }: { locations: any[]; origin: { latitude: number; longitude: number; label: string } }) {
   const [selectedStopId, setSelectedStopId] = useState<number | null>(null);
   const valid = locations.filter((location) => isPlausibleRouteCoordinate(location.latitude, location.longitude, origin));
   if (!locations.length) return null;
   if (!valid.length) return <section className="vehicle-load-planning-map panel"><header className="vehicle-load-planning-head"><div><h3>Mapa de pedidos</h3><p className="muted">Geolocaliza las direcciones para dibujar la ruta.</p></div><strong>0/{locations.length} ubicados</strong></header><div className="vehicle-load-planning-empty">No hay pedidos geolocalizados para este día.</div></section>;
-  // El encuadre debe centrarse en la zona de reparto. Si incluimos la nave de
-  // Palencia junto con entregas de Madrid, todos los clientes quedan juntos
-  // en una esquina y el mapa deja de servir para planificar la ruta local.
   const points = valid;
-  const latitudes = points.map((point) => Number(point.latitude));
-  const longitudes = points.map((point) => Number(point.longitude));
-  const minLatitude = Math.min(...latitudes), maxLatitude = Math.max(...latitudes), minLongitude = Math.min(...longitudes), maxLongitude = Math.max(...longitudes);
-  const latitudePadding = Math.max(0.018, (maxLatitude - minLatitude) * 0.14);
-  const longitudePadding = Math.max(0.022, (maxLongitude - minLongitude) * 0.14);
-  const south = minLatitude - latitudePadding, north = maxLatitude + latitudePadding, west = minLongitude - longitudePadding, east = maxLongitude + longitudePadding;
-  const project = (latitude: number, longitude: number) => ({ x: ((longitude - west) / Math.max(0.0001, east - west)) * 100, y: (1 - (latitude - south) / Math.max(0.0001, north - south)) * 100 });
-  const routePoints = points.map((point) => { const projected = project(Number(point.latitude), Number(point.longitude)); return `${projected.x},${projected.y}`; }).join(" ");
-  const mapSrc = `https://www.openstreetmap.org/export/embed.html?bbox=${west}%2C${south}%2C${east}%2C${north}&layer=mapnik`;
   const selectStop = (id: number) => {
     setSelectedStopId(id);
     window.requestAnimationFrame(() => document.querySelector(`[data-map-stop-id="${id}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
   };
-  return <section className="vehicle-load-planning-map panel"><header className="vehicle-load-planning-head"><div><h3>Mapa de la zona de entregas</h3><p className="muted">El zoom se centra en los clientes del día. Pulsa un número o una parada para localizarla en el mapa.</p></div><strong>{valid.length}/{locations.length} ubicados</strong></header><div className="vehicle-load-planning-body"><div className="vehicle-load-planning-canvas"><iframe title="Mapa de la zona de entregas" src={mapSrc} loading="lazy" /><svg className="vehicle-load-planning-route" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polyline points={routePoints} /></svg>{points.map((point, index) => { const projected = project(Number(point.latitude), Number(point.longitude)); const selected = Number(selectedStopId) === Number(point.id); return <button type="button" key={`${point.id || "delivery"}-${index}`} className={`vehicle-load-planning-marker${selected ? " is-selected" : ""}`} style={{ left: `${projected.x}%`, top: `${projected.y}%` }} title={`${index + 1}. ${point.client_name || "Pedido"}`} aria-label={`Localizar parada ${index + 1}: ${point.client_name || "Pedido"}`} onClick={() => selectStop(Number(point.id))}>{index + 1}</button>; })}</div><ol className="vehicle-load-planning-stops"><li className="is-origin"><b>N</b><span><strong>Salida</strong><small>{origin.label}</small></span></li>{valid.map((item: any, index: number) => { const selected = Number(selectedStopId) === Number(item.id); return <li key={item.id} data-map-stop-id={item.id} className={selected ? "is-selected" : ""} role="button" tabIndex={0} onClick={() => selectStop(Number(item.id))} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectStop(Number(item.id)); } }}><b>{index + 1}</b><span><strong>{item.client_name || "Cliente sin nombre"}</strong><small>{item.opening_time && item.closing_time ? `Recepción ${String(item.opening_time).slice(0, 5)}–${String(item.closing_time).slice(0, 5)}` : "Horario pendiente"}{item.distance_km === null ? " · Distancia pendiente" : ` · ${String(item.distance_km).replace(".", ",")} km`}</small></span></li>; })}</ol></div>{valid.length < locations.length && <p className="vehicle-load-planning-warning">{locations.length - valid.length} pedido{locations.length - valid.length === 1 ? " sin" : "s sin"} coordenadas. No se puede calcular su posición en la ruta hasta geolocalizarlo.</p>}</section>;
+  return <section className="vehicle-load-planning-map panel"><header className="vehicle-load-planning-head"><div><h3>Mapa de la zona de entregas</h3><p className="muted">El zoom mantiene los pedidos en su ubicación. Pulsa un número o una parada para localizarla.</p></div><strong>{valid.length}/{locations.length} ubicados</strong></header><div className="vehicle-load-planning-body"><div className="vehicle-load-planning-canvas"><VehicleLoadLeafletMap points={points} origin={origin} selectedStopId={selectedStopId} onSelect={selectStop} /></div><ol className="vehicle-load-planning-stops"><li className="is-origin"><b>N</b><span><strong>Salida</strong><small>{origin.label}</small></span></li>{valid.map((item: any, index: number) => { const selected = Number(selectedStopId) === Number(item.id); return <li key={item.id} data-map-stop-id={item.id} className={selected ? "is-selected" : ""} role="button" tabIndex={0} onClick={() => selectStop(Number(item.id))} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectStop(Number(item.id)); } }}><b>{index + 1}</b><span><strong>{item.client_name || "Cliente sin nombre"}</strong><small>{item.opening_time && item.closing_time ? `Recepción ${String(item.opening_time).slice(0, 5)}–${String(item.closing_time).slice(0, 5)}` : "Horario pendiente"}{item.distance_km === null ? " · Distancia pendiente" : ` · ${String(item.distance_km).replace(".", ",")} km`}</small></span></li>; })}</ol></div>{valid.length < locations.length && <p className="vehicle-load-planning-warning">{locations.length - valid.length} pedido{locations.length - valid.length === 1 ? " sin" : "s sin"} coordenadas. No se puede calcular su posición en la ruta hasta geolocalizarlo.</p>}</section>;
 }
 
 function haversineKm(aLat: number, aLon: number, bLat: number, bLon: number) {
