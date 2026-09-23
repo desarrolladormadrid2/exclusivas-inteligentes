@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.198";
+const APP_VERSION = "2.0.199";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
@@ -4381,15 +4381,20 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       .finally(() => setLoading(false));
   }, [active, showDeleted, showInactive, preparationDateFilter, listRefreshKey]);
   useEffect(() => {
+    // No descargamos todas las tablas relacionadas al entrar en una sección.
+    // En Turso esas lecturas grandes se solapan y bloquean la primera pintura
+    // (por ejemplo, Facturas no necesita los 1.200 productos para mostrar su
+    // listado). Los detalles y formularios cargan sus relaciones por IDs al
+    // abrirse, y aquí solo dejamos las necesarias para pintar/filtrar la lista.
     const lookupResourcesByActive: Record<string, string[]> = {
-      Productos: ["suppliers", "warehouses", "product_lots"],
-      Stock: ["products", "warehouses", "inventory_movements", "product_lots"],
-      Envíos: ["clients", "orders", "collection_points", "shipments"],
-      Clientes: ["clients", "collection_points", "invoices", "payments"],
+      Productos: ["suppliers", "warehouses"],
+      Stock: ["warehouses", "product_lots"],
+      Envíos: ["clients", "collection_points"],
+      Clientes: [],
       Contactos: ["clients", "suppliers"],
-      Proveedores: ["suppliers", "purchase_orders", "payments"],
-      Compras: ["suppliers", "products", "purchase_orders", "invoices"],
-      "Compras inteligentes": ["suppliers", "products", "purchase_orders"],
+      Proveedores: ["purchase_orders"],
+      Compras: ["suppliers"],
+      "Compras inteligentes": ["suppliers"],
       Almacenes: ["warehouses", "products"],
       // Esta vista ya tiene los envíos filtrados en `rows`. No debemos volver
       // a descargar todos los pedidos, envíos y productos para pintar la
@@ -4398,12 +4403,12 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       // una comanda o la orden de carga colectiva.
       "Preparación de pedidos": ["clients", "collection_points", "users"],
       "Lugares de recogida": ["clients", "collection_points"],
-      Entradas: ["products", "warehouses", "suppliers", "purchase_orders", "invoices"],
+      Entradas: ["warehouses", "suppliers", "purchase_orders"],
       Salidas: ["clients", "orders", "collection_points", "shipments"],
-      Pedidos: ["clients", "products", "collection_points", "shipments", "orders", "invoices"],
-      Presupuestos: ["clients", "products", "quotes"],
-      Albaranes: ["clients", "orders", "products", "delivery_notes"],
-      Facturas: ["clients", "orders", "products", "invoices"],
+      Pedidos: ["clients", "shipments", "invoices", "payments"],
+      Presupuestos: ["clients"],
+      Albaranes: ["clients", "orders"],
+      Facturas: ["clients"],
       Cobros: ["clients", "invoices", "payments"],
       "Gastos y tickets": ["clients", "suppliers", "payments"],
       Balance: ["invoices", "purchase_orders", "payments", "expenses"],
