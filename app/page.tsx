@@ -12,7 +12,7 @@ declare global {
   }
 }
 
-const APP_VERSION = "2.0.202";
+const APP_VERSION = "2.0.203";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
@@ -1303,7 +1303,7 @@ function VehicleLoadLeafletMap({ points, origin, selectedStopId, onSelect }: { p
           const id = String(point.id);
           const position: [number, number] = [Number(point.latitude), Number(point.longitude)];
           const marker = L.marker(position, { icon: markerIcon(L, String(index + 1)) }).addTo(map);
-          marker.bindTooltip(`${index + 1}. ${point.client_name || "Pedido"}`);
+          marker.bindTooltip(`${index + 1}. ${point.code || point.shipment_code || point.order_code || `Pedido #${point.id}`} · ${point.client_name || "Cliente sin nombre"}`);
           marker.on("click", () => onSelectRef.current(Number(point.id)));
           nextMarkers[id] = marker;
           nextPositions[id] = position;
