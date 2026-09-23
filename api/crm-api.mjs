@@ -407,15 +407,35 @@ function documentShareUrl(req, type, token) {
 }
 let remoteMode = process.env.DATABASE_MODE === "remote";
 if (!remoteMode && !existsSync(dir)) mkdirSync(dir);
-const localDatabase = new DatabaseSync(join(dir, "excluvas.sqlite"));
+const localDatabasePath = join(dir, process.env.DATABASE_LOCAL_PATH || (remoteMode ? "excluvas-local.sqlite" : "excluvas.sqlite"));
+let localDatabase = null;
 let remoteDatabase = null;
+function openLocalDatabase() {
+  if (!localDatabase) {
+    localDatabase = new DatabaseSync(localDatabasePath);
+    localDatabase.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-64000; PRAGMA foreign_keys=ON;");
+  }
+  return localDatabase;
+}
 let db = remoteMode
   ? createRemoteDatabaseSync({ url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN })
-  : localDatabase;
+  : openLocalDatabase();
 function databaseSource() {
   return remoteMode ? "Turso" : "SQLite local";
 }
 function localDatabaseReady() {
+  if (!existsSync(localDatabasePath)) return false;
+  if (!localDatabase) {
+    let probe = null;
+    try {
+      probe = new DatabaseSync(localDatabasePath);
+      return ["users", "clients", "products", "orders"].every((table) => Boolean(probe.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(table)));
+    } catch {
+      return false;
+    } finally {
+      try { probe?.close(); } catch {}
+    }
+  }
   try {
     return ["users", "clients", "products", "orders"].every((table) => Boolean(localDatabase.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(table)));
   } catch {
@@ -430,13 +450,12 @@ function selectDatabaseMode(mode) {
     if (!remoteDatabase) remoteDatabase = createRemoteDatabaseSync({ url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN });
   }
   remoteMode = nextMode === "remote";
-  db = remoteMode ? remoteDatabase : localDatabase;
+  db = remoteMode ? remoteDatabase : openLocalDatabase();
   readCache.clear();
   return { mode: remoteMode ? "remote" : "local", source: databaseSource(), local_ready: localDatabaseReady(), turso_configured: Boolean(process.env.TURSO_DATABASE_URL && process.env.TURSO_AUTH_TOKEN) };
 }
 // Ajustes de SQLite para el uso local habitual: lecturas ágiles, escrituras
 // concurrentes sin bloquear la aplicación y menos trabajo de disco.
-localDatabase.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-64000; PRAGMA foreign_keys=ON;");
 db.exec(`CREATE TABLE IF NOT EXISTS purchase_orders(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,supplier_id INTEGER,status TEXT DEFAULT 'Borrador',order_date TEXT DEFAULT CURRENT_DATE,expected_date TEXT,amount REAL DEFAULT 0,notes TEXT);`);
 for (const column of ["updated_at TEXT", "stock_applied_at TEXT", "stock_applied_by TEXT", "supplier_invoice_code TEXT", "invoice_date TEXT", "payment_terms_snapshot TEXT", "payment_due_date TEXT", "payment_status TEXT DEFAULT 'Pendiente'", "payment_paid_at TEXT", "payment_reference TEXT"]) {
   try { db.exec(`ALTER TABLE purchase_orders ADD COLUMN ${column}`); } catch {}

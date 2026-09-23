@@ -8,6 +8,9 @@ on:
         required: true
         default: true
         type: boolean
+  workflow_run:
+    workflows: ["Deploy production to miniPC"]
+    types: [completed]
 
 permissions:
   contents: read
@@ -18,6 +21,7 @@ defaults:
 
 jobs:
   benchmark:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.sync_local || github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' }}
     runs-on: [self-hosted, Windows, exclusivas-inteligentes]
     timeout-minutes: 20
     steps:
@@ -31,14 +35,15 @@ jobs:
         run: npm ci
 
       - name: Sincronizar copia local desde Turso
-        if: ${{ inputs.sync_local }}
         working-directory: C:\Users\luism\Desktop\exclusivas-inteligentes
         env:
           SYNC_ENV_FILE: C:\Users\luism\Desktop\exclusivas-inteligentes\.env.local
         shell: powershell -ExecutionPolicy Bypass -Command "& '{0}'"
-        run: node scripts/sync-turso-to-local.mjs
+        run: node scripts\sync-turso-to-local.mjs
 
       - name: Comparar tiempos local y Turso
         working-directory: C:\Users\luism\Desktop\exclusivas-inteligentes
+        env:
+          DATABASE_LOCAL_PATH: exclusivas-local.sqlite
         shell: powershell -ExecutionPolicy Bypass -Command "& '{0}'"
-        run: node scripts/benchmark-database-modes.mjs
+        run: node scripts\benchmark-database-modes.mjs

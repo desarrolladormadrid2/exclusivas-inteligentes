@@ -5,7 +5,6 @@ import { createClient } from "@libsql/client";
 
 const root = process.cwd();
 const dataDir = path.join(root, "data");
-const targetPath = path.join(dataDir, "excluvas.sqlite");
 const envPath = process.env.SYNC_ENV_FILE || path.join(root, ".env.local");
 const dryRun = process.argv.includes("--dry-run");
 
@@ -19,6 +18,7 @@ function readEnv(filePath) {
 }
 
 const env = { ...readEnv(envPath), ...process.env };
+const targetPath = path.join(dataDir, env.SYNC_LOCAL_PATH || (env.DATABASE_MODE === "remote" ? "excluvas-local.sqlite" : "excluvas.sqlite"));
 if (!env.TURSO_DATABASE_URL || !env.TURSO_AUTH_TOKEN) {
   throw new Error(`Faltan TURSO_DATABASE_URL/TURSO_AUTH_TOKEN en ${envPath}`);
 }
