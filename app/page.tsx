@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.196";
+const APP_VERSION = "2.0.197";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
@@ -6635,7 +6635,11 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   ].map((column) => ({ ...column, rows: sortedRows.filter((row) => preparationStatusGroup(row) === column.key) }));
   const preparationClient = (row: any) => row.client_name || getClient(row.client_id)?.name || "Cliente sin nombre";
   const preparationAddress = (row: any) => [row.address, row.delivery_city || row.city].filter(Boolean).join(" · ") || "Dirección no indicada";
-  const currentListKey = `${active}|${active === "Preparación de pedidos" ? preparationDateFilter || "all-dates" : ""}|${showDeleted ? "deleted" : "active"}|${showInactive ? "all-statuses" : "active-only"}`;
+  // Keep the readiness key identical to the key used by the list-loading
+  // effect. Normal views use the shared "all-dates" segment too; using an
+  // empty segment here left every cached non-preparation list permanently in
+  // the loading state even after its rows had been loaded.
+  const currentListKey = `${active}|${active === "Preparación de pedidos" ? preparationDateFilter || "all-dates" : "all-dates"}|${showDeleted ? "deleted" : "active"}|${showInactive ? "all-statuses" : "active-only"}`;
   const listIsReady = loadedListKey === currentListKey;
   useEffect(() => {
     setPage(1);
