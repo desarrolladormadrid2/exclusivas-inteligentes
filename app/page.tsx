@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.197";
+const APP_VERSION = "2.0.198";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
@@ -143,7 +143,7 @@ function LoadingIndicator({ label }: { label: string }) {
       setSeconds(Math.floor((Date.now() - startedAt) / 1000));
     }, 250);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [label]);
   return <><span>{label}</span><b className="loading-seconds">{seconds} s</b></>;
 }
 function TopHorizontalScroll({ className, children }: { className: string; children: ReactNode }) {
@@ -7529,7 +7529,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       {!isCrmPreparation && !listIsReady && (
         <div className="data-loading" role="status" aria-live="polite">
           <span className="loading-spinner" aria-hidden="true" />
-          <LoadingIndicator label="Cargando datos desde la base de datos…" />
+          <LoadingIndicator key={currentListKey} label="Cargando datos desde la base de datos…" />
         </div>
       )}
       {!isCrmPreparation && listIsReady && !filteredRows.length && (
