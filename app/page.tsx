@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 
-const APP_VERSION = "2.0.194";
+const APP_VERSION = "2.0.196";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
@@ -2804,6 +2804,7 @@ function PreparationDayCards({ rows, lookups, onOpen, onOpenCollective, dateFilt
 
 function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDateFilterChange, embedded = false }: { rows: any[]; lookups: any; dateFilter: string; actor: string; onClose: () => void; onDateFilterChange?: (value: string) => void; embedded?: boolean }) {
   const [sourceLines, setSourceLines] = useState<any[]>([]);
+  const [productRows, setProductRows] = useState<any[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [barcodeDrafts, setBarcodeDrafts] = useState<Record<string, string>>({});
   const [editingLineIds, setEditingLineIds] = useState<Record<string, boolean>>({});
@@ -2825,7 +2826,8 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
   const collectiveDateAllowed = dateFilter === tabletTodayInput() || dateFilter === tabletDateOffset(1);
   const orderIds = Array.from(new Set(items.map((row) => Number(row.order_id || row._source_order_id || 0)).filter(Boolean)));
   const orderKey = orderIds.join(",");
-  const getProduct = (line: any) => (lookups.products || []).find((product: any) => Number(product.id) === Number(line.product_id));
+  const productKey = Array.from(new Set(sourceLines.map((line: any) => Number(line.product_id)).filter((id) => Number.isInteger(id) && id > 0))).join(",");
+  const getProduct = (line: any) => (productRows.length ? productRows : lookups.products || []).find((product: any) => Number(product.id) === Number(line.product_id));
   const requestedQuantity = (line: any) => Number(line.quantity ?? line.quantity_requested ?? 0) || 0;
   const preparedQuantity = (line: any) => {
     const requested = requestedQuantity(line);
@@ -2886,6 +2888,17 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; controller.abort(); window.clearTimeout(timeout); };
   }, [orderKey, actor, loadAttempt]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!productKey) {
+      setProductRows([]);
+      return () => { cancelled = true; };
+    }
+    fetchCompactLookup("products", actor, false, { ids: productKey })
+      .then((products) => { if (!cancelled) setProductRows(products); });
+    return () => { cancelled = true; };
+  }, [productKey, actor]);
 
   const groups = Array.from(sourceLines.reduce((map: Map<string, any>, line: any) => {
     const product = getProduct(line);
@@ -4378,7 +4391,12 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       Compras: ["suppliers", "products", "purchase_orders", "invoices"],
       "Compras inteligentes": ["suppliers", "products", "purchase_orders"],
       Almacenes: ["warehouses", "products"],
-       "Preparación de pedidos": ["clients", "orders", "products", "collection_points", "shipments", "users"],
+      // Esta vista ya tiene los envíos filtrados en `rows`. No debemos volver
+      // a descargar todos los pedidos, envíos y productos para pintar la
+      // pantalla: en Turso esas consultas grandes se serializan y bloquean el
+      // acceso a preparación. Los productos se cargan por sus IDs al abrir
+      // una comanda o la orden de carga colectiva.
+      "Preparación de pedidos": ["clients", "collection_points", "users"],
       "Lugares de recogida": ["clients", "collection_points"],
       Entradas: ["products", "warehouses", "suppliers", "purchase_orders", "invoices"],
       Salidas: ["clients", "orders", "collection_points", "shipments"],
@@ -4394,18 +4412,27 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     };
     const lookupResources = lookupResourcesByActive[active] || [];
     if (!lookupResources.length) return;
-    const preparationQuery = active === "Preparación de pedidos" && preparationDateFilter
-      ? { preparation_date: preparationDateFilter }
-      : {};
-    const lookupQuery = lookupRefreshKey > 0 ? { ...preparationQuery, refresh: String(lookupRefreshKey) } : preparationQuery;
+    const preparationClientIds = active === "Preparación de pedidos"
+      ? [...new Set(rows.map((row: any) => Number(row.client_id)).filter((id) => Number.isInteger(id) && id > 0))].join(",")
+      : "";
+    const preparationPointIds = active === "Preparación de pedidos"
+      ? [...new Set(rows.map((row: any) => Number(row.collection_point_id)).filter((id) => Number.isInteger(id) && id > 0))].join(",")
+      : "";
     Promise.allSettled(
-      lookupResources.map(async (resource) => [resource, await fetchCompactLookup(resource, user?.username || "Usuario local", false, ["orders", "shipments"].includes(resource) ? lookupQuery : lookupRefreshKey > 0 ? { refresh: String(lookupRefreshKey) } : {})] as const),
+      lookupResources.map(async (resource) => {
+        const resourceQuery = active === "Preparación de pedidos" && resource === "clients" && preparationClientIds
+          ? { ids: preparationClientIds }
+          : active === "Preparación de pedidos" && resource === "collection_points" && preparationPointIds
+            ? { ids: preparationPointIds }
+            : lookupRefreshKey > 0 ? { refresh: String(lookupRefreshKey) } : {};
+        return [resource, await fetchCompactLookup(resource, user?.username || "Usuario local", false, resourceQuery)] as const;
+      }),
     ).then((results) => setLookups((current: any) => {
       const next = { ...current };
       results.forEach((result) => { if (result.status === "fulfilled") next[result.value[0]] = result.value[1]; });
       return next;
     }));
-  }, [active, preparationDateFilter, user?.username, lookupRefreshKey]);
+  }, [active, preparationDateFilter, rows, user?.username, lookupRefreshKey]);
   useEffect(() => {
     if (active !== "Preparación de pedidos") return;
     const orderIds = [...new Set([
