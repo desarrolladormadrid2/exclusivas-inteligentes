@@ -12,7 +12,7 @@ declare global {
   }
 }
 
-const APP_VERSION = "2.0.203";
+const APP_VERSION = "2.0.204";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
@@ -1954,28 +1954,33 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
     <VehicleLoadPlanningMap locations={dayShipments} origin={origin} />
     {error && <p className="error-message" role="alert">{error}</p>}
     {message && <p className="success-message" role="status">{message}</p>}
-    <section className="vehicle-load-board" aria-label="Asignación de pedidos a camiones">
-      {vehicleColumns.map((column: any) => {
-        const key = String(column.id);
-        const columnItems = (boardAssignments[key] || []).map((id) => shipmentById.get(Number(id))).filter(Boolean);
-        const planStats = getVehiclePlanStats(columnItems);
-        const roadStats = roadEstimates[key];
-        const displayedDistance = roadStats?.distance_km ?? planStats.distance;
-        const displayedMinutes = roadStats?.total_minutes ?? planStats.minutes;
-        const overDailyLimit = displayedMinutes > 600;
-        const lateStops = Number(roadStats?.time_window_warnings?.length || 0);
-        return <section className="vehicle-load-column" key={key} onDragOver={(event) => allowShipmentDrop(event)} onDrop={(event) => { event.preventDefault(); moveShipment(readDraggedShipmentId(event), key); }}>
-          <header className="vehicle-load-column-head"><div><h3>{column.plate || column.name || `Camión ${key}`}</h3><span>{columnItems.length} pedidos</span><small className={overDailyLimit || lateStops ? "is-over-limit" : ""}>{roadStats ? `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km carretera · ${formatLoadDuration(roadStats.driving_minutes)} conducción + ${roadStats.waiting_minutes || 0} min espera + ${roadStats.service_minutes} min entregas = ${formatLoadDuration(displayedMinutes)}` : roadEstimateLoading ? "Calculando tiempo real de carretera…" : `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km aprox. · ${formatLoadDuration(planStats.drivingMinutes)} conducción + ${planStats.waitingMinutes} min espera + ${columnItems.length * DEFAULT_DELIVERY_SERVICE_MINUTES} min entregas = ${formatLoadDuration(displayedMinutes)}`}{overDailyLimit ? " · supera 10 h" : ""}{lateStops ? ` · ${lateStops} fuera de horario` : ""}</small></div><div className="vehicle-load-column-tools"><button type="button" className="button secondary vehicle-load-optimize" disabled={optimizingVehicle === key || columnItems.length < 2} onClick={() => void optimizeVehicle(key)}>{optimizingVehicle === key ? "Optimizando…" : "Optimizar orden"}</button><label>Conductor<input value={driverByVehicle[key] || column.driver || user?.username || ""} onChange={(event) => setDriverByVehicle((current) => ({ ...current, [key]: event.target.value }))} placeholder="Nombre" /></label></div></header>
-          <div className="vehicle-load-column-list">{columnItems.length ? [renderDropSlot(key, `${key}-start`, Number(columnItems[0].id)), ...columnItems.flatMap((item: any, index: number) => [renderBoardCard(item, key, index, columnItems.length), renderDropSlot(key, `${key}-${item.id}-after`, Number(columnItems[index + 1]?.id) || undefined)])] : <p className="vehicle-load-column-empty">Suelta aquí los pedidos</p>}</div>
-        </section>;
-      })}
-    </section>
-    <section className="vehicle-load-unassigned panel">
-      <div className="panel-head"><div><h3>Pedidos del día</h3><p className="muted">Ordenados del más lejano al más cercano. Se muestra la ventana de recepción; arrastra los no asignados a un camión.</p></div><strong>{unassigned.length} sin asignar</strong></div>
-      <div className="vehicle-load-dropzone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveShipment(Number(event.dataTransfer.getData("text/plain")) || draggedShipmentId || 0, "unassigned"); }}>
-        {loading ? <div className="data-loading" role="status"><LoadingIndicator label="Cargando pedidos preparados…" /></div> : unassigned.length ? unassigned.map((item: any) => renderBoardCard(item, "unassigned")) : <p className="empty-state">Todos los pedidos están asignados a un camión.</p>}
-      </div>
-    </section>
+    <div className="vehicle-load-workspace">
+      <section className="vehicle-load-unassigned panel">
+        <div className="panel-head"><div><h3>Pedidos del día</h3><p className="muted">Ordenados del más lejano al más cercano. Se muestra la ventana de recepción; arrastra los no asignados a un camión. Los camiones quedan visibles a la derecha.</p></div><strong>{unassigned.length} sin asignar</strong></div>
+        <div className="vehicle-load-dropzone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveShipment(Number(event.dataTransfer.getData("text/plain")) || draggedShipmentId || 0, "unassigned"); }}>
+          {loading ? <div className="data-loading" role="status"><LoadingIndicator label="Cargando pedidos preparados…" /></div> : unassigned.length ? unassigned.map((item: any) => renderBoardCard(item, "unassigned")) : <p className="empty-state">Todos los pedidos están asignados a un camión.</p>}
+        </div>
+      </section>
+      <aside className="vehicle-load-trucks-panel panel" aria-label="Camiones y pedidos asignados">
+        <div className="panel-head"><div><h3>Camiones</h3><p className="muted">Panel fijo para asignar y ordenar los pedidos.</p></div></div>
+        <section className="vehicle-load-board" aria-label="Asignación de pedidos a camiones">
+          {vehicleColumns.map((column: any) => {
+            const key = String(column.id);
+            const columnItems = (boardAssignments[key] || []).map((id) => shipmentById.get(Number(id))).filter(Boolean);
+            const planStats = getVehiclePlanStats(columnItems);
+            const roadStats = roadEstimates[key];
+            const displayedDistance = roadStats?.distance_km ?? planStats.distance;
+            const displayedMinutes = roadStats?.total_minutes ?? planStats.minutes;
+            const overDailyLimit = displayedMinutes > 600;
+            const lateStops = Number(roadStats?.time_window_warnings?.length || 0);
+            return <section className="vehicle-load-column" key={key} onDragOver={(event) => allowShipmentDrop(event)} onDrop={(event) => { event.preventDefault(); moveShipment(readDraggedShipmentId(event), key); }}>
+              <header className="vehicle-load-column-head"><div><h3>{column.plate || column.name || `Camión ${key}`}</h3><span>{columnItems.length} pedidos</span><small className={overDailyLimit || lateStops ? "is-over-limit" : ""}>{roadStats ? `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km carretera · ${formatLoadDuration(roadStats.driving_minutes)} conducción + ${roadStats.waiting_minutes || 0} min espera + ${roadStats.service_minutes} min entregas = ${formatLoadDuration(displayedMinutes)}` : roadEstimateLoading ? "Calculando tiempo real de carretera…" : `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km aprox. · ${formatLoadDuration(planStats.drivingMinutes)} conducción + ${planStats.waitingMinutes} min espera + ${columnItems.length * DEFAULT_DELIVERY_SERVICE_MINUTES} min entregas = ${formatLoadDuration(displayedMinutes)}`}{overDailyLimit ? " · supera 10 h" : ""}{lateStops ? ` · ${lateStops} fuera de horario` : ""}</small></div><div className="vehicle-load-column-tools"><button type="button" className="button secondary vehicle-load-optimize" disabled={optimizingVehicle === key || columnItems.length < 2} onClick={() => void optimizeVehicle(key)}>{optimizingVehicle === key ? "Optimizando…" : "Optimizar orden"}</button><label>Conductor<input value={driverByVehicle[key] || column.driver || user?.username || ""} onChange={(event) => setDriverByVehicle((current) => ({ ...current, [key]: event.target.value }))} placeholder="Nombre" /></label></div></header>
+              <div className="vehicle-load-column-list">{columnItems.length ? [renderDropSlot(key, `${key}-start`, Number(columnItems[0].id)), ...columnItems.flatMap((item: any, index: number) => [renderBoardCard(item, key, index, columnItems.length), renderDropSlot(key, `${key}-${item.id}-after`, Number(columnItems[index + 1]?.id) || undefined)])] : <p className="vehicle-load-column-empty">Suelta aquí los pedidos</p>}</div>
+            </section>;
+          })}
+        </section>
+      </aside>
+    </div>
     <VehicleOperationsPanel user={user} routeDate={routeDate} vehicles={vehicles} onReload={() => void load(true)} />
     {routeAlternatives.length > 0 && <div className="preview-overlay vehicle-route-alternatives-overlay" role="dialog" aria-modal="true" aria-label="Alternativas de rutas" onClick={(event) => event.target === event.currentTarget && setRouteAlternatives([])}><div className="vehicle-route-alternatives-modal"><header><div><p className="eyebrow">PLANIFICACIÓN · 2 CAMIONES</p><h2>Elige una alternativa de reparto</h2><small>Ordenadas de mejor a peor: primero se respetan los horarios, después el menor tiempo y los menos kilómetros.</small></div><button type="button" className="preview-close" onClick={() => setRouteAlternatives([])} aria-label="Cerrar">×</button></header><div className="vehicle-route-alternatives-grid">{routeAlternatives.map((alternative: any, index: number) => <article className={`vehicle-route-alternative${alternative.recommended ? " is-recommended" : ""}`} key={`${alternative.title}-${index}`}><div className="vehicle-route-alternative-head"><div><b>{alternative.recommended ? "Recomendada" : `Alternativa ${index + 1}`}</b><h3>{alternative.title}</h3><small>{alternative.description}</small></div><strong>{formatLoadDuration(Number(alternative.total_minutes || 0))}</strong></div><div className="vehicle-route-alternative-summary"><span>{Number(alternative.total_distance_km || 0).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km sumados</span><span>{formatLoadDuration(Number(alternative.combined_minutes || 0))} los 2 camiones · {alternative.late_stops ? `${alternative.late_stops} fuera de horario` : "Horarios respetados"}</span></div><div className="vehicle-route-alternative-columns">{alternative.columns?.map((column: any, columnIndex: number) => <div key={columnIndex}><b>{vehicleColumns[columnIndex]?.plate || vehicleColumns[columnIndex]?.name || `Camión ${columnIndex + 1}`}</b><span>{column.shipment_ids?.length || 0} pedidos · {Number(column.estimate?.distance_km || 0).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km · {formatLoadDuration(Number(column.estimate?.total_minutes || 0))}</span><small>{Number(column.estimate?.driving_minutes || 0)} min carretera + {Number(column.estimate?.waiting_minutes || 0)} min espera + {Number(column.estimate?.service_minutes || 0)} min entregas</small><small>{(column.stops || []).map((stop: any) => stop.client_name || `Pedido ${stop.shipment_id}`).join(" → ") || "Sin pedidos"}</small></div>)}</div><button type="button" className="button primary" onClick={() => applyRouteAlternative(alternative)}>Usar esta alternativa</button></article>)}</div></div></div>}
     {printShipment && <ShipmentLabelModal shipment={printShipment} client={{ name: printShipment.client_name }} lines={Array.isArray(printShipment.load_lines) ? printShipment.load_lines : []} products={products} address={printShipment.address || ""} city={printShipment.city || ""} order={orders.find((item: any) => Number(item.id) === Number(printShipment.order_id))} invoice={invoices.find((item: any) => Number(item.order_id) === Number(printShipment.order_id))} onPrintInvoice={(invoice) => void printInvoiceDocument(invoice)} onClose={() => setPrintShipmentId(null)} />}
