@@ -12,7 +12,7 @@ declare global {
   }
 }
 
-const APP_VERSION = "2.0.206";
+const APP_VERSION = "2.0.207";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
@@ -1283,7 +1283,7 @@ function VehicleLoadLeafletMap({ points, origin, selectedStopId, onSelect }: { p
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
   const pointsKey = points.map((point) => `${point.id}:${point.latitude}:${point.longitude}`).join("|");
-  const markerIcon = (L: any, label: string, selected = false, isOrigin = false) => L.divIcon({ className: "vehicle-load-leaflet-icon", html: `<span class="vehicle-load-leaflet-marker${selected ? " is-selected" : ""}${isOrigin ? " is-origin" : ""}">${label}</span>`, iconSize: [24, 24], iconAnchor: [12, 12] });
+  const markerIcon = (L: any, label: string, selected = false, isOrigin = false, isEstimated = false) => L.divIcon({ className: "vehicle-load-leaflet-icon", html: `<span class="vehicle-load-leaflet-marker${selected ? " is-selected" : ""}${isOrigin ? " is-origin" : ""}${isEstimated ? " is-estimated" : ""}">${label}</span>`, iconSize: [24, 24], iconAnchor: [12, 12] });
   useEffect(() => {
     let disposed = false;
     const setup = async () => {
@@ -1299,11 +1299,25 @@ function VehicleLoadLeafletMap({ points, origin, selectedStopId, onSelect }: { p
         L.marker(routeCoordinates[0], { icon: markerIcon(L, "N", false, true), interactive: false }).addTo(map);
         const nextMarkers: Record<string, any> = {};
         const nextPositions: Record<string, [number, number]> = {};
+        const duplicateTotals: Record<string, number> = {};
+        points.forEach((point) => {
+          const key = `${Number(point.latitude).toFixed(6)}:${Number(point.longitude).toFixed(6)}`;
+          duplicateTotals[key] = (duplicateTotals[key] || 0) + 1;
+        });
+        const duplicateIndexes: Record<string, number> = {};
         points.forEach((point, index) => {
           const id = String(point.id);
-          const position: [number, number] = [Number(point.latitude), Number(point.longitude)];
-          const marker = L.marker(position, { icon: markerIcon(L, String(index + 1)) }).addTo(map);
-          marker.bindTooltip(`${index + 1}. ${point.code || point.shipment_code || point.order_code || `Pedido #${point.id}`} · ${point.client_name || "Cliente sin nombre"}`);
+          const latitude = Number(point.latitude);
+          const longitude = Number(point.longitude);
+          const coordinateKey = `${latitude.toFixed(6)}:${longitude.toFixed(6)}`;
+          const duplicateIndex = duplicateIndexes[coordinateKey] || 0;
+          duplicateIndexes[coordinateKey] = duplicateIndex + 1;
+          const duplicateTotal = duplicateTotals[coordinateKey] || 1;
+          const position: [number, number] = duplicateTotal > 1
+            ? [latitude + Math.sin((duplicateIndex * Math.PI * 2) / duplicateTotal) * 0.00045, longitude + Math.cos((duplicateIndex * Math.PI * 2) / duplicateTotal) * 0.00045 / Math.max(0.7, Math.cos(latitude * Math.PI / 180))]
+            : [latitude, longitude];
+          const marker = L.marker(position, { icon: markerIcon(L, String(index + 1), false, false, Boolean(point.coordinates_estimated)) }).addTo(map);
+          marker.bindTooltip(`${index + 1}. ${point.code || point.shipment_code || point.order_code || `Pedido #${point.id}`} · ${point.client_name || "Cliente sin nombre"}${point.coordinates_estimated ? " · Ubicación aproximada" : ""}`);
           marker.on("click", () => onSelectRef.current(Number(point.id)));
           nextMarkers[id] = marker;
           nextPositions[id] = position;
@@ -1329,7 +1343,7 @@ function VehicleLoadLeafletMap({ points, origin, selectedStopId, onSelect }: { p
     if (!L) return;
     Object.entries(markersRef.current).forEach(([id, marker]) => {
       const point = points.find((item) => String(item.id) === id);
-      marker.setIcon(markerIcon(L, String(Math.max(1, points.indexOf(point) + 1)), Number(selectedStopId) === Number(id)));
+      marker.setIcon(markerIcon(L, String(Math.max(1, points.indexOf(point) + 1)), Number(selectedStopId) === Number(id), false, Boolean(point?.coordinates_estimated)));
     });
     const position = selectedStopId === null ? null : positionsRef.current[String(selectedStopId)];
     if (position && mapRef.current) mapRef.current.flyTo(position, Math.max(mapRef.current.getZoom(), 14), { duration: 0.35 });
@@ -1343,11 +1357,12 @@ function VehicleLoadPlanningMap({ locations, origin }: { locations: any[]; origi
   if (!locations.length) return null;
   if (!valid.length) return <section className="vehicle-load-planning-map panel"><header className="vehicle-load-planning-head"><div><h3>Mapa de pedidos</h3><p className="muted">Geolocaliza las direcciones para dibujar la ruta.</p></div><strong>0/{locations.length} ubicados</strong></header><div className="vehicle-load-planning-empty">No hay pedidos geolocalizados para este día.</div></section>;
   const points = valid;
+  const approximateCount = points.filter((item) => item.coordinates_estimated).length;
   const selectStop = (id: number) => {
     setSelectedStopId(id);
     window.requestAnimationFrame(() => document.querySelector(`[data-map-stop-id="${id}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
   };
-  return <section className="vehicle-load-planning-map panel"><header className="vehicle-load-planning-head"><div><h3>Mapa de la zona de entregas</h3><p className="muted">El zoom mantiene los pedidos en su ubicación. Pulsa un número o una parada para localizarla.</p></div><strong>{valid.length}/{locations.length} ubicados</strong></header><div className="vehicle-load-planning-body"><div className="vehicle-load-planning-canvas"><VehicleLoadLeafletMap points={points} origin={origin} selectedStopId={selectedStopId} onSelect={selectStop} /></div><ol className="vehicle-load-planning-stops"><li className="is-origin"><b>N</b><span><strong>Salida</strong><small>{origin.label}</small></span></li>{valid.map((item: any, index: number) => { const selected = Number(selectedStopId) === Number(item.id); return <li key={item.id} data-map-stop-id={item.id} className={selected ? "is-selected" : ""} role="button" tabIndex={0} onClick={() => selectStop(Number(item.id))} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectStop(Number(item.id)); } }}><b>{index + 1}</b><span><strong>{item.client_name || "Cliente sin nombre"}</strong><small>{item.opening_time && item.closing_time ? `Recepción ${String(item.opening_time).slice(0, 5)}–${String(item.closing_time).slice(0, 5)}` : "Horario pendiente"}{item.distance_km === null ? " · Distancia pendiente" : ` · ${String(item.distance_km).replace(".", ",")} km`}</small></span></li>; })}</ol></div>{valid.length < locations.length && <p className="vehicle-load-planning-warning">{locations.length - valid.length} pedido{locations.length - valid.length === 1 ? " sin" : "s sin"} coordenadas. No se puede calcular su posición en la ruta hasta geolocalizarlo.</p>}</section>;
+  return <section className="vehicle-load-planning-map panel"><header className="vehicle-load-planning-head"><div><h3>Mapa de la zona de entregas</h3><p className="muted">El zoom mantiene los pedidos en su ubicación. Pulsa un número o una parada para localizarla.</p></div><strong>{valid.length}/{locations.length} en mapa{approximateCount ? ` · ${approximateCount} aprox.` : ""}</strong></header><div className="vehicle-load-planning-body"><div className="vehicle-load-planning-canvas"><VehicleLoadLeafletMap points={points} origin={origin} selectedStopId={selectedStopId} onSelect={selectStop} /></div><ol className="vehicle-load-planning-stops"><li className="is-origin"><b>N</b><span><strong>Salida</strong><small>{origin.label}</small></span></li>{valid.map((item: any, index: number) => { const selected = Number(selectedStopId) === Number(item.id); return <li key={item.id} data-map-stop-id={item.id} className={selected ? "is-selected" : ""} role="button" tabIndex={0} onClick={() => selectStop(Number(item.id))} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectStop(Number(item.id)); } }}><b>{index + 1}</b><span><strong>{item.client_name || "Cliente sin nombre"}</strong><small>{item.opening_time && item.closing_time ? `Recepción ${String(item.opening_time).slice(0, 5)}–${String(item.closing_time).slice(0, 5)}` : "Horario pendiente"}{item.coordinates_estimated ? " · Ubicación aproximada" : item.distance_km === null ? " · Distancia pendiente" : ` · ${String(item.distance_km).replace(".", ",")} km`}</small></span></li>; })}</ol></div>{valid.length < locations.length && <p className="vehicle-load-planning-warning">{locations.length - valid.length} pedido{locations.length - valid.length === 1 ? " sin" : "s sin"} coordenadas. No se puede calcular su posición en la ruta hasta geolocalizarlo.</p>}</section>;
 }
 
 function haversineKm(aLat: number, aLon: number, bLat: number, bLon: number) {
