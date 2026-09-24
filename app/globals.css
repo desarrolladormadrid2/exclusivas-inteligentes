@@ -115,6 +115,9 @@ input[type="checkbox"] { accent-color: #b91c1c; }
   body:has(.shipment-label-overlay) .shipment-label-overlay,
   body:has(.shipment-label-overlay) .shipment-label-overlay * { visibility: visible !important; }
   .shipment-label-overlay { position: absolute; inset: 0; display: block; padding: 0; background: #fff; }
+  body:has(.shipment-label-overlay) .delivery-map-panel,
+  body:has(.shipment-label-overlay) .integrated-map,
+  body:has(.shipment-label-overlay) iframe[src*="openstreetmap.org"] { display: none !important; }
   .shipment-label-modal { width: 100%; max-height: none; overflow: visible; padding: 0; border: 0; background: #fff; box-shadow: none; }
   .shipment-label-toolbar, .shipment-label-actions { display: none !important; }
   .shipment-label-sheet { width: 100%; min-height: 140mm; padding: 12mm; border: 0; }
