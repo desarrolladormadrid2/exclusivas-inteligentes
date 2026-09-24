@@ -12,7 +12,7 @@ declare global {
   }
 }
 
-const APP_VERSION = "2.0.208";
+const APP_VERSION = "2.0.209";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
@@ -2917,6 +2917,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
   const [savingId, setSavingId] = useState<number | null>(null);
   const [bulkValidating, setBulkValidating] = useState(false);
   const [bulkProgress, setBulkProgress] = useState({ completed: 0, total: 0 });
+  const [bulkElapsedSeconds, setBulkElapsedSeconds] = useState(0);
   const [closing, setClosing] = useState(false);
   const [loadSent, setLoadSent] = useState(false);
   const [incidentLineId, setIncidentLineId] = useState<number | null>(null);
@@ -2925,6 +2926,15 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [loadAttempt, setLoadAttempt] = useState(0);
+  useEffect(() => {
+    if (!bulkValidating) {
+      setBulkElapsedSeconds(0);
+      return;
+    }
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => setBulkElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [bulkValidating]);
   const items = rows
     .filter((row) => !dateFilter || String(row.preparation_date || row.delivery_date || row.expected_delivery_at || "").slice(0, 10) === dateFilter)
     .filter((row) => !["Cancelado", "Anulado"].includes(String(row.status || "")));
@@ -3058,7 +3068,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Actor": actor },
         body: JSON.stringify({ lines }),
-      });
+      }, 120000);
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "No se pudieron validar todas las líneas.");
       setBulkProgress({ completed: pendingValidationLines.length, total: pendingValidationLines.length });
@@ -3229,6 +3239,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
       <header className="collective-load-header"><div><p className="eyebrow">LOGÍSTICA · PREPARACIÓN</p><h2>Orden de carga colectiva</h2><small>Día de preparación: {dateFilter ? formatSpanishDateValue(dateFilter, false) : "Sin fecha"} · artículos ordenados por ubicación</small></div>{!embedded && <button type="button" className="preview-close collective-load-close" aria-label="Cerrar" onClick={onClose}>×</button>}<div className="collective-load-date-toolbar" aria-label="Cambiar día de preparación"><label>Fecha<input type="date" value={dateFilter} onChange={(event) => onDateFilterChange?.(event.target.value)} /></label><button type="button" className={`button ${dateFilter === today ? "primary" : "secondary"}`} aria-pressed={dateFilter === today} onClick={() => onDateFilterChange?.(today)}>Hoy</button><button type="button" className={`button ${dateFilter === tomorrow ? "primary" : "secondary"}`} aria-pressed={dateFilter === tomorrow} onClick={() => onDateFilterChange?.(tomorrow)}>Mañana</button></div></header>
       <div className="collective-load-summary"><span><b>{items.length}</b> pedidos</span><span><b>{groups.length}</b> referencias</span><span><b>{sourceLines.filter(lineIsValidated).length}/{sourceLines.length}</b> líneas validadas</span><span><b>{Math.max(0, groups.reduce((total: number, group: any) => total + group.requested - group.prepared, 0))}</b> unidades pendientes</span></div>
       <div className="collective-load-note"><b>Validación por línea</b><span>Cada pedido aparece ya separado. Escanea el código de barras o escríbelo y comprueba la cantidad antes de validar.</span></div>
+      {bulkValidating && <div className="collective-load-progress" role="status" aria-live="polite"><span className="loading-spinner" aria-hidden="true" /><div><b>Validando {bulkProgress.total} líneas… {bulkProgress.completed}/{bulkProgress.total}</b><small>Guardando en bloque. Tiempo transcurrido: {bulkElapsedSeconds} s. No cierres esta ventana.</small></div></div>}
       {error && <p className="collective-load-feedback error-message" role="alert">{error} <button type="button" className="collective-load-retry" onClick={() => setLoadAttempt((current) => current + 1)}>Reintentar</button></p>}
       {message && <p className="collective-load-feedback success-message" role="status">{message}</p>}
       {loading ? <div className="collective-load-empty"><span className="loading-spinner" /><p>Cargando artículos de los pedidos…</p></div> : !groups.length ? <div className="collective-load-empty"><b>No hay artículos para esta fecha</b><span>Prueba otra fecha o vuelve a “Todos”.</span></div> : (
@@ -3293,7 +3304,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
         </div>
         </>
       )}
-       <footer className="collective-load-actions"><button type="button" className="button primary" disabled={loading || bulkValidating || savingId !== null || incidentSaving || !pendingValidationLines.length} onClick={() => void validateAllLines()}>{bulkValidating ? `Validando… ${bulkProgress.completed}/${bulkProgress.total}` : "Validar todos"}</button><button type="button" className="button secondary collective-load-print" onClick={() => window.print()}>Imprimir listado</button><button type="button" className="button primary collective-load-close-action" disabled={!readyToClose || closing || bulkValidating || loadSent} onClick={() => void closeCollectiveLoad()}>{loadSent ? "En carga ✓" : closing ? "Mandando a cargar…" : "Mandar a cargar"}</button>{!embedded && <button type="button" className="button secondary" disabled={closing || bulkValidating || loadSent} onClick={onClose}>Cerrar</button>}</footer>
+       <footer className="collective-load-actions"><button type="button" className="button primary" aria-busy={bulkValidating} disabled={loading || bulkValidating || savingId !== null || incidentSaving || !pendingValidationLines.length} onClick={() => void validateAllLines()}>{bulkValidating ? `Validando… ${bulkProgress.completed}/${bulkProgress.total}` : "Validar todos"}</button><button type="button" className="button secondary collective-load-print" onClick={() => window.print()}>Imprimir listado</button><button type="button" className="button primary collective-load-close-action" disabled={!readyToClose || closing || bulkValidating || loadSent} onClick={() => void closeCollectiveLoad()}>{loadSent ? "En carga ✓" : closing ? "Mandando a cargar…" : "Mandar a cargar"}</button>{!embedded && <button type="button" className="button secondary" disabled={closing || bulkValidating || loadSent} onClick={onClose}>Cerrar</button>}</footer>
        {incidentLineId !== null && (() => { const incidentLine = sourceLines.find((line) => Number(line.id) === incidentLineId); if (!incidentLine) return null; const product = getProduct(incidentLine); const requested = requestedQuantity(incidentLine); const quantity = Math.max(0, Number(drafts[String(incidentLine.id)] ?? defaultDraftQuantity(incidentLine)) || 0); const missing = Math.max(0, requested - quantity); const order = items.find((item) => Number(item.order_id || item._source_order_id) === Number(incidentLine.order_id)); return <div className="collective-load-incident-overlay" role="dialog" aria-modal="true" aria-label="Registrar incidencia" onMouseDown={(event) => event.target === event.currentTarget && !incidentSaving && setIncidentLineId(null)}><section className="collective-load-incident-modal" onClick={(event) => event.stopPropagation()}><header><div><p className="eyebrow">PREPARACIÓN · INCIDENCIA</p><h3>Registrar incidencia</h3><small>{order?.code || `Pedido #${incidentLine.order_id}`} · {product?.name || `Producto #${incidentLine.product_id}`}</small></div><button type="button" className="preview-close" aria-label="Cerrar" disabled={incidentSaving} onClick={() => setIncidentLineId(null)}>×</button></header><div className="collective-load-incident-summary"><b>Preparadas: {quantity} de {requested}</b><span>Faltan {missing} {quantityUnitLabel(incidentLine.quantity_unit || product?.unit)}</span></div><label className="collective-load-incident-text">Qué ha ocurrido<textarea value={incidentText} onChange={(event) => setIncidentText(event.target.value)} placeholder={`Ej.: solo hay ${quantity} unidades disponibles.`} rows={4} autoFocus /></label><p className="collective-load-incident-help">La incidencia quedará vinculada al pedido y la línea seguirá marcada en rojo hasta resolverla.</p>{error && <p className="collective-load-feedback error-message" role="alert">{error}</p>}<footer><button type="button" className="button secondary" disabled={incidentSaving} onClick={() => setIncidentLineId(null)}>Cancelar</button><button type="button" className="button danger" disabled={incidentSaving} onClick={() => void registerLineIncident(incidentLine)}>{incidentSaving ? "Registrando…" : "Confirmar incidencia"}</button></footer></section></div>; })()}
     </section>
   </div>;

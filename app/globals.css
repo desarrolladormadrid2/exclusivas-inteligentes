@@ -3723,6 +3723,11 @@ footer span {
 .collective-load-summary span:nth-child(4) { border-color: #e7c98d; background: #fff9eb; }
 .collective-load-note { display: flex; gap: 8px; margin: 12px 20px 4px; padding: 9px 10px; border-left: 3px solid #64748b; background: #f4f6f7; color: #526670; font-size: 11px; line-height: 1.4; }
 .collective-load-note b { flex: 0 0 auto; color: #26343d; }
+.collective-load-progress { display: flex; align-items: center; gap: 10px; margin: 10px 20px 0; padding: 11px 12px; border: 1px solid #b7d5e3; border-left: 4px solid #147aa3; background: #eef8fc; color: #244b5c; }
+.collective-load-progress .loading-spinner { flex: 0 0 auto; }
+.collective-load-progress div { display: grid; gap: 2px; }
+.collective-load-progress b { color: #123f52; font-size: 12px; }
+.collective-load-progress small { color: #526f7b; font-size: 10px; }
 .collective-load-feedback { margin: 8px 20px 0; }
 .collective-load-list { margin: 12px 20px 4px; border: 1px solid #d1d9dd; }
 .collective-load-grid { display: grid; grid-template-columns: minmax(95px, .75fr) minmax(220px, 2.2fr) minmax(78px, .7fr) minmax(90px, .8fr) minmax(90px, .8fr) minmax(110px, .9fr); gap: 8px; align-items: center; }
