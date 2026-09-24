@@ -12,7 +12,7 @@ declare global {
   }
 }
 
-const APP_VERSION = "2.0.209";
+const APP_VERSION = "2.0.210";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
@@ -2919,6 +2919,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
   const [bulkProgress, setBulkProgress] = useState({ completed: 0, total: 0 });
   const [bulkElapsedSeconds, setBulkElapsedSeconds] = useState(0);
   const [closing, setClosing] = useState(false);
+  const [closingElapsedSeconds, setClosingElapsedSeconds] = useState(0);
   const [loadSent, setLoadSent] = useState(false);
   const [incidentLineId, setIncidentLineId] = useState<number | null>(null);
   const [incidentText, setIncidentText] = useState("");
@@ -2935,6 +2936,15 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
     const timer = window.setInterval(() => setBulkElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000)), 1000);
     return () => window.clearInterval(timer);
   }, [bulkValidating]);
+  useEffect(() => {
+    if (!closing) {
+      setClosingElapsedSeconds(0);
+      return;
+    }
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => setClosingElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [closing]);
   const items = rows
     .filter((row) => !dateFilter || String(row.preparation_date || row.delivery_date || row.expected_delivery_at || "").slice(0, 10) === dateFilter)
     .filter((row) => !["Cancelado", "Anulado"].includes(String(row.status || "")));
@@ -3108,11 +3118,11 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
         const hasIncident = lines.some((line) => String(line.preparation_status || "") === "Incidencia");
         return { id: Number(shipment.id), status: hasIncident ? "Preparado con incidencia" : "Preparado" };
       });
-      const response = await fetch("/api/shipments/bulk-close-preparation", {
+      const response = await fetchWithTimeout("/api/shipments/bulk-close-preparation", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Actor": actor },
         body: JSON.stringify({ shipments }),
-      });
+      }, 120000);
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "No se pudo cerrar uno de los pedidos preparados.");
       setLoadSent(true);
@@ -3240,6 +3250,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
       <div className="collective-load-summary"><span><b>{items.length}</b> pedidos</span><span><b>{groups.length}</b> referencias</span><span><b>{sourceLines.filter(lineIsValidated).length}/{sourceLines.length}</b> líneas validadas</span><span><b>{Math.max(0, groups.reduce((total: number, group: any) => total + group.requested - group.prepared, 0))}</b> unidades pendientes</span></div>
       <div className="collective-load-note"><b>Validación por línea</b><span>Cada pedido aparece ya separado. Escanea el código de barras o escríbelo y comprueba la cantidad antes de validar.</span></div>
       {bulkValidating && <div className="collective-load-progress" role="status" aria-live="polite"><span className="loading-spinner" aria-hidden="true" /><div><b>Validando {bulkProgress.total} líneas… {bulkProgress.completed}/{bulkProgress.total}</b><small>Guardando en bloque. Tiempo transcurrido: {bulkElapsedSeconds} s. No cierres esta ventana.</small></div></div>}
+      {closing && <div className="collective-load-progress collective-load-progress-close" role="status" aria-live="polite"><span className="loading-spinner" aria-hidden="true" /><div><b>Mandando {items.length} pedidos a Carga de vehículos…</b><small>Cerrando la preparación y actualizando los estados. Tiempo transcurrido: {closingElapsedSeconds} s. No cierres esta ventana.</small></div></div>}
       {error && <p className="collective-load-feedback error-message" role="alert">{error} <button type="button" className="collective-load-retry" onClick={() => setLoadAttempt((current) => current + 1)}>Reintentar</button></p>}
       {message && <p className="collective-load-feedback success-message" role="status">{message}</p>}
       {loading ? <div className="collective-load-empty"><span className="loading-spinner" /><p>Cargando artículos de los pedidos…</p></div> : !groups.length ? <div className="collective-load-empty"><b>No hay artículos para esta fecha</b><span>Prueba otra fecha o vuelve a “Todos”.</span></div> : (
