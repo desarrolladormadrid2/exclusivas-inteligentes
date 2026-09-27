@@ -12,7 +12,7 @@ declare global {
   }
 }
 
-const APP_VERSION = "2.0.211";
+const APP_VERSION = "2.0.212";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
@@ -1527,6 +1527,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
   const [dragOverSlot, setDragOverSlot] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [draftSaving, setDraftSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [printShipmentId, setPrintShipmentId] = useState<number | null>(null);
@@ -1536,6 +1537,9 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
   const [optimizingVehicle, setOptimizingVehicle] = useState("");
   const [routeAlternatives, setRouteAlternatives] = useState<any[]>([]);
   const [alternativesLoading, setAlternativesLoading] = useState(false);
+  const draftSaveTimer = useRef<number | null>(null);
+  const draftSaveRequest = useRef(0);
+  const [bulkInvoicePrinting, setBulkInvoicePrinting] = useState(false);
 
   async function load(force = false) {
     const cached = vehicleLoadMemoryCache.get(routeDate);
@@ -1547,6 +1551,8 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       setRoutes(cached.routes || []);
       setVehicles(cached.vehicles || []);
       setOrigin(cached.origin || { latitude: 40.4168, longitude: -3.7038, label: "Madrid (estimación)" });
+      if (cached.boardAssignments) setBoardAssignments(cached.boardAssignments);
+      if (cached.driverByVehicle) setDriverByVehicle(cached.driverByVehicle);
       setError("");
       setLoading(false);
       return;
@@ -1593,7 +1599,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
         setProducts([]);
         setShipments([]);
         setBoardAssignments({});
-        vehicleLoadMemoryCache.set(routeDate, { shipments: [], orders: [], invoices: [], products: [], routes: Array.isArray(routeRows) ? routeRows : [], vehicles: Array.isArray(vehicleRows) ? vehicleRows : [], origin: nextOrigin });
+        vehicleLoadMemoryCache.set(routeDate, { shipments: [], orders: [], invoices: [], products: [], routes: Array.isArray(routeRows) ? routeRows : [], vehicles: Array.isArray(vehicleRows) ? vehicleRows : [], origin: nextOrigin, boardAssignments: {}, driverByVehicle: {} });
         return;
       }
       const shipmentList = shipmentRows as any[];
@@ -1659,6 +1665,10 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
     }
   }
   useEffect(() => { void load(); }, [routeDate]);
+  useEffect(() => () => {
+    if (draftSaveTimer.current) window.clearTimeout(draftSaveTimer.current);
+    draftSaveRequest.current += 1;
+  }, [routeDate]);
   useEffect(() => {
     if (initialDate) setRouteDate(initialDate);
   }, [initialDate]);
@@ -1746,6 +1756,41 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
     return () => { cancelled = true; };
   }, [boardAssignments, dayShipmentSignature, vehicleColumnSignature, origin.latitude, origin.longitude, user?.username]);
 
+  function boardColumns(assignments: Record<string, number[]>, drivers = driverByVehicle) {
+    return vehicleColumns.map((column: any) => ({
+      vehicle_id: Number.isInteger(Number(column.id)) ? Number(column.id) : null,
+      vehicle: column.plate || column.name || `Camión ${column.id}`,
+      driver: drivers[String(column.id)] || column.driver || user?.username || "",
+      shipment_ids: assignments[String(column.id)] || [],
+    })).filter((column) => column.shipment_ids.length);
+  }
+
+  function scheduleBoardDraft(assignments: Record<string, number[]>, drivers = driverByVehicle) {
+    const request = ++draftSaveRequest.current;
+    if (draftSaveTimer.current) window.clearTimeout(draftSaveTimer.current);
+    draftSaveTimer.current = window.setTimeout(async () => {
+      if (request !== draftSaveRequest.current) return;
+      setDraftSaving(true);
+      try {
+        const response = await fetch("/api/routes/board", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Usuario local" },
+          body: JSON.stringify({ route_date: routeDate, columns: boardColumns(assignments, drivers), confirmed_shipment_ids: [], origin_latitude: origin.latitude, origin_longitude: origin.longitude, origin_address: origin.label, draft: true }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || "No se pudo guardar la asignación automática.");
+        const nextRoutes = [...(body.routes || []), ...routes.filter((route: any) => String(route.route_date || "").slice(0, 10) !== routeDate)];
+        setRoutes(nextRoutes);
+        const cachedLoad = vehicleLoadMemoryCache.get(routeDate);
+        if (cachedLoad) vehicleLoadMemoryCache.set(routeDate, { ...cachedLoad, routes: nextRoutes, boardAssignments: assignments, driverByVehicle: drivers });
+      } catch (reason: any) {
+        setError(reason?.message || "No se pudo guardar la asignación automática.");
+      } finally {
+        if (request === draftSaveRequest.current) setDraftSaving(false);
+      }
+    }, 450);
+  }
+
   function moveShipment(shipmentId: number, targetKey: string, beforeId?: number) {
     if (!shipmentId) return;
     setError("");
@@ -1757,6 +1802,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
         const position = beforeId && beforeId !== shipmentId ? target.indexOf(beforeId) : -1;
         next[targetKey] = position >= 0 ? [...target.slice(0, position), shipmentId, ...target.slice(position)] : [...target, shipmentId];
       }
+      scheduleBoardDraft(next);
       return next;
     });
   }
@@ -1770,7 +1816,9 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       const nextIndex = index + direction;
       if (index < 0 || nextIndex < 0 || nextIndex >= list.length) return current;
       [list[index], list[nextIndex]] = [list[nextIndex], list[index]];
-      return { ...current, [targetKey]: list };
+      const nextAssignments = { ...current, [targetKey]: list };
+      scheduleBoardDraft(nextAssignments);
+      return nextAssignments;
     });
   }
 
@@ -1877,18 +1925,16 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       nextAssignments[String(column.id)] = Array.isArray(alternative?.columns?.[index]?.shipment_ids) ? alternative.columns[index].shipment_ids.map(Number).filter(Boolean) : [];
     });
     setBoardAssignments(nextAssignments);
+    scheduleBoardDraft(nextAssignments);
     setRoadEstimates(Object.fromEntries(vehicleColumns.slice(0, 2).map((column: any, index: number) => [String(column.id), alternative?.columns?.[index]?.estimate]).filter(([, value]) => value)));
     setRouteAlternatives([]);
     setMessage(`${alternative?.title || "Alternativa"} seleccionada. Revisa los dos camiones y guarda las cargas.`);
   }
 
   async function saveVehicleBoard() {
-    const columns = vehicleColumns.map((column: any) => ({
-      vehicle_id: Number.isInteger(Number(column.id)) ? Number(column.id) : null,
-      vehicle: column.plate || column.name || `Camión ${column.id}`,
-      driver: driverByVehicle[String(column.id)] || column.driver || user?.username || "",
-      shipment_ids: boardAssignments[String(column.id)] || [],
-    })).filter((column) => column.shipment_ids.length);
+    if (draftSaveTimer.current) window.clearTimeout(draftSaveTimer.current);
+    draftSaveRequest.current += 1;
+    const columns = boardColumns(boardAssignments);
     if (!columns.length) { setError("Arrastra al menos un pedido a un camión."); return; }
     const assignedShipmentIds = columns.flatMap((column) => column.shipment_ids);
     setSaving(true);
@@ -1904,9 +1950,10 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       if (!response.ok) throw new Error(body.error || "No se ha podido asignar la carga.");
       const nextRoutes = [...(body.routes || []), ...routes.filter((route: any) => String(route.route_date || "").slice(0, 10) !== routeDate)];
       setRoutes(nextRoutes);
+      if (Array.isArray(body.invoices) && body.invoices.length) setInvoices((current) => [...current.filter((invoice) => !body.invoices.some((created: any) => Number(created.id) === Number(invoice.id))), ...body.invoices]);
       const cachedLoad = vehicleLoadMemoryCache.get(routeDate);
-      if (cachedLoad) vehicleLoadMemoryCache.set(routeDate, { ...cachedLoad, routes: nextRoutes });
-      setMessage(`Carga guardada: ${columns.reduce((total, column) => total + column.shipment_ids.length, 0)} pedidos asignados.`);
+      if (cachedLoad) vehicleLoadMemoryCache.set(routeDate, { ...cachedLoad, routes: nextRoutes, invoices: Array.isArray(body.invoices) ? [...(cachedLoad.invoices || []), ...body.invoices] : cachedLoad.invoices, boardAssignments, driverByVehicle });
+      setMessage(`Carga guardada: ${columns.reduce((total, column) => total + column.shipment_ids.length, 0)} pedidos asignados y ${body.invoices?.length || 0} facturas preparadas.`);
     } catch (reason: any) {
       setError(reason?.message || "No se ha podido asignar la carga.");
     } finally {
@@ -1916,6 +1963,21 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
 
   const shipmentById = new Map(dayShipments.map((item: any) => [Number(item.id), item]));
   const printShipment = printShipmentId ? shipmentById.get(Number(printShipmentId)) : null;
+  async function ensureInvoiceForShipment(shipment: any) {
+    const orderId = Number(shipment?.order_id || 0);
+    if (!orderId) throw new Error("Este envío no tiene pedido asociado.");
+    const current = invoices.find((invoice: any) => Number(invoice.order_id) === orderId);
+    if (current?.id) return current;
+    const response = await fetch(`/api/orders/${orderId}/convert-invoice`, { method: "POST", headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Usuario local" }, body: JSON.stringify({}) });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok && response.status !== 409) throw new Error(body.error || "No se pudo generar la factura.");
+    const invoiceResponse = await fetch(`/api/invoices?order_ids=${encodeURIComponent(String(orderId))}`);
+    const rows = invoiceResponse.ok ? await invoiceResponse.json() : [];
+    const invoice = Array.isArray(rows) ? rows.find((item: any) => Number(item.order_id) === orderId) || (response.ok ? body : null) : (response.ok ? body : null);
+    if (!invoice?.id) throw new Error("La factura no ha quedado disponible.");
+    setInvoices((currentRows) => [...currentRows.filter((item) => Number(item.id) !== Number(invoice.id)), invoice]);
+    return invoice;
+  }
   async function printInvoiceDocument(invoice: any) {
     if (!invoice?.id) return;
     const popup = window.open("about:blank", "_blank");
@@ -1931,6 +1993,32 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       setError(reason?.message || "No se ha podido preparar la factura.");
     }
   }
+  async function printLoadedInvoices() {
+    const loaded = vehicleColumns.flatMap((column: any) => (boardAssignments[String(column.id)] || []).map((id) => shipmentById.get(Number(id))).filter(Boolean));
+    if (!loaded.length) { setError("No hay pedidos cargados en ningún camión."); return; }
+    setBulkInvoicePrinting(true);
+    setError("");
+    setMessage("");
+    const popups = loaded.map(() => window.open("about:blank", "_blank"));
+    try {
+      const invoiceRows = [];
+      for (const shipment of loaded) invoiceRows.push(await ensureInvoiceForShipment(shipment));
+      for (let index = 0; index < invoiceRows.length; index += 1) {
+        const invoice = invoiceRows[index];
+        const response = await fetch(`/api/invoices/${invoice.id}/pdf`, { method: "POST", headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Usuario local" }, body: JSON.stringify({}) });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || `No se pudo preparar la factura ${invoice.code || invoice.id}.`);
+        const url = body.share_url || `/api/invoices/share/${encodeURIComponent(body.share_token || "")}`;
+        if (popups[index]) popups[index]!.location.href = url;
+      }
+      setMessage(`${invoiceRows.length} facturas preparadas para imprimir, una por pestaña.`);
+    } catch (reason: any) {
+      popups.forEach((popup) => popup && popup.close());
+      setError(reason?.message || "No se han podido preparar las facturas cargadas.");
+    } finally {
+      setBulkInvoicePrinting(false);
+    }
+  }
   const readDraggedShipmentId = (event: any) => Number(event.dataTransfer.getData("text/plain")) || draggedShipmentId || 0;
   const allowShipmentDrop = (event: any, slotKey?: string) => {
     event.preventDefault();
@@ -1940,6 +2028,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
   const renderDropSlot = (targetKey: string, slotKey: string, beforeId?: number) => <div className={`vehicle-load-drop-slot${dragOverSlot === slotKey ? " is-active" : ""}`} onDragEnter={(event) => allowShipmentDrop(event, slotKey)} onDragOver={(event) => allowShipmentDrop(event, slotKey)} onDragLeave={() => setDragOverSlot("")} onDrop={(event) => { event.preventDefault(); moveShipment(readDraggedShipmentId(event), targetKey, beforeId); }} aria-label="Colocar aquí" />;
   const renderBoardCard = (item: any, targetKey: string, orderIndex = -1, orderTotal = 0) => {
     const stats = getLoadStats(item);
+    const invoice = invoices.find((row: any) => Number(row.order_id) === Number(item.order_id));
     const preparationReady = ["Preparado", "Preparado con incidencia"].includes(String(item.status || "")) && Boolean(String(item.preparation_closed_at || "").trim());
     const reception = item.opening_time && item.closing_time ? `Recepción ${String(item.opening_time).slice(0, 5)}–${String(item.closing_time).slice(0, 5)}` : "Horario pendiente";
     const statusLabel = preparationReady ? (item.status === "Preparado con incidencia" ? "Preparado con incidencia" : "Preparado") : item.status === "Preparando" ? "En preparación" : "Pendiente de preparar";
@@ -1947,13 +2036,13 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
     return <article className="vehicle-load-board-card" key={item.id} draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", String(item.id)); setDraggedShipmentId(Number(item.id)); }} onDragEnd={() => { setDraggedShipmentId(null); setDragOverSlot(""); }} onDragOver={(event) => allowShipmentDrop(event, canReorder ? `${targetKey}-${item.id}-before` : undefined)} onDrop={(event) => { event.preventDefault(); moveShipment(readDraggedShipmentId(event), targetKey, Number(item.id)); }}>
       <div className="vehicle-load-board-card-top"><b>{item.code}</b><strong>{item.distance_km === null ? "—" : `${String(item.distance_km).replace(".", ",")} km`}</strong></div>
       <strong>{item.client_name}</strong>
-      <div className="vehicle-load-board-card-meta"><span className="vehicle-load-card-reception">{reception}</span><span className={`vehicle-load-card-status${preparationReady ? " is-ready" : ""}`}>{statusLabel}</span><small>{stats.lines.length ? `${stats.quantityLabel}${stats.lines.length > 2 ? ` · ${stats.lines.length} líneas` : ""}` : "Sin líneas preparadas"}</small></div>
+      <div className="vehicle-load-board-card-meta"><span className="vehicle-load-card-reception">{reception}</span><span className={`vehicle-load-card-status${preparationReady ? " is-ready" : ""}`}>{statusLabel}</span><small>{stats.lines.length ? `${stats.quantityLabel}${stats.lines.length > 2 ? ` · ${stats.lines.length} líneas` : ""}` : "Sin líneas preparadas"}</small><small className="vehicle-load-card-invoice-status">{invoice?.status === "Cobrada" ? "Facturado y cobrado" : invoice?.id ? `Facturado · ${invoice.status || "Pendiente de cobro"}` : "Pendiente de facturar"}</small></div>
       <div className="vehicle-load-card-actions">
         {canReorder && <div className="vehicle-load-order-actions" aria-label="Cambiar posición del pedido">
           <button type="button" className="vehicle-load-order-button" disabled={orderIndex === 0} title="Subir posición" aria-label="Subir posición" onClick={(event) => { event.stopPropagation(); moveShipmentWithinVehicle(Number(item.id), targetKey, -1); }}>↑</button>
           <button type="button" className="vehicle-load-order-button" disabled={orderIndex === orderTotal - 1} title="Bajar posición" aria-label="Bajar posición" onClick={(event) => { event.stopPropagation(); moveShipmentWithinVehicle(Number(item.id), targetKey, 1); }}>↓</button>
         </div>}
-        <button type="button" className="vehicle-load-print" onClick={(event) => { event.stopPropagation(); setPrintShipmentId(Number(item.id)); }}>Imprimir</button>
+        <button type="button" className="vehicle-load-print" onClick={(event) => { event.stopPropagation(); setPrintShipmentId(Number(item.id)); }}>Pedido y factura</button>
       </div>
     </article>;
   };
@@ -1964,6 +2053,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       <span className="vehicle-load-toolbar-summary"><b>{dayShipments.length} pedidos del día</b><small>{dayShipments.filter((item: any) => ["Preparado", "Preparado con incidencia"].includes(String(item.status || ""))).length} listos para cargar · distancia primero, apertura de entrega después</small></span>
       <button type="button" className="button secondary" onClick={() => void proposeRouteAlternatives()} disabled={alternativesLoading || loading}>{alternativesLoading ? "Calculando rutas…" : "Proponer 4 rutas"}</button>
       <button type="button" className="button secondary" onClick={() => void load(true)} disabled={loading}>{loading ? "Actualizando…" : "Actualizar"}</button>
+      <button type="button" className="button secondary" onClick={() => void printLoadedInvoices()} disabled={bulkInvoicePrinting || !assignedIds.size}>{bulkInvoicePrinting ? "Preparando facturas…" : "Imprimir facturas cargadas"}</button>
       <button type="button" className="button primary" disabled={saving || !assignedIds.size} onClick={() => void saveVehicleBoard()}>{saving ? "Guardando…" : "Guardar cargas"}</button>
     </div>
     <VehicleLoadPlanningMap locations={dayShipments} origin={origin} />
@@ -1977,7 +2067,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
         </div>
       </section>
       <aside className="vehicle-load-trucks-panel panel" aria-label="Camiones y pedidos asignados">
-        <div className="panel-head"><div><h3>Camiones</h3><p className="muted">Panel fijo para asignar y ordenar los pedidos.</p></div></div>
+        <div className="panel-head"><div><h3>Camiones</h3><p className="muted">Panel fijo para asignar y ordenar los pedidos.</p></div>{draftSaving && <span className="vehicle-load-autosave" role="status">Guardando cambios…</span>}</div>
         <section className="vehicle-load-board" aria-label="Asignación de pedidos a camiones">
           {vehicleColumns.map((column: any) => {
             const key = String(column.id);
@@ -1989,7 +2079,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
             const overDailyLimit = displayedMinutes > 600;
             const lateStops = Number(roadStats?.time_window_warnings?.length || 0);
             return <section className="vehicle-load-column" key={key} onDragOver={(event) => allowShipmentDrop(event)} onDrop={(event) => { event.preventDefault(); moveShipment(readDraggedShipmentId(event), key); }}>
-              <header className="vehicle-load-column-head"><div><h3>{column.plate || column.name || `Camión ${key}`}</h3><span>{columnItems.length} pedidos</span><small className={overDailyLimit || lateStops ? "is-over-limit" : ""}>{roadStats ? `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km carretera · ${formatLoadDuration(roadStats.driving_minutes)} conducción + ${roadStats.waiting_minutes || 0} min espera + ${roadStats.service_minutes} min entregas = ${formatLoadDuration(displayedMinutes)}` : roadEstimateLoading ? "Calculando tiempo real de carretera…" : `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km aprox. · ${formatLoadDuration(planStats.drivingMinutes)} conducción + ${planStats.waitingMinutes} min espera + ${columnItems.length * DEFAULT_DELIVERY_SERVICE_MINUTES} min entregas = ${formatLoadDuration(displayedMinutes)}`}{overDailyLimit ? " · supera 10 h" : ""}{lateStops ? ` · ${lateStops} fuera de horario` : ""}</small></div><div className="vehicle-load-column-tools"><button type="button" className="button secondary vehicle-load-optimize" disabled={optimizingVehicle === key || columnItems.length < 2} onClick={() => void optimizeVehicle(key)}>{optimizingVehicle === key ? "Optimizando…" : "Optimizar orden"}</button><label>Conductor<input value={driverByVehicle[key] || column.driver || user?.username || ""} onChange={(event) => setDriverByVehicle((current) => ({ ...current, [key]: event.target.value }))} placeholder="Nombre" /></label></div></header>
+              <header className="vehicle-load-column-head"><div><h3>{column.plate || column.name || `Camión ${key}`}</h3><span>{columnItems.length} pedidos</span><small className={overDailyLimit || lateStops ? "is-over-limit" : ""}>{roadStats ? `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km carretera · ${formatLoadDuration(roadStats.driving_minutes)} conducción + ${roadStats.waiting_minutes || 0} min espera + ${roadStats.service_minutes} min entregas = ${formatLoadDuration(displayedMinutes)}` : roadEstimateLoading ? "Calculando tiempo real de carretera…" : `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km aprox. · ${formatLoadDuration(planStats.drivingMinutes)} conducción + ${planStats.waitingMinutes} min espera + ${columnItems.length * DEFAULT_DELIVERY_SERVICE_MINUTES} min entregas = ${formatLoadDuration(displayedMinutes)}`}{overDailyLimit ? " · supera 10 h" : ""}{lateStops ? ` · ${lateStops} fuera de horario` : ""}</small></div><div className="vehicle-load-column-tools"><button type="button" className="button secondary vehicle-load-optimize" disabled={optimizingVehicle === key || columnItems.length < 2} onClick={() => void optimizeVehicle(key)}>{optimizingVehicle === key ? "Optimizando…" : "Optimizar orden"}</button><label>Conductor<input value={driverByVehicle[key] || column.driver || user?.username || ""} onChange={(event) => { const value = event.target.value; setDriverByVehicle((current) => { const next = { ...current, [key]: value }; scheduleBoardDraft(boardAssignments, next); return next; }); }} placeholder="Nombre" /></label></div></header>
               <div className="vehicle-load-column-list">{columnItems.length ? [renderDropSlot(key, `${key}-start`, Number(columnItems[0].id)), ...columnItems.flatMap((item: any, index: number) => [renderBoardCard(item, key, index, columnItems.length), renderDropSlot(key, `${key}-${item.id}-after`, Number(columnItems[index + 1]?.id) || undefined)])] : <p className="vehicle-load-column-empty">Suelta aquí los pedidos</p>}</div>
             </section>;
           })}
@@ -1998,7 +2088,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
     </div>
     <VehicleOperationsPanel user={user} routeDate={routeDate} vehicles={vehicles} onReload={() => void load(true)} />
     {routeAlternatives.length > 0 && <div className="preview-overlay vehicle-route-alternatives-overlay" role="dialog" aria-modal="true" aria-label="Alternativas de rutas" onClick={(event) => event.target === event.currentTarget && setRouteAlternatives([])}><div className="vehicle-route-alternatives-modal"><header><div><p className="eyebrow">PLANIFICACIÓN · 2 CAMIONES</p><h2>Elige una alternativa de reparto</h2><small>Ordenadas de mejor a peor: primero se respetan los horarios, después el menor tiempo y los menos kilómetros.</small></div><button type="button" className="preview-close" onClick={() => setRouteAlternatives([])} aria-label="Cerrar">×</button></header><div className="vehicle-route-alternatives-grid">{routeAlternatives.map((alternative: any, index: number) => <article className={`vehicle-route-alternative${alternative.recommended ? " is-recommended" : ""}`} key={`${alternative.title}-${index}`}><div className="vehicle-route-alternative-head"><div><b>{alternative.recommended ? "Recomendada" : `Alternativa ${index + 1}`}</b><h3>{alternative.title}</h3><small>{alternative.description}</small></div><strong>{formatLoadDuration(Number(alternative.total_minutes || 0))}</strong></div><div className="vehicle-route-alternative-summary"><span>{Number(alternative.total_distance_km || 0).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km sumados</span><span>{formatLoadDuration(Number(alternative.combined_minutes || 0))} los 2 camiones · {alternative.late_stops ? `${alternative.late_stops} fuera de horario` : "Horarios respetados"}</span></div><div className="vehicle-route-alternative-columns">{alternative.columns?.map((column: any, columnIndex: number) => <div key={columnIndex}><b>{vehicleColumns[columnIndex]?.plate || vehicleColumns[columnIndex]?.name || `Camión ${columnIndex + 1}`}</b><span>{column.shipment_ids?.length || 0} pedidos · {Number(column.estimate?.distance_km || 0).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km · {formatLoadDuration(Number(column.estimate?.total_minutes || 0))}</span><small>{Number(column.estimate?.driving_minutes || 0)} min carretera + {Number(column.estimate?.waiting_minutes || 0)} min espera + {Number(column.estimate?.service_minutes || 0)} min entregas</small><small>{(column.stops || []).map((stop: any) => stop.client_name || `Pedido ${stop.shipment_id}`).join(" → ") || "Sin pedidos"}</small></div>)}</div><button type="button" className="button primary" onClick={() => applyRouteAlternative(alternative)}>Usar esta alternativa</button></article>)}</div></div></div>}
-    {printShipment && <ShipmentLabelModal shipment={printShipment} client={{ name: printShipment.client_name }} lines={Array.isArray(printShipment.load_lines) ? printShipment.load_lines : []} products={products} address={printShipment.address || ""} city={printShipment.city || ""} order={orders.find((item: any) => Number(item.id) === Number(printShipment.order_id))} invoice={invoices.find((item: any) => Number(item.order_id) === Number(printShipment.order_id))} onPrintInvoice={(invoice) => void printInvoiceDocument(invoice)} onClose={() => setPrintShipmentId(null)} />}
+    {printShipment && <ShipmentLabelModal shipment={printShipment} client={{ name: printShipment.client_name }} lines={Array.isArray(printShipment.load_lines) ? printShipment.load_lines : []} products={products} address={printShipment.address || ""} city={printShipment.city || ""} order={orders.find((item: any) => Number(item.id) === Number(printShipment.order_id))} invoice={invoices.find((item: any) => Number(item.order_id) === Number(printShipment.order_id))} onEnsureInvoice={() => ensureInvoiceForShipment(printShipment)} onPrintInvoice={(invoice) => void printInvoiceDocument(invoice)} onClose={() => setPrintShipmentId(null)} />}
   </section>;
 }
 
@@ -2660,7 +2750,7 @@ function ProductBatchLabelModal({ products, onClose }: { products: any[]; onClos
   );
 }
 
-function ShipmentLabelModal({ shipment, client, lines, products, address, city, order, invoice, onClose, onPrintInvoice }: { shipment: any; client: any; lines: any[]; products: any[]; address: string; city: string; order?: any; invoice?: any; onClose: () => void; onPrintInvoice?: (invoice: any) => void }) {
+function ShipmentLabelModal({ shipment, client, lines, products, address, city, order, invoice, onClose, onPrintInvoice, onEnsureInvoice }: { shipment: any; client: any; lines: any[]; products: any[]; address: string; city: string; order?: any; invoice?: any; onClose: () => void; onPrintInvoice?: (invoice: any) => void; onEnsureInvoice?: () => Promise<any> }) {
   const code = String(shipment?.code || `ENV-${shipment?.id || "SIN-CODIGO"}`);
   const trackingToken = String(shipment?.public_tracking_token || "").trim();
   const trackingUrl = trackingToken && typeof window !== "undefined"
@@ -2670,6 +2760,7 @@ function ShipmentLabelModal({ shipment, client, lines, products, address, city, 
   const barcodeRef = useRef<SVGSVGElement>(null);
   const [qrImage, setQrImage] = useState("");
   const [printMode, setPrintMode] = useState<"all" | "barcode" | "qr" | "both">("all");
+  const [invoiceLoading, setInvoiceLoading] = useState(false);
   const lineRows = lines.map((line: any) => {
     const product = products.find((item: any) => Number(item.id) === Number(line.product_id));
     const requested = Number(line.quantity_requested || line.quantity || 0);
@@ -2726,7 +2817,7 @@ function ShipmentLabelModal({ shipment, client, lines, products, address, city, 
           <footer><span>Total del pedido</span><strong>{orderTotal.toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</strong></footer>
         </article>
         <div className="product-label-print-controls shipment-label-print-controls"><label>Qué imprimir<select value={printMode} onChange={(event) => setPrintMode(event.target.value as typeof printMode)}><option value="all">Etiqueta completa</option><option value="barcode">Solo código de barras</option><option value="qr">Solo código QR</option><option value="both">QR + código de barras</option></select></label><small>El modo se aplica al imprimir o guardar como PDF.</small></div>
-        <div className="product-label-actions shipment-label-actions"><button className="button secondary" type="button" onClick={onClose}>Cerrar</button><button className="button primary" type="button" onClick={() => printDocumentNow("label")}>Imprimir etiqueta</button><button className="button secondary" type="button" onClick={() => printDocumentNow("order")}>Imprimir pedido</button><button className="button workflow" type="button" disabled={!invoice?.id} onClick={() => invoice?.id && onPrintInvoice?.(invoice)}>{invoice?.id ? "Imprimir factura" : "Factura no disponible"}</button></div>
+        <div className="product-label-actions shipment-label-actions"><button className="button secondary" type="button" onClick={onClose}>Cerrar</button><button className="button primary" type="button" onClick={() => printDocumentNow("label")}>Imprimir etiqueta</button><button className="button secondary" type="button" onClick={() => printDocumentNow("order")}>Imprimir pedido</button><button className="button workflow" type="button" disabled={invoiceLoading || (!invoice?.id && !onEnsureInvoice)} onClick={async () => { setInvoiceLoading(true); try { const prepared = invoice?.id ? invoice : await onEnsureInvoice?.(); if (prepared?.id) onPrintInvoice?.(prepared); } finally { setInvoiceLoading(false); } }}>{invoiceLoading ? "Generando factura…" : invoice?.id ? "Imprimir factura" : "Generar e imprimir factura"}</button></div>
       </div>
     </div>
   );

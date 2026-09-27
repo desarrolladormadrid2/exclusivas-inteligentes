@@ -259,6 +259,44 @@ async function ensureInvoicePdf(invoiceId, actor = "Sistema", force = false) {
   invalidateReadCache("invoices");
   return { ...current, pdf_public_id: uploaded?.public_id || current.pdf_public_id || null, pdf_url: uploaded?.secure_url || current.pdf_url || null, pdf_bytes: uploaded?.bytes || pdf.length, pdf_sha256: createHash("sha256").update(pdf).digest("hex"), pdf_generated_at: now, pdf_status: status, share_token: shareToken, _pdf: pdf };
 }
+function orderInvoice(orderId) {
+  return db.prepare("SELECT i.* FROM invoices i WHERE CAST(COALESCE(i.deleted,0) AS INTEGER)=0 AND COALESCE(i.status,'')<>'Anulada' AND (i.order_id=? OR EXISTS(SELECT 1 FROM invoice_orders io WHERE io.invoice_id=i.id AND io.order_id=?)) ORDER BY i.id DESC LIMIT 1").get(Number(orderId), Number(orderId));
+}
+function syncOrderStatusFromInvoice(invoiceId) {
+  const invoice = db.prepare("SELECT id,order_id,amount,status FROM invoices WHERE id=?").get(Number(invoiceId));
+  if (!invoice) return [];
+  const orderIds = new Set();
+  if (invoice.order_id) orderIds.add(Number(invoice.order_id));
+  db.prepare("SELECT order_id FROM invoice_orders WHERE invoice_id=?").all(Number(invoiceId)).forEach((row) => orderIds.add(Number(row.order_id)));
+  const nextStatus = String(invoice.status || "") === "Cobrada" ? "Facturado y cobrado" : String(invoice.status || "") === "Anulada" ? "Pendiente" : "Facturado";
+  const now = new Date().toISOString();
+  for (const orderId of orderIds) if (orderId) db.prepare("UPDATE orders SET status=?,updated_at=? WHERE id=?").run(nextStatus, now, orderId);
+  invalidateReadCache("orders");
+  return [...orderIds].filter(Boolean);
+}
+function ensureOrderInvoice(orderId, actor = "Sistema") {
+  const order = db.prepare("SELECT * FROM orders WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(orderId));
+  if (!order) throw new Error("Pedido no encontrado");
+  const existing = orderInvoice(order.id);
+  if (existing) {
+    syncOrderStatusFromInvoice(existing.id);
+    return existing;
+  }
+  const now = new Date().toISOString();
+  const code = `FAC-${new Date().getFullYear()}-${String(Date.now()).slice(-7)}-${String(order.id).padStart(4, "0")}`;
+  const created = db.prepare("INSERT INTO invoices(code,order_id,client_id,amount,status,issue_date,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)").run(code, Number(order.id), order.client_id || null, Number(order.amount || 0), "Pendiente", now.slice(0, 10), now, now);
+  const invoiceId = Number(created.lastInsertRowid);
+  db.prepare("INSERT INTO invoice_lines(invoice_id,product_id,quantity,unit_price,discount,vat,amount) SELECT ?,product_id,quantity,unit_price,discount,vat,amount FROM order_lines WHERE order_id=?").run(invoiceId, Number(order.id));
+  const hasLines = db.prepare("SELECT 1 FROM invoice_lines WHERE invoice_id=? LIMIT 1").get(invoiceId);
+  if (!hasLines && order.product_id && Number(order.quantity || 0) > 0) db.prepare("INSERT INTO invoice_lines(invoice_id,product_id,quantity,unit_price,discount,vat,amount) VALUES(?,?,?,?,?,?,?)").run(invoiceId, Number(order.product_id), Number(order.quantity), Number(order.unit_price || 0), Number(order.discount || 0), Number(order.vat || 21), Number(order.amount || 0));
+  db.prepare("INSERT INTO invoice_orders(invoice_id,order_id) VALUES(?,?)").run(invoiceId, Number(order.id));
+  db.prepare("UPDATE orders SET status='Facturado',updated_at=? WHERE id=?").run(now, Number(order.id));
+  recordAudit(actor, "POST", `orders/${Number(order.id)}/convert-invoice`, "Generar factura al cargar", JSON.stringify({ order_id: Number(order.id), invoice_id: invoiceId, code }));
+  invalidateReadCache("invoice_lines");
+  invalidateReadCache("invoices");
+  invalidateReadCache("orders");
+  return db.prepare("SELECT * FROM invoices WHERE id=?").get(invoiceId);
+}
 function markInvoicePdfStale(invoiceId) {
   if (!invoiceId || !hasColumn("invoices", "pdf_status")) return;
   db.prepare("UPDATE invoices SET pdf_status='Pendiente de regenerar',updated_at=? WHERE id=?").run(new Date().toISOString(), Number(invoiceId));
@@ -2228,6 +2266,7 @@ export async function crmApiHandler(req, res) {
         const body = await read(req);
         const routeDate = String(body.route_date || "").slice(0, 10);
         const columns = Array.isArray(body.columns) ? body.columns : [];
+        const draft = body.draft === true;
         const confirmedShipmentIds = new Set((Array.isArray(body.confirmed_shipment_ids) ? body.confirmed_shipment_ids : []).map(Number).filter(Boolean));
         if (!routeDate) return send(res, 400, { error: "Indica la fecha de la carga" });
         const now = new Date().toISOString();
@@ -2236,12 +2275,20 @@ export async function crmApiHandler(req, res) {
           if (!shipmentIds.length) continue;
           const shipmentRows = shipmentIds.map((id) => db.prepare("SELECT * FROM shipments WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(id)).filter(Boolean);
           if (shipmentRows.length !== shipmentIds.length) return send(res, 400, { error: "Uno de los pedidos ya no está disponible" });
-          const incomplete = shipmentRows.find((shipment) => !shipmentHasCompletePreparedLines(shipment));
-          if (incomplete) return send(res, 400, { error: `El pedido ${incomplete.code || incomplete.id} no tiene todas las unidades preparadas` });
-          const missing = shipmentRows.map(resolveShipmentStop).filter((stop) => stop.latitude == null || stop.longitude == null);
-          if (missing.length) return send(res, 400, { error: "Hay pedidos sin geolocalizar", missing: missing.map((stop) => ({ shipment_id: stop.shipment_id, client_name: stop.client_name, address: stop.address })) });
+          if (!draft) {
+            const incomplete = shipmentRows.find((shipment) => !shipmentHasCompletePreparedLines(shipment));
+            if (incomplete) return send(res, 400, { error: `El pedido ${incomplete.code || incomplete.id} no tiene todas las unidades preparadas` });
+            const missing = shipmentRows.map(resolveShipmentStop).filter((stop) => stop.latitude == null || stop.longitude == null);
+            if (missing.length) return send(res, 400, { error: "Hay pedidos sin geolocalizar", missing: missing.map((stop) => ({ shipment_id: stop.shipment_id, client_name: stop.client_name, address: stop.address })) });
+          }
           const vehicleId = Number(column.vehicle_id || 0) || null;
           if (vehicleId && !db.prepare("SELECT id FROM vehicles WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(vehicleId)) return send(res, 400, { error: "Uno de los camiones seleccionados no existe" });
+        }
+        const assignedOrderIds = [...new Set(columns.flatMap((column) => Array.isArray(column.shipment_ids) ? column.shipment_ids : []).map(Number).filter(Boolean).map((shipmentId) => Number(db.prepare("SELECT order_id FROM shipments WHERE id=?").get(shipmentId)?.order_id || 0)).filter(Boolean))];
+        const generatedInvoices = [];
+        if (!draft) {
+          try { for (const orderId of assignedOrderIds) generatedInvoices.push(ensureOrderInvoice(orderId, actor)); }
+          catch (error) { return send(res, 400, { error: error?.message || "No se pudieron generar las facturas de los pedidos cargados" }); }
         }
         const activeRoutes = db.prepare("SELECT id FROM delivery_routes WHERE route_date=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").all(routeDate);
         for (const route of activeRoutes) {
@@ -2271,13 +2318,13 @@ export async function crmApiHandler(req, res) {
             return { ...stop, position: index + 1, distance_km: distance };
           });
           const routeCode = `RUT-${routeDate.replace(/[^0-9]/g, "")}-${String(Date.now()).slice(-5)}-${createdRoutes.length + 1}`;
-          const route = db.prepare("INSERT INTO delivery_routes(code,route_date,driver,vehicle,vehicle_id,status,radius_meters,origin_address,origin_latitude,origin_longitude,notes,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(routeCode, routeDate, String(column.driver || "").trim(), vehicleLabel, vehicleId, "Planificada", 150, String(body.origin_address || ""), Number.isFinite(originLat) ? originLat : null, Number.isFinite(originLon) ? originLon : null, "", actor, now, now);
-          for (const stop of orderedStops) db.prepare("INSERT INTO delivery_route_stops(route_id,position,shipment_id,client_id,collection_point_id,client_name,address,city,opening_time,closing_time,latitude,longitude,distance_km,status,load_confirmed,notes,driver_notes,invoice_delivery_method,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(Number(route.lastInsertRowid), stop.position, stop.shipment_id, stop.client_id, stop.collection_point_id, stop.client_name, stop.address, stop.city, stop.opening_time, stop.closing_time, stop.latitude, stop.longitude, stop.distance_km, "Pendiente", 1, stop.notes || "", stop.driver_notes || "", stop.invoice_delivery_method || "Pendiente de indicar", now, now);
-          if (vehicleId) db.prepare("INSERT INTO vehicle_trips(code,vehicle_id,route_id,route_date,route_code,driver,planned_distance_km,status,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(`VIA-${routeDate.replace(/[^0-9]/g, "")}-${String(Date.now()).slice(-5)}-${createdRoutes.length + 1}`, vehicleId, Number(route.lastInsertRowid), routeDate, routeCode, String(column.driver || "").trim(), Number(orderedStops.reduce((total, stop) => total + Number(stop.distance_km || 0), 0).toFixed(1)), "Planificada", actor, now, now);
+          const route = db.prepare("INSERT INTO delivery_routes(code,route_date,driver,vehicle,vehicle_id,status,radius_meters,origin_address,origin_latitude,origin_longitude,notes,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(routeCode, routeDate, String(column.driver || "").trim(), vehicleLabel, vehicleId, draft ? "Borrador" : "Planificada", 150, String(body.origin_address || ""), Number.isFinite(originLat) ? originLat : null, Number.isFinite(originLon) ? originLon : null, draft ? "Asignación guardada automáticamente" : "", actor, now, now);
+          for (const stop of orderedStops) db.prepare("INSERT INTO delivery_route_stops(route_id,position,shipment_id,client_id,collection_point_id,client_name,address,city,opening_time,closing_time,latitude,longitude,distance_km,status,load_confirmed,notes,driver_notes,invoice_delivery_method,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(Number(route.lastInsertRowid), stop.position, stop.shipment_id, stop.client_id, stop.collection_point_id, stop.client_name, stop.address, stop.city, stop.opening_time, stop.closing_time, stop.latitude, stop.longitude, stop.distance_km, "Pendiente", draft ? 0 : 1, stop.notes || "", stop.driver_notes || "", stop.invoice_delivery_method || "Pendiente de indicar", now, now);
+          if (vehicleId && !draft) db.prepare("INSERT INTO vehicle_trips(code,vehicle_id,route_id,route_date,route_code,driver,planned_distance_km,status,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(`VIA-${routeDate.replace(/[^0-9]/g, "")}-${String(Date.now()).slice(-5)}-${createdRoutes.length + 1}`, vehicleId, Number(route.lastInsertRowid), routeDate, routeCode, String(column.driver || "").trim(), Number(orderedStops.reduce((total, stop) => total + Number(stop.distance_km || 0), 0).toFixed(1)), "Planificada", actor, now, now);
           createdRoutes.push(getRouteWithStops(Number(route.lastInsertRowid)));
         }
         recordAudit(actor, "PUT", "routes/board", "Guardar tablero de cargas", JSON.stringify({ route_date: routeDate, columns: columns.map((column) => ({ vehicle_id: column.vehicle_id, shipment_ids: column.shipment_ids })) }));
-        return send(res, 200, { route_date: routeDate, routes: createdRoutes });
+        return send(res, 200, { route_date: routeDate, routes: createdRoutes, draft, invoices: generatedInvoices });
       }
       if (p[1] === "routes" && req.method === "POST" && !p[2]) {
         const body = await read(req);
@@ -2396,7 +2443,7 @@ export async function crmApiHandler(req, res) {
           delivery_notes: deliveryNotes,
           summary: {
             orders: orders.length,
-            in_progress: orders.filter((row) => !["Entregado", "Cancelado", "Facturado"].includes(String(row.status || ""))).length,
+            in_progress: orders.filter((row) => !["Entregado", "Cancelado", "Facturado", "Facturado y cobrado"].includes(String(row.status || ""))).length,
             shipments: shipments.filter((row) => !["Entregado", "Cancelado"].includes(String(row.status || ""))).length,
             pending_invoices: invoices.filter((row) => !["Cobrada", "Pagada", "Anulada"].includes(String(row.status || ""))).length,
           },
@@ -2964,6 +3011,7 @@ export async function crmApiHandler(req, res) {
             const paid = db.prepare("SELECT COALESCE(SUM(amount),0) total FROM payments WHERE invoice_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(linkedInvoiceId).total;
             const invoiceAmount = db.prepare("SELECT amount FROM invoices WHERE id=?").get(linkedInvoiceId)?.amount || 0;
             db.prepare("UPDATE invoices SET status=? WHERE id=?").run(Number(paid) >= Number(invoiceAmount) ? "Cobrada" : "Parcial", linkedInvoiceId);
+            syncOrderStatusFromInvoice(linkedInvoiceId);
           }
         }
         recordAudit(actor, "POST", `shipments/${shipmentId}/payment-receipt`, "Registrar talón o cobro recibido", JSON.stringify({ shipment_id: shipmentId, order_id: shipment.order_id || null, invoice_id: linkedInvoiceId, payment_status: paymentStatus, amount, method: body.method || null, reference: body.reference || null, attachments: attachments.length }));
@@ -3900,6 +3948,7 @@ export async function crmApiHandler(req, res) {
           const invoice = db.prepare("SELECT amount FROM invoices WHERE id=?").get(d.invoice_id);
           const paid = db.prepare("SELECT COALESCE(SUM(amount),0) total FROM payments WHERE invoice_id=?").get(d.invoice_id).total;
           db.prepare("UPDATE invoices SET status=? WHERE id=?").run(Number(paid) >= Number(invoice?.amount || 0) ? "Cobrada" : "Parcial", d.invoice_id);
+          syncOrderStatusFromInvoice(d.invoice_id);
         }
         if (t === "orders" && d.product_id && d.quantity)
           db.prepare(
