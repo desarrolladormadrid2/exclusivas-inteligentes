@@ -329,6 +329,13 @@ const migrationsByTable = {
     ["created_at", "ALTER TABLE delivery_notes ADD COLUMN created_at TEXT"],
     ["updated_at", "ALTER TABLE delivery_notes ADD COLUMN updated_at TEXT"],
     ["deleted", "ALTER TABLE delivery_notes ADD COLUMN deleted INTEGER DEFAULT 0"],
+    ["pdf_public_id", "ALTER TABLE delivery_notes ADD COLUMN pdf_public_id TEXT"],
+    ["pdf_url", "ALTER TABLE delivery_notes ADD COLUMN pdf_url TEXT"],
+    ["pdf_bytes", "ALTER TABLE delivery_notes ADD COLUMN pdf_bytes INTEGER DEFAULT 0"],
+    ["pdf_sha256", "ALTER TABLE delivery_notes ADD COLUMN pdf_sha256 TEXT"],
+    ["pdf_generated_at", "ALTER TABLE delivery_notes ADD COLUMN pdf_generated_at TEXT"],
+    ["pdf_status", "ALTER TABLE delivery_notes ADD COLUMN pdf_status TEXT DEFAULT 'Pendiente'"],
+    ["share_token", "ALTER TABLE delivery_notes ADD COLUMN share_token TEXT"],
   ],
   payments: [
     ["deleted", "ALTER TABLE payments ADD COLUMN deleted INTEGER DEFAULT 0"],

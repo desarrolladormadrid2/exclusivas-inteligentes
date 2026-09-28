@@ -343,7 +343,10 @@ function commercialDocumentPdfData(type, documentId) {
   const document = db.prepare(`SELECT d.*,c.name client_name,c.address client_address,c.city client_city,c.email client_email,c.phone client_phone FROM ${config.table} d LEFT JOIN clients c ON c.id=d.client_id WHERE d.id=? AND CAST(COALESCE(d.deleted,0) AS INTEGER)=0`).get(Number(documentId));
   if (!document) return null;
   const lines = db.prepare(`SELECT l.*,p.name product_name,p.sku FROM ${config.lines} l LEFT JOIN products p ON p.id=l.product_id WHERE l.${config.foreignKey}=? ORDER BY l.id`).all(Number(documentId));
-  return { ...document, lines };
+  const proof = type === "delivery"
+    ? db.prepare("SELECT delivery_signature_data,delivery_recipient_name,delivery_signature_status,delivery_signature_at,delivery_signature_by,delivery_signature_note FROM shipments WHERE order_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 1").get(Number(document.order_id))
+    : null;
+  return { ...document, ...(proof || {}), lines };
 }
 function createCommercialDocumentPdf(document, type) {
   const config = commercialPdfConfig(type);
@@ -378,6 +381,16 @@ function createCommercialDocumentPdf(document, type) {
     `Base imponible: ${base.toFixed(2)} EUR`,
     `IVA (${vatRate.toFixed(0)}%): ${vat.toFixed(2)} EUR`,
     `TOTAL: ${total.toFixed(2)} EUR`,
+    ...(type === "delivery" ? [
+      "",
+      "JUSTIFICANTE DE ENTREGA",
+      `Recepcion: ${document.delivery_signature_status === "Firmado" ? "Firmada" : document.delivery_signature_status || "Pendiente"}`,
+      `Recibe: ${document.delivery_recipient_name || "No indicado"}`,
+      `Fecha de recepcion: ${document.delivery_signature_at ? String(document.delivery_signature_at).slice(0, 16).replace("T", " ") : "No indicada"}`,
+      `Registrado por: ${document.delivery_signature_by || "No indicado"}`,
+      `Observaciones: ${document.delivery_signature_note || "Sin observaciones"}`,
+      document.delivery_signature_status === "Firmado" ? "Firma digital de recepcion registrada en el sistema." : "La entrega todavía no consta como firmada.",
+    ] : []),
     "",
     "Documento generado por Exclusivas Inteligentes.",
   ];
@@ -2463,8 +2476,20 @@ export async function crmApiHandler(req, res) {
         if (!client) return send(res, 404, { error: "Cliente no encontrado o desactivado" });
         const orders = db.prepare("SELECT id,code,status,amount,created_at,updated_at,delivery_date,preparation_date,shipping_date,address,urgent FROM orders WHERE client_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 50").all(session.id);
         const shipments = db.prepare("SELECT id,code,order_id,status,expected_delivery_at,address,packages,delivered_at,delivery_signature_status,delivery_recipient_name,delivery_signature_at,public_tracking_token FROM shipments WHERE client_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 50").all(session.id).map(attachShipmentTrackingToken);
-        const invoices = db.prepare("SELECT i.id,i.code,i.order_id,i.amount,i.status,i.issue_date,i.due_date,i.pdf_url,i.pdf_status,i.pdf_generated_at,i.share_token FROM invoices i WHERE i.client_id=? AND CAST(COALESCE(i.deleted,0) AS INTEGER)=0 ORDER BY i.id DESC LIMIT 50").all(session.id).map((row) => ({ ...row, share_url: row.share_token ? invoiceShareUrl(req, row.share_token) : null }));
-        const deliveryNotes = db.prepare("SELECT id,code,order_id,status,created_at,updated_at,pdf_url,pdf_status,pdf_generated_at,share_token FROM delivery_notes WHERE client_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 50").all(session.id).map((row) => ({ ...row, share_url: row.share_token ? documentShareUrl(req, "delivery", row.share_token) : null }));
+        const paymentColumns = ["id", "invoice_id", "amount", "payment_date", "method", "reference", "notes"].filter((column) => hasColumn("payments", column));
+        const payments = paymentColumns.length > 1
+          ? db.prepare(`SELECT ${paymentColumns.join(",")} FROM payments WHERE invoice_id IN (SELECT id FROM invoices WHERE client_id=?) AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY payment_date DESC,id DESC LIMIT 100`).all(session.id)
+          : [];
+        const paidByInvoice = new Map();
+        for (const payment of payments) paidByInvoice.set(Number(payment.invoice_id), Number(paidByInvoice.get(Number(payment.invoice_id)) || 0) + Number(payment.amount || 0));
+        const invoices = db.prepare("SELECT i.id,i.code,i.order_id,i.amount,i.status,i.issue_date,i.due_date,i.pdf_url,i.pdf_status,i.pdf_generated_at,i.share_token FROM invoices i WHERE i.client_id=? AND CAST(COALESCE(i.deleted,0) AS INTEGER)=0 ORDER BY i.id DESC LIMIT 50").all(session.id).map((row) => {
+          const paidAmount = Number(paidByInvoice.get(Number(row.id)) || 0);
+          return { ...row, paid_amount: paidAmount, outstanding_amount: Math.max(0, Number(row.amount || 0) - paidAmount), share_url: row.share_token ? invoiceShareUrl(req, row.share_token) : null };
+        });
+        const deliveryNotes = db.prepare("SELECT id,code,order_id,status,created_at,updated_at,pdf_url,pdf_status,pdf_generated_at,share_token FROM delivery_notes WHERE client_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 50").all(session.id).map((row) => {
+          const shipment = shipments.find((item) => Number(item.order_id) === Number(row.order_id));
+          return { ...row, delivery_signature_status: shipment?.delivery_signature_status || null, delivery_recipient_name: shipment?.delivery_recipient_name || null, delivery_signature_at: shipment?.delivery_signature_at || null, signed: shipment?.delivery_signature_status === "Firmado", share_url: row.share_token ? documentShareUrl(req, "delivery", row.share_token) : null };
+        });
         for (const order of orders) order.lines = db.prepare("SELECT ol.product_id,ol.quantity,ol.quantity_requested,ol.quantity_unit,ol.units_factor,ol.unit_price,ol.amount,p.name product_name,p.sku FROM order_lines ol LEFT JOIN products p ON p.id=ol.product_id WHERE ol.order_id=? ORDER BY ol.id").all(Number(order.id));
         return send(res, 200, {
           profile: client,
@@ -2472,6 +2497,7 @@ export async function crmApiHandler(req, res) {
           shipments,
           invoices,
           delivery_notes: deliveryNotes,
+          payments,
           summary: {
             orders: orders.length,
             in_progress: orders.filter((row) => !["Entregado", "Cancelado", "Facturado", "Facturado y cobrado"].includes(String(row.status || ""))).length,
@@ -2972,6 +2998,8 @@ export async function crmApiHandler(req, res) {
         );
         if (!result.changes) return send(res, 404, { error: "No se pudo confirmar la entrega" });
         if (shipment.order_id) db.prepare("UPDATE orders SET status='Entregado',updated_at=? WHERE id=?").run(now, Number(shipment.order_id));
+        const deliveryNote = shipment.order_id ? db.prepare("SELECT id FROM delivery_notes WHERE order_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 1").get(Number(shipment.order_id)) : null;
+        if (deliveryNote?.id) markCommercialDocumentPdfStale("delivery", Number(deliveryNote.id));
         // Sincroniza la parada aunque el cliente rechace firmar: la entrega
         // queda hecha, pero la ruta conserva la incidencia para seguimiento.
         const routeStopStatus = signatureStatus === "Rechazó firmar" ? "Incidencia" : "Entregado";
