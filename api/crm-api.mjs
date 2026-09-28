@@ -521,12 +521,22 @@ for (const column of ["updated_at TEXT", "stock_applied_at TEXT", "stock_applied
 }
 db.exec(`CREATE TABLE IF NOT EXISTS purchase_order_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,purchase_order_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity REAL DEFAULT 0,unit_cost REAL DEFAULT 0,amount REAL DEFAULT 0);`);
 db.exec(`CREATE TABLE IF NOT EXISTS goods_receipts(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,supplier_id INTEGER NOT NULL,purchase_order_id INTEGER,purchase_invoice_id INTEGER,warehouse_id INTEGER,receipt_date TEXT NOT NULL,status TEXT DEFAULT 'Borrador',validation_status TEXT DEFAULT 'Pendiente',validated_by TEXT,validated_at TEXT,notes TEXT,created_by TEXT,received_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
-for (const column of ["purchase_invoice_id INTEGER", "validation_status TEXT DEFAULT 'Pendiente'", "validated_by TEXT", "validated_at TEXT"]) {
+for (const column of ["purchase_invoice_id INTEGER", "validation_status TEXT DEFAULT 'Pendiente'", "validated_by TEXT", "validated_at TEXT", "client_id INTEGER", "counterparty_type TEXT DEFAULT 'Proveedor'", "stock_applied INTEGER DEFAULT 1", "stock_applied_at TEXT", "stock_applied_by TEXT"]) {
   try { db.exec(`ALTER TABLE goods_receipts ADD COLUMN ${column}`); } catch {}
 }
+if (remoteMode && process.env.RUN_REMOTE_MIGRATIONS === "1") {
+  for (const column of ["purchase_invoice_id INTEGER", "validation_status TEXT DEFAULT 'Pendiente'", "validated_by TEXT", "validated_at TEXT", "client_id INTEGER", "counterparty_type TEXT DEFAULT 'Proveedor'", "stock_applied INTEGER DEFAULT 1", "stock_applied_at TEXT", "stock_applied_by TEXT"]) {
+    try { db.prepare(`ALTER TABLE goods_receipts ADD COLUMN ${column}`).run(); } catch {}
+  }
+}
 db.exec(`CREATE TABLE IF NOT EXISTS goods_receipt_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,receipt_id INTEGER NOT NULL,product_id INTEGER NOT NULL,product_name_snapshot TEXT,expected_quantity REAL DEFAULT 0,received_quantity REAL DEFAULT 0,damaged_quantity REAL DEFAULT 0,substituted_quantity REAL DEFAULT 0,substitute_product_id INTEGER,unit_cost REAL DEFAULT 0,expected_value REAL DEFAULT 0,received_value REAL DEFAULT 0,economic_difference REAL DEFAULT 0,status TEXT DEFAULT 'Correcta',lot_id INTEGER,lot_code TEXT,expiry_date TEXT,notes TEXT,location_verified_status TEXT DEFAULT 'Pendiente',location_verified_code TEXT,location_verified_reason TEXT,location_verified_by TEXT,location_verified_at TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
-for (const column of ["damaged_quantity REAL DEFAULT 0", "substituted_quantity REAL DEFAULT 0", "substitute_product_id INTEGER", "expected_value REAL DEFAULT 0", "received_value REAL DEFAULT 0", "economic_difference REAL DEFAULT 0", "lot_id INTEGER", "lot_code TEXT", "expiry_date TEXT", "location_verified_status TEXT DEFAULT 'Pendiente'", "location_verified_code TEXT", "location_verified_reason TEXT", "location_verified_by TEXT", "location_verified_at TEXT"]) {
+for (const column of ["damaged_quantity REAL DEFAULT 0", "substituted_quantity REAL DEFAULT 0", "substitute_product_id INTEGER", "expected_value REAL DEFAULT 0", "received_value REAL DEFAULT 0", "economic_difference REAL DEFAULT 0", "lot_id INTEGER", "lot_code TEXT", "expiry_date TEXT", "quantity_unit TEXT DEFAULT 'unidad'", "location_verified_status TEXT DEFAULT 'Pendiente'", "location_verified_code TEXT", "location_verified_reason TEXT", "location_verified_by TEXT", "location_verified_at TEXT"]) {
   try { db.exec(`ALTER TABLE goods_receipt_lines ADD COLUMN ${column}`); } catch {}
+}
+if (remoteMode && process.env.RUN_REMOTE_MIGRATIONS === "1") {
+  for (const column of ["damaged_quantity REAL DEFAULT 0", "substituted_quantity REAL DEFAULT 0", "substitute_product_id INTEGER", "expected_value REAL DEFAULT 0", "received_value REAL DEFAULT 0", "economic_difference REAL DEFAULT 0", "lot_id INTEGER", "lot_code TEXT", "expiry_date TEXT", "quantity_unit TEXT DEFAULT 'unidad'"]) {
+    try { db.prepare(`ALTER TABLE goods_receipt_lines ADD COLUMN ${column}`).run(); } catch {}
+  }
 }
 db.exec(`CREATE TABLE IF NOT EXISTS goods_receipt_incidents(id INTEGER PRIMARY KEY AUTOINCREMENT,receipt_id INTEGER NOT NULL,receipt_line_id INTEGER,supplier_id INTEGER,type TEXT DEFAULT 'Diferencia',description TEXT NOT NULL,expected_quantity REAL,received_quantity REAL,damaged_quantity REAL DEFAULT 0,substituted_quantity REAL DEFAULT 0,substitute_product_id INTEGER,economic_difference REAL DEFAULT 0,status TEXT DEFAULT 'Abierta',attachment_name TEXT,attachment_mime TEXT,attachment_data TEXT,attachments_json TEXT,claim_status TEXT DEFAULT 'No reclamada',claim_message TEXT,claim_created_by TEXT,claim_created_at TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
 for (const column of ["damaged_quantity REAL DEFAULT 0", "substituted_quantity REAL DEFAULT 0", "substitute_product_id INTEGER", "economic_difference REAL DEFAULT 0", "attachments_json TEXT", "claim_status TEXT DEFAULT 'No reclamada'", "claim_message TEXT", "claim_created_by TEXT", "claim_created_at TEXT", "resolution TEXT", "resolved_by TEXT", "resolved_at TEXT"]) {
@@ -1449,8 +1459,8 @@ const lookupFields = {
   order_lines: ["id", "order_id", "product_id", "quantity", "quantity_requested", "quantity_unit", "prepared", "prepared_quantity", "preparation_status", "incident_resolution"],
   invoices: ["id", "code", "order_id", "client_id", "amount", "status", "created_at", "issue_date", "due_date"],
   purchase_orders: ["id", "code", "supplier_id", "status", "order_date", "expected_date", "amount", "validation_status", "supplier_invoice_code", "invoice_date", "payment_terms_snapshot", "payment_due_date", "payment_status", "payment_paid_at", "payment_reference"],
-  goods_receipts: ["id", "code", "supplier_id", "purchase_order_id", "purchase_invoice_id", "warehouse_id", "receipt_date", "status", "validation_status", "validated_by", "validated_at", "line_count", "incident_count", "received_by", "notes"],
-  goods_receipt_lines: ["id", "receipt_id", "product_id", "product_name_snapshot", "expected_quantity", "received_quantity", "damaged_quantity", "substituted_quantity", "substitute_product_id", "unit_cost", "expected_value", "received_value", "economic_difference", "status", "lot_id", "lot_code", "expiry_date", "notes", "location_verified_status", "location_verified_code", "location_verified_reason", "location_verified_by", "location_verified_at"],
+  goods_receipts: ["id", "code", "counterparty_type", "client_id", "supplier_id", "purchase_order_id", "purchase_invoice_id", "warehouse_id", "receipt_date", "status", "validation_status", "validated_by", "validated_at", "stock_applied", "stock_applied_at", "stock_applied_by", "line_count", "incident_count", "received_by", "notes"],
+  goods_receipt_lines: ["id", "receipt_id", "product_id", "product_name_snapshot", "expected_quantity", "received_quantity", "quantity_unit", "damaged_quantity", "substituted_quantity", "substitute_product_id", "unit_cost", "expected_value", "received_value", "economic_difference", "status", "lot_id", "lot_code", "expiry_date", "notes", "location_verified_status", "location_verified_code", "location_verified_reason", "location_verified_by", "location_verified_at"],
   goods_receipt_incidents: ["id", "receipt_id", "receipt_line_id", "supplier_id", "type", "description", "expected_quantity", "received_quantity", "damaged_quantity", "substituted_quantity", "substitute_product_id", "economic_difference", "status", "claim_status", "attachment_name", "attachment_mime", "created_by", "created_at"],
   payments: ["id", "invoice_id", "amount", "payment_date", "method"],
   inventory_movements: ["id", "product_id", "warehouse_id", "movement_type", "quantity", "stock_effect", "reference", "movement_date", "notes"],
@@ -3074,12 +3084,12 @@ export async function crmApiHandler(req, res) {
         return send(res, 200, current);
       }
       if (t === "goods_receipts" && req.method === "GET" && !p[2]) {
-        const rows = db.prepare("SELECT gr.*,s.name supplier_name,w.name warehouse_name,po.code purchase_order_code,pi.code purchase_invoice_code,pi.status purchase_invoice_status,(SELECT COUNT(*) FROM goods_receipt_lines gl WHERE gl.receipt_id=gr.id AND CAST(COALESCE(gl.deleted,0) AS INTEGER)=0) line_count,(SELECT COUNT(*) FROM goods_receipt_incidents gi WHERE gi.receipt_id=gr.id AND CAST(COALESCE(gi.deleted,0) AS INTEGER)=0) incident_count,(SELECT COALESCE(SUM(gl.economic_difference),0) FROM goods_receipt_lines gl WHERE gl.receipt_id=gr.id AND CAST(COALESCE(gl.deleted,0) AS INTEGER)=0) economic_difference FROM goods_receipts gr LEFT JOIN suppliers s ON s.id=gr.supplier_id LEFT JOIN warehouses w ON w.id=gr.warehouse_id LEFT JOIN purchase_orders po ON po.id=gr.purchase_order_id LEFT JOIN invoices pi ON pi.id=gr.purchase_invoice_id WHERE CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.receipt_date DESC,gr.id DESC LIMIT 500").all();
+        const rows = db.prepare("SELECT gr.*,s.name supplier_name,c.name client_name,w.name warehouse_name,CASE WHEN COALESCE(gr.counterparty_type,'Proveedor')='Cliente' THEN c.name ELSE s.name END counterparty_name,po.code purchase_order_code,pi.code purchase_invoice_code,pi.status purchase_invoice_status,(SELECT COUNT(*) FROM goods_receipt_lines gl WHERE gl.receipt_id=gr.id AND CAST(COALESCE(gl.deleted,0) AS INTEGER)=0) line_count,(SELECT COUNT(*) FROM goods_receipt_incidents gi WHERE gi.receipt_id=gr.id AND CAST(COALESCE(gi.deleted,0) AS INTEGER)=0) incident_count,(SELECT COALESCE(SUM(gl.economic_difference),0) FROM goods_receipt_lines gl WHERE gl.receipt_id=gr.id AND CAST(COALESCE(gl.deleted,0) AS INTEGER)=0) economic_difference FROM goods_receipts gr LEFT JOIN suppliers s ON s.id=gr.supplier_id LEFT JOIN clients c ON c.id=gr.client_id LEFT JOIN warehouses w ON w.id=gr.warehouse_id LEFT JOIN purchase_orders po ON po.id=gr.purchase_order_id LEFT JOIN invoices pi ON pi.id=gr.purchase_invoice_id WHERE CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.receipt_date DESC,gr.id DESC LIMIT 500").all();
         return send(res, 200, rows);
       }
       if (t === "goods_receipts" && req.method === "GET" && p[2] === "detail") {
         const receiptId = Number(p[3]);
-        const receipt = db.prepare("SELECT gr.*,s.name supplier_name,w.name warehouse_name,po.code purchase_order_code,pi.code purchase_invoice_code,pi.status purchase_invoice_status FROM goods_receipts gr LEFT JOIN suppliers s ON s.id=gr.supplier_id LEFT JOIN warehouses w ON w.id=gr.warehouse_id LEFT JOIN purchase_orders po ON po.id=gr.purchase_order_id LEFT JOIN invoices pi ON pi.id=gr.purchase_invoice_id WHERE gr.id=? AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0").get(receiptId);
+        const receipt = db.prepare("SELECT gr.*,s.name supplier_name,c.name client_name,w.name warehouse_name,CASE WHEN COALESCE(gr.counterparty_type,'Proveedor')='Cliente' THEN c.name ELSE s.name END counterparty_name,po.code purchase_order_code,pi.code purchase_invoice_code,pi.status purchase_invoice_status FROM goods_receipts gr LEFT JOIN suppliers s ON s.id=gr.supplier_id LEFT JOIN clients c ON c.id=gr.client_id LEFT JOIN warehouses w ON w.id=gr.warehouse_id LEFT JOIN purchase_orders po ON po.id=gr.purchase_order_id LEFT JOIN invoices pi ON pi.id=gr.purchase_invoice_id WHERE gr.id=? AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0").get(receiptId);
         if (!receipt) return send(res, 404, { error: "Entrada no encontrada" });
         const lines = db.prepare("SELECT gl.*,p.name product_name,p.sku,p.warehouse_location,p.warehouse_id AS product_warehouse_id,w2.name AS product_warehouse_name,sp.name substitute_product_name FROM goods_receipt_lines gl LEFT JOIN products p ON p.id=gl.product_id LEFT JOIN warehouses w2 ON w2.id=p.warehouse_id LEFT JOIN products sp ON sp.id=gl.substitute_product_id WHERE gl.receipt_id=? AND CAST(COALESCE(gl.deleted,0) AS INTEGER)=0 ORDER BY gl.id").all(receiptId);
         const incidentRows = db.prepare("SELECT gi.*,p.name product_name,sp.name substitute_product_name FROM goods_receipt_incidents gi LEFT JOIN goods_receipt_lines gl ON gl.id=gi.receipt_line_id LEFT JOIN products p ON p.id=gl.product_id LEFT JOIN products sp ON sp.id=gi.substitute_product_id WHERE gi.receipt_id=? AND CAST(COALESCE(gi.deleted,0) AS INTEGER)=0 ORDER BY gi.id").all(receiptId);
@@ -3088,16 +3098,21 @@ export async function crmApiHandler(req, res) {
       }
       if (t === "goods_receipts" && req.method === "POST" && p[2] === "receive") {
         const d = await read(req);
-        const supplierId = Number(d.supplier_id || 0);
+        const counterpartyType = String(d.counterparty_type || "Proveedor") === "Cliente" ? "Cliente" : "Proveedor";
+        const supplierId = counterpartyType === "Proveedor" ? Number(d.supplier_id || 0) : 0;
+        const clientId = counterpartyType === "Cliente" ? Number(d.client_id || 0) : null;
         const warehouseId = Number(d.warehouse_id || 0);
         const purchaseOrderId = Number(d.purchase_order_id || 0) || null;
         const purchaseInvoiceId = Number(d.purchase_invoice_id || 0) || null;
         const receiptDate = String(d.receipt_date || new Date().toISOString().slice(0, 10)).slice(0, 10);
         const inputLines = Array.isArray(d.lines) ? d.lines : [];
         const supplier = supplierId ? db.prepare("SELECT id,name FROM suppliers WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(supplierId) : null;
+        const client = clientId ? db.prepare("SELECT id,name FROM clients WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(clientId) : null;
         const warehouse = warehouseId ? db.prepare("SELECT id,name FROM warehouses WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(warehouseId) : null;
-        if (!supplier) return send(res, 400, { error: "Selecciona un proveedor para la entrada" });
+        if (counterpartyType === "Proveedor" && !supplier) return send(res, 400, { error: "Selecciona un proveedor para la entrada" });
+        if (counterpartyType === "Cliente" && !client) return send(res, 400, { error: "Selecciona un cliente para la entrada" });
         if (!warehouse) return send(res, 400, { error: "Selecciona el almacén de destino" });
+        if (counterpartyType === "Cliente" && (purchaseOrderId || purchaseInvoiceId)) return send(res, 400, { error: "Las entradas de cliente no pueden vincular un pedido o factura de compra" });
         if (purchaseOrderId && !db.prepare("SELECT id FROM purchase_orders WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(purchaseOrderId)) return send(res, 400, { error: "El pedido de compra no existe" });
         if (purchaseInvoiceId && !db.prepare("SELECT id FROM invoices WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(purchaseInvoiceId)) return send(res, 400, { error: "La factura de compra no existe" });
         if (!inputLines.length) return send(res, 400, { error: "Añade al menos un producto a la entrada" });
@@ -3105,7 +3120,7 @@ export async function crmApiHandler(req, res) {
         const lines = [];
         for (const input of inputLines) {
           const productId = Number(input.product_id || 0);
-          const product = productId ? db.prepare("SELECT id,name,sku,stock FROM products WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(productId) : null;
+          const product = productId ? db.prepare("SELECT id,name,sku,unit,stock FROM products WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(productId) : null;
           const expected = Number(input.expected_quantity || 0);
           const received = Number(input.received_quantity || 0);
           const damaged = Math.min(received, Math.max(0, Number(input.damaged_quantity || 0)));
@@ -3113,6 +3128,7 @@ export async function crmApiHandler(req, res) {
           const substituteProductId = Number(input.substitute_product_id || 0) || null;
           const lotCode = String(input.lot_code || "").trim().slice(0, 120);
           const expiryDate = String(input.expiry_date || "").trim().slice(0, 10) || null;
+          const quantityUnit = String(input.quantity_unit || product.unit || "unidad").trim().slice(0, 40) || "unidad";
           if (!product) return send(res, 400, { error: "Uno de los productos no existe" });
           if (!Number.isFinite(expected) || expected < 0 || !Number.isFinite(received) || received < 0) return send(res, 400, { error: `Cantidad no válida para ${product.name}` });
           if (expiryDate && !/^\d{4}-\d{2}-\d{2}$/.test(expiryDate)) return send(res, 400, { error: `Fecha de caducidad no válida para ${product.name}` });
@@ -3134,7 +3150,7 @@ export async function crmApiHandler(req, res) {
           }
           const expectedValue = expected * Math.max(0, Number(input.unit_cost || 0));
           const receivedValue = received * Math.max(0, Number(input.unit_cost || 0));
-          lines.push({ productId, product, expected, received, damaged, substituted, substituteProductId, lotCode, expiryDate, unitCost: Math.max(0, Number(input.unit_cost || 0)), expectedValue, receivedValue, economicDifference: receivedValue - expectedValue, status, notes: String(input.notes || "").trim(), incidentDescription: String(input.incident_description || "").trim(), attachments });
+          lines.push({ productId, product, expected, received, damaged, substituted, substituteProductId, lotCode, expiryDate, quantityUnit, unitCost: Math.max(0, Number(input.unit_cost || 0)), expectedValue, receivedValue, economicDifference: receivedValue - expectedValue, status, notes: String(input.notes || "").trim(), incidentDescription: String(input.incident_description || "").trim(), attachments });
         }
         if (!lines.length) return send(res, 400, { error: "Las líneas deben tener alguna cantidad recibida o una incidencia" });
         const hasIncident = lines.some((line) => line.status !== "Correcta" || line.incidentDescription || line.attachments.length || line.damaged > 0 || line.substituted > 0 || (line.expected !== line.received));
@@ -3143,11 +3159,14 @@ export async function crmApiHandler(req, res) {
         const validationStatus = ["Pendiente", "Validada", "Rechazada"].includes(String(d.validation_status)) ? String(d.validation_status) : "Pendiente";
         const validatedBy = validationStatus === "Validada" ? String(d.validated_by || actor) : null;
         const validatedAt = validationStatus === "Validada" ? now : null;
+        const stockApplied = d.stock_applied === undefined ? 1 : ([true, 1, "1", "true", "on"].includes(d.stock_applied) ? 1 : 0);
+        const stockAppliedAt = stockApplied ? now : null;
+        const stockAppliedBy = stockApplied ? actor : null;
         if (!remoteMode) db.exec("BEGIN");
         try {
-          const created = db.prepare("INSERT INTO goods_receipts(code,supplier_id,purchase_order_id,purchase_invoice_id,warehouse_id,receipt_date,status,validation_status,validated_by,validated_at,notes,created_by,received_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(code, supplierId, purchaseOrderId, purchaseInvoiceId, warehouseId, receiptDate, status, validationStatus, validatedBy, validatedAt, String(d.notes || "").trim(), actor, String(d.received_by || actor), now, now);
+          const created = db.prepare("INSERT INTO goods_receipts(code,supplier_id,client_id,counterparty_type,purchase_order_id,purchase_invoice_id,warehouse_id,receipt_date,status,validation_status,validated_by,validated_at,stock_applied,stock_applied_at,stock_applied_by,notes,created_by,received_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(code, supplierId, clientId, counterpartyType, purchaseOrderId, purchaseInvoiceId, warehouseId, receiptDate, status, validationStatus, validatedBy, validatedAt, stockApplied, stockAppliedAt, stockAppliedBy, String(d.notes || "").trim(), actor, String(d.received_by || actor), now, now);
           const receiptId = Number(created.lastInsertRowid);
-          const insertLine = db.prepare("INSERT INTO goods_receipt_lines(receipt_id,product_id,product_name_snapshot,expected_quantity,received_quantity,damaged_quantity,substituted_quantity,substitute_product_id,unit_cost,expected_value,received_value,economic_difference,status,lot_code,expiry_date,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+          const insertLine = db.prepare("INSERT INTO goods_receipt_lines(receipt_id,product_id,product_name_snapshot,expected_quantity,received_quantity,quantity_unit,damaged_quantity,substituted_quantity,substitute_product_id,unit_cost,expected_value,received_value,economic_difference,status,lot_code,expiry_date,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
           const insertMovement = db.prepare("INSERT INTO inventory_movements(product_id,warehouse_id,movement_type,quantity,reference,movement_date,notes,receipt_id,created_by) VALUES(?,?,?,?,?,?,?,?,?)");
           const findLot = db.prepare("SELECT id FROM product_lots WHERE product_id=? AND lot_code=? AND (warehouse_id=? OR warehouse_id IS NULL) ORDER BY id LIMIT 1");
           const insertLot = db.prepare("INSERT INTO product_lots(product_id,lot_code,quantity,waste_quantity,expiry_date,received_date,warehouse_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)");
@@ -3156,14 +3175,14 @@ export async function crmApiHandler(req, res) {
           const insertIncident = db.prepare("INSERT INTO goods_receipt_incidents(receipt_id,receipt_line_id,supplier_id,type,description,expected_quantity,received_quantity,damaged_quantity,substituted_quantity,substitute_product_id,economic_difference,status,attachment_name,attachment_mime,attachment_data,attachments_json,claim_status,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
           const incidents = [];
           for (const line of lines) {
-            const lineResult = insertLine.run(receiptId, line.productId, line.product.name, line.expected, line.received, line.damaged, line.substituted, line.substituteProductId, line.unitCost, line.expectedValue, line.receivedValue, line.economicDifference, line.status, line.lotCode || null, line.expiryDate, line.notes, now, now);
+            const lineResult = insertLine.run(receiptId, line.productId, line.product.name, line.expected, line.received, line.quantityUnit, line.damaged, line.substituted, line.substituteProductId, line.unitCost, line.expectedValue, line.receivedValue, line.economicDifference, line.status, line.lotCode || null, line.expiryDate, line.notes, now, now);
             const lineId = Number(lineResult.lastInsertRowid);
             const usableOriginal = Math.max(0, line.received - line.damaged - line.substituted);
-            if (usableOriginal > 0) {
+            if (stockApplied && usableOriginal > 0) {
               insertMovement.run(line.productId, warehouseId, "Entrada", usableOriginal, code, receiptDate, `Recepción ${code} · ${line.product.name}`, receiptId, actor);
               db.prepare("UPDATE products SET stock=COALESCE(stock,0)+?,cost_price=CASE WHEN ? > 0 THEN ? ELSE cost_price END,real_cost=CASE WHEN ? > 0 THEN ? ELSE real_cost END,updated_at=? WHERE id=?").run(usableOriginal, line.unitCost, line.unitCost, line.unitCost, line.unitCost, now, line.productId);
             }
-            if (line.lotCode && (usableOriginal > 0 || line.damaged > 0)) {
+            if (stockApplied && line.lotCode && (usableOriginal > 0 || line.damaged > 0)) {
               const existingLot = findLot.get(line.productId, line.lotCode, warehouseId);
               const lotId = existingLot
                 ? Number(existingLot.id)
@@ -3171,7 +3190,7 @@ export async function crmApiHandler(req, res) {
               if (existingLot) updateLot.run(usableOriginal, line.damaged, line.expiryDate, receiptDate, warehouseId, now, lotId);
               updateLineLot.run(lotId, lineId);
             }
-            if (line.substituteProductId && line.substituted > 0) {
+            if (stockApplied && line.substituteProductId && line.substituted > 0) {
               insertMovement.run(line.substituteProductId, warehouseId, "Entrada", line.substituted, code, receiptDate, `Sustitución en recepción ${code} · ${line.product.name}`, receiptId, actor);
               db.prepare("UPDATE products SET stock=COALESCE(stock,0)+?,updated_at=? WHERE id=?").run(line.substituted, now, line.substituteProductId);
             }
@@ -3185,13 +3204,13 @@ export async function crmApiHandler(req, res) {
             }
           }
           if (purchaseOrderId) db.prepare("UPDATE purchase_orders SET status=?,updated_at=? WHERE id=?").run(hasIncident ? "Recibida con incidencia" : "Recibida", now, purchaseOrderId);
-          if (incidents.length) db.prepare("INSERT INTO notes(title,content,priority,module,record_id,important,completed,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)").run(`Incidencia en entrada · ${code}`, `La entrada ${code} del proveedor ${supplier.name} tiene ${incidents.length} incidencia${incidents.length === 1 ? "" : "s"}. Revisa las diferencias, productos equivocados o daños y sus fotografías desde Entradas.`, "Alta", "Entradas", receiptId, 1, 0, actor, now, now);
-          recordAudit(actor, "POST", `goods_receipts/${receiptId}`, "Recepción de mercancía", JSON.stringify({ receipt_id: receiptId, code, supplier_id: supplierId, warehouse_id: warehouseId, purchase_order_id: purchaseOrderId, purchase_invoice_id: purchaseInvoiceId, validation_status: validationStatus, lines: lines.length, incidents: incidents.length, economic_difference: lines.reduce((sum, line) => sum + Number(line.economicDifference || 0), 0) }));
+          if (incidents.length) db.prepare("INSERT INTO notes(title,content,priority,module,record_id,important,completed,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)").run(`Incidencia en entrada · ${code}`, `La entrada ${code} de ${counterpartyType.toLowerCase()} ${client?.name || supplier?.name || "sin nombre"} tiene ${incidents.length} incidencia${incidents.length === 1 ? "" : "s"}. Revisa las diferencias, productos equivocados o daños y sus fotografías desde Entradas.`, "Alta", "Entradas", receiptId, 1, 0, actor, now, now);
+          recordAudit(actor, "POST", `goods_receipts/${receiptId}`, "Recepción de mercancía", JSON.stringify({ receipt_id: receiptId, code, counterparty_type: counterpartyType, supplier_id: supplierId || null, client_id: clientId || null, warehouse_id: warehouseId, purchase_order_id: purchaseOrderId, purchase_invoice_id: purchaseInvoiceId, stock_applied: stockApplied, validation_status: validationStatus, lines: lines.length, incidents: incidents.length, economic_difference: lines.reduce((sum, line) => sum + Number(line.economicDifference || 0), 0) }));
           if (!remoteMode) db.exec("COMMIT");
           invalidateRelatedReadCaches("goods_receipts");
           invalidateRelatedReadCaches("inventory_movements");
           invalidateReadCache("products");
-          return send(res, 201, { id: receiptId, code, supplier_id: supplierId, supplier_name: supplier.name, warehouse_id: warehouseId, status, validation_status: validationStatus, validated_by: validatedBy, validated_at: validatedAt, purchase_invoice_id: purchaseInvoiceId, line_count: lines.length, incident_count: incidents.length, economic_difference: lines.reduce((sum, line) => sum + Number(line.economicDifference || 0), 0), received_by: String(d.received_by || actor), receipt_date: receiptDate, notes: String(d.notes || "").trim() });
+          return send(res, 201, { id: receiptId, code, counterparty_type: counterpartyType, supplier_id: supplierId || null, client_id: clientId || null, counterparty_name: client?.name || supplier?.name, supplier_name: supplier?.name || null, client_name: client?.name || null, warehouse_id: warehouseId, status, validation_status: validationStatus, stock_applied: stockApplied, stock_applied_at: stockAppliedAt, stock_applied_by: stockAppliedBy, validated_by: validatedBy, validated_at: validatedAt, purchase_invoice_id: purchaseInvoiceId, line_count: lines.length, incident_count: incidents.length, economic_difference: lines.reduce((sum, line) => sum + Number(line.economicDifference || 0), 0), received_by: String(d.received_by || actor), receipt_date: receiptDate, notes: String(d.notes || "").trim() });
         } catch (error) {
           if (!remoteMode) { try { db.exec("ROLLBACK"); } catch {} }
           return send(res, 500, { error: error?.message || "No se pudo registrar la entrada" });
@@ -4134,9 +4153,13 @@ export async function crmApiHandler(req, res) {
           if (terminal && Object.keys(d).some((key) => !allowedAfterClose.has(key))) return send(res, 409, { error: "Los pedidos enviados o cerrados no se pueden editar" });
         }
         if (t === "goods_receipts") {
-          const supplierId = Number(d.supplier_id || 0);
+          const currentReceipt = db.prepare("SELECT * FROM goods_receipts WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(p[2]));
+          const counterpartyType = String(d.counterparty_type || currentReceipt?.counterparty_type || "Proveedor") === "Cliente" ? "Cliente" : "Proveedor";
+          const supplierId = counterpartyType === "Proveedor" ? Number(d.supplier_id ?? currentReceipt?.supplier_id ?? 0) : 0;
+          const clientId = counterpartyType === "Cliente" ? Number(d.client_id ?? currentReceipt?.client_id ?? 0) : 0;
           const warehouseId = Number(d.warehouse_id || 0);
-          if (d.supplier_id !== undefined && !db.prepare("SELECT id FROM suppliers WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(supplierId)) return send(res, 400, { error: "El proveedor de la entrada no existe" });
+          if (counterpartyType === "Proveedor" && d.supplier_id !== undefined && !db.prepare("SELECT id FROM suppliers WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(supplierId)) return send(res, 400, { error: "El proveedor de la entrada no existe" });
+          if (counterpartyType === "Cliente" && d.client_id !== undefined && !db.prepare("SELECT id FROM clients WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(clientId)) return send(res, 400, { error: "El cliente de la entrada no existe" });
           if (d.warehouse_id !== undefined && !db.prepare("SELECT id FROM warehouses WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(warehouseId)) return send(res, 400, { error: "El almacén de la entrada no existe" });
           if (d.purchase_order_id && !db.prepare("SELECT id FROM purchase_orders WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(d.purchase_order_id))) return send(res, 400, { error: "El pedido de compra relacionado no existe" });
           if (d.purchase_invoice_id && !db.prepare("SELECT id FROM invoices WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(d.purchase_invoice_id))) return send(res, 400, { error: "La factura de compra relacionada no existe" });
