@@ -12275,10 +12275,10 @@ function WarehouseIncidentManager({ user, refreshSignal = 0 }: { user: any; refr
 }
 
 const warehouseTabletSections = [
-  { id: "Preparación de pedidos", short: "Preparación", icon: "preparation", hint: "Prepara y valida las líneas" },
-  { id: "Carga de vehículos", short: "Carga", icon: "warehouse", hint: "Asigna pedidos al camión" },
-  { id: "Entradas", short: "Entradas", icon: "upload", hint: "Recepciona mercancía" },
-  { id: "Crear incidencia", short: "Incidencia", icon: "template", hint: "Registra un problema" },
+  { id: "Preparación de pedidos", short: "Preparación", icon: "preparation" },
+  { id: "Carga de vehículos", short: "Carga", icon: "warehouse" },
+  { id: "Entradas", short: "Entradas", icon: "upload" },
+  { id: "Crear incidencia", short: "Incidencia", icon: "template" },
 ] as const;
 const warehouseTabletActiveKey = "excluvas.warehouse.active-tab";
 const warehouseTabletDateKey = "excluvas.warehouse.load-date";
@@ -12377,7 +12377,7 @@ function WarehouseTabletApp() {
       <a className="warehouse-tablet-brand" href="/almacen" aria-label="Vista almacén"><span className="warehouse-brand-mark">E</span><span><b>Exclusivas</b><small>Almacén operativo</small></span></a>
       <div className="warehouse-tablet-header-actions"><button type="button" className="warehouse-tablet-back-button" onClick={goBackInWarehouse} disabled={active === "Preparación de pedidos"} aria-label="Volver a la pestaña anterior" title="Volver a la pestaña anterior">← Atrás</button><span><b>{currentUser.username}</b><small>{currentUser.role === "admin" ? "Administrador" : "Almacén"}</small></span><div className="warehouse-tablet-quick-actions" aria-label="Acciones de la vista"><button type="button" className="warehouse-tablet-icon-button" onClick={printWarehouseView} aria-label="Imprimir vista" title="Imprimir vista"><ToolbarIcon name="print" /></button><button type="button" className="warehouse-tablet-icon-button" onClick={downloadWarehouseExcel} aria-label="Descargar Excel" title="Descargar Excel"><ToolbarIcon name="download" /></button></div><button type="button" className="warehouse-tablet-force-refresh" onClick={forceWarehouseRefresh} aria-busy={refreshing}>{refreshing ? "Actualizando…" : "Forzar actualización"}</button><a className="warehouse-reparto-link" href="/reparto">Reparto</a><button type="button" className="button secondary" onClick={logout}>Salir</button></div>
     </header>
-    <nav className="warehouse-tablet-nav" aria-label="Secciones de almacén">{warehouseTabletSections.map((section) => <button type="button" key={section.id} className={active === section.id ? "is-active" : ""} aria-pressed={active === section.id} onClick={() => selectWarehouseSection(section.id)}><span className="warehouse-nav-step"><b>{section.short}</b><small>{section.hint}</small></span></button>)}</nav>
+    <nav className="warehouse-tablet-nav" aria-label="Secciones de almacén">{warehouseTabletSections.map((section) => <button type="button" key={section.id} className={active === section.id ? "is-active" : ""} aria-pressed={active === section.id} onClick={() => selectWarehouseSection(section.id)}><b>{section.short}</b></button>)}</nav>
     <section className="warehouse-tablet-content">
       {active === "Preparación de pedidos" && <Manager active="Preparación de pedidos" user={currentUser} warehouseMode refreshSignal={refreshSignal} onNavigate={(module, date) => { if (date) setLoadDate(date); selectWarehouseSection(module); }} />}
       {active === "Carga de vehículos" && <VehicleLoadManager user={currentUser} initialDate={loadDate} refreshSignal={refreshSignal} />}
