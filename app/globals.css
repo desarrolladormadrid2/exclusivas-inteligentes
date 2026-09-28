@@ -5699,6 +5699,10 @@ body:has(.reparto-page) .assistant-global{display:none !important}
 /* Vista de almacén compacta: navegación y acciones siempre visibles en una sola fila. */
 .warehouse-tablet-heading{display:none}
 .warehouse-tablet-header-actions{gap:8px}
+.warehouse-tablet-back-button,.warehouse-tablet-force-refresh{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:0 9px;border:1px solid #cbd7db;background:#fff;color:#b91c1c;cursor:pointer;font:inherit;font-size:10px;font-weight:700;white-space:nowrap}
+.warehouse-tablet-back-button:disabled{border-color:#e2e9eb;color:#aab5b9;cursor:default}
+.warehouse-tablet-force-refresh{border-color:#b91c1c;background:#b91c1c;color:#fff}
+.warehouse-tablet-force-refresh[aria-busy="true"]{opacity:.72;cursor:wait}
 .warehouse-tablet-quick-actions{display:flex;align-items:center;gap:5px}
 .warehouse-tablet-icon-button{display:grid;place-items:center;width:34px;height:34px;padding:0;border:1px solid #cbd7db;background:#fff;color:#b91c1c;cursor:pointer}
 .warehouse-tablet-icon-button:hover{background:#fff4f4;border-color:#b91c1c}
@@ -5714,6 +5718,7 @@ body:has(.reparto-page) .assistant-global{display:none !important}
   .warehouse-tablet-brand b{font-size:14px}
   .warehouse-tablet-brand small{font-size:8px}
   .warehouse-tablet-header-actions{gap:5px}
+  .warehouse-tablet-back-button,.warehouse-tablet-force-refresh{min-height:30px;padding:0 6px;font-size:9px}
   .warehouse-tablet-header-actions .button{min-height:30px;padding:5px 8px;font-size:9px}
   .warehouse-tablet-nav{grid-template-columns:repeat(4,minmax(0,1fr));width:calc(100% - 20px);margin-top:10px;margin-bottom:10px}
   .warehouse-tablet-nav button{min-height:42px;padding:6px 2px}

@@ -12,7 +12,7 @@ declare global {
   }
 }
 
-const APP_VERSION = "2.0.214";
+const APP_VERSION = "2.0.215";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
@@ -1513,7 +1513,7 @@ function VehicleOperationsPanel({ user, routeDate, vehicles, onReload }: { user:
   </section>;
 }
 
-function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: string }) {
+function VehicleLoadManager({ user, initialDate, refreshSignal = 0 }: { user: any; initialDate?: string; refreshSignal?: number }) {
   const [shipments, setShipments] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
@@ -1664,7 +1664,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       setLoading(false);
     }
   }
-  useEffect(() => { void load(); }, [routeDate]);
+  useEffect(() => { void load(refreshSignal > 0); }, [routeDate, refreshSignal]);
   useEffect(() => () => {
     if (draftSaveTimer.current) window.clearTimeout(draftSaveTimer.current);
     draftSaveRequest.current += 1;
@@ -4167,7 +4167,7 @@ function ClientReceivablesPanel({ client, invoices, payments }: { client: any; i
   );
 }
 
-function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFormConsumed, warehouseMode = false }: { active: string; user?: any; onNavigate?: (module: string, date?: string) => void; assistantFormIntent?: any; onAssistantFormConsumed?: () => void; warehouseMode?: boolean }) {
+function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFormConsumed, warehouseMode = false, refreshSignal = 0 }: { active: string; user?: any; onNavigate?: (module: string, date?: string) => void; assistantFormIntent?: any; onAssistantFormConsumed?: () => void; warehouseMode?: boolean; refreshSignal?: number }) {
   const c = cfg[active];
   const actorHeaders = {
     "Content-Type": "application/json",
@@ -4467,6 +4467,10 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     setListRefreshKey((current) => current + 1);
     setLookupRefreshKey((current) => current + 1);
   }
+  useEffect(() => {
+    if (!refreshSignal) return;
+    refreshCurrentList();
+  }, [refreshSignal]);
   useEffect(() => {
     if (active !== "Cobros" || formOpen) return;
     try {
@@ -11983,7 +11987,7 @@ export function OcrIntelligent({ user = { username: "Usuario local" } }: { user?
   return <section className="ocr-page"><div className="ocr-page-head"><div><p className="eyebrow">AUTOMATIZACIÓN DOCUMENTAL</p><h2>OCR inteligente</h2><p className="muted">Sube un documento para identificarlo y preparar sus datos para el CRM.</p></div></div><div className="ocr-tabs"><b>Nuevo documento</b><span>Historial {history.length}</span></div><div className={`ocr-dropzone${dragging ? " is-dragging" : ""}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); void selectFile(event.dataTransfer.files?.[0]); }}><span className="ocr-upload-icon">↑</span><h3>Arrastra tu documento aquí</h3><p className="muted">o selecciona un archivo desde tu dispositivo</p><label className="button primary">Subir archivo<input type="file" hidden onChange={(event) => void selectFile(event.target.files?.[0])} /></label><small>PDF, imágenes, Word, Excel, XML, CSV y cualquier otro formato · Máx. 25 MB</small></div>{loading && <div className="ocr-feedback" role="status">Analizando documento…</div>}{data && !loading && <div className="ocr-review"><div className="panel-head"><div><h3>Datos extraídos</h3><p className="muted">Revisa la clasificación antes de guardar.</p></div><span className="scanner-state ready">{data.document_type}</span></div><div className="ocr-fields"><label>Tipo de documento<select value={data.document_type} onChange={(event) => setData({ ...data, document_type: event.target.value })}><option>Factura</option><option>Presupuesto</option><option>Otro</option></select></label><label>Correo detectado<input value={data.email} onChange={(event) => setData({ ...data, email: event.target.value })} placeholder="No detectado" /></label><label>Importe / total<input value={data.total} onChange={(event) => setData({ ...data, total: event.target.value })} placeholder="No detectado" /></label></div><div className="ocr-actions"><button className="button primary" disabled={saving} onClick={() => void save()}>{saving ? "Guardando…" : "Guardar en el historial"}</button><button className="button secondary" onClick={() => { setFile(null); setData(null); }}>Descartar</button></div></div>}{message && <p className="ocr-message" role="status">{message}</p>}<div className="ocr-history"><div className="panel-head"><div><h3>Historial de documentos</h3><p className="muted">Documentos guardados y clasificados.</p></div></div>{history.length ? history.map((item) => <div className="ocr-history-row" key={item.id}><span className="file-icon">▤</span><div><b>{item.file_name}</b><small>{item.created_at ? formatSpanishDateValue(item.created_at, true) : "—"} · {item.created_by || "Usuario local"}</small></div><span className="scanner-state ready">{item.document_type || "Otro"}</span></div>) : <p className="muted empty-row">Aún no hay documentos procesados.</p>}</div></section>;
 }
 
-function WarehouseIncidentManager({ user }: { user: any }) {
+function WarehouseIncidentManager({ user, refreshSignal = 0 }: { user: any; refreshSignal?: number }) {
   const actor = user?.username || "Usuario local";
   const [draft, setDraft] = useState({ area: "Preparación de pedidos", priority: "Urgente", reference: "", title: "", content: "" });
   const [recent, setRecent] = useState<any[]>([]);
@@ -12004,7 +12008,7 @@ function WarehouseIncidentManager({ user }: { user: any }) {
       setLoading(false);
     }
   }
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(); }, [refreshSignal]);
 
   async function createIncident(event: FormEvent) {
     event.preventDefault();
@@ -12058,18 +12062,34 @@ function WarehouseIncidentManager({ user }: { user: any }) {
   </section>;
 }
 
+const warehouseTabletSections = [
+  { id: "Preparación de pedidos", short: "Preparación", icon: "preparation", hint: "Prepara y valida las líneas" },
+  { id: "Carga de vehículos", short: "Carga", icon: "warehouse", hint: "Asigna pedidos al camión" },
+  { id: "Entradas", short: "Entradas", icon: "upload", hint: "Recepciona mercancía" },
+  { id: "Crear incidencia", short: "Incidencia", icon: "template", hint: "Registra un problema" },
+] as const;
+const warehouseTabletActiveKey = "excluvas.warehouse.active-tab";
+const warehouseTabletDateKey = "excluvas.warehouse.load-date";
 function WarehouseTabletApp() {
   const [currentUser, setCurrentUser] = useState<any>(() => ({ id: 0, username: "Luis", role: "admin", permissions: "*" }));
   const [active, setActive] = useState(() => {
+    if (typeof window === "undefined") return "Preparación de pedidos";
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    if (warehouseTabletSections.some((section) => section.id === requested)) return requested as string;
+    try {
+      const stored = localStorage.getItem(warehouseTabletActiveKey);
+      if (warehouseTabletSections.some((section) => section.id === stored)) return stored as string;
+    } catch {}
     return "Preparación de pedidos";
   });
-  const [loadDate, setLoadDate] = useState(() => tabletTodayInput());
-  const sections = [
-    { id: "Preparación de pedidos", short: "Preparación", icon: "preparation", hint: "Prepara y valida las líneas" },
-    { id: "Carga de vehículos", short: "Carga", icon: "warehouse", hint: "Asigna pedidos al camión" },
-    { id: "Entradas", short: "Entradas", icon: "upload", hint: "Recepciona mercancía" },
-    { id: "Crear incidencia", short: "Incidencia", icon: "template", hint: "Registra un problema" },
-  ] as const;
+  const [loadDate, setLoadDate] = useState(() => {
+    if (typeof window !== "undefined") {
+      try { return localStorage.getItem(warehouseTabletDateKey) || tabletTodayInput(); } catch {}
+    }
+    return tabletTodayInput();
+  });
+  const [refreshSignal, setRefreshSignal] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
   useEffect(() => {
     try {
       const raw = localStorage.getItem("excluvas.session") || sessionStorage.getItem("excluvas.session");
@@ -12080,8 +12100,43 @@ function WarehouseTabletApp() {
     } catch {}
   }, []);
   useEffect(() => {
-    if (!sections.some((section) => section.id === active)) setActive("Preparación de pedidos");
+    if (!warehouseTabletSections.some((section) => section.id === active)) setActive("Preparación de pedidos");
   }, [active]);
+  useEffect(() => {
+    try { localStorage.setItem(warehouseTabletActiveKey, active); } catch {}
+  }, [active]);
+  useEffect(() => {
+    try { localStorage.setItem(warehouseTabletDateKey, loadDate); } catch {}
+  }, [loadDate]);
+  useEffect(() => {
+    const onPopState = () => {
+      const requested = new URLSearchParams(window.location.search).get("tab");
+      setActive(warehouseTabletSections.some((section) => section.id === requested) ? requested as string : "Preparación de pedidos");
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+  function selectWarehouseSection(section: string) {
+    if (!warehouseTabletSections.some((item) => item.id === section) || section === active) return;
+    setActive(section);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", section);
+      window.history.pushState({ warehouseSection: section }, "", `${url.pathname}?${url.searchParams.toString()}`);
+    } catch {}
+  }
+  function goBackInWarehouse() {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    if (requested) window.history.back();
+    else if (active !== "Preparación de pedidos") setActive("Preparación de pedidos");
+  }
+  function forceWarehouseRefresh() {
+    clearLookupMemoryCache();
+    vehicleLoadMemoryCache.clear();
+    setRefreshing(true);
+    setRefreshSignal((current) => current + 1);
+    window.setTimeout(() => setRefreshing(false), 900);
+  }
   function logout() {
     localStorage.removeItem("excluvas.session");
     sessionStorage.removeItem("excluvas.session");
@@ -12108,14 +12163,14 @@ function WarehouseTabletApp() {
   return <main className="warehouse-tablet-app">
     <header className="warehouse-tablet-header">
       <a className="warehouse-tablet-brand" href="/almacen" aria-label="Vista almacén"><span className="warehouse-brand-mark">E</span><span><b>Exclusivas</b><small>Almacén operativo</small></span></a>
-      <div className="warehouse-tablet-header-actions"><span><b>{currentUser.username}</b><small>{currentUser.role === "admin" ? "Administrador" : "Almacén"}</small></span><div className="warehouse-tablet-quick-actions" aria-label="Acciones de la vista"><button type="button" className="warehouse-tablet-icon-button" onClick={printWarehouseView} aria-label="Imprimir vista" title="Imprimir vista"><ToolbarIcon name="print" /></button><button type="button" className="warehouse-tablet-icon-button" onClick={downloadWarehouseExcel} aria-label="Descargar Excel" title="Descargar Excel"><ToolbarIcon name="download" /></button></div><a className="warehouse-reparto-link" href="/reparto">Reparto</a><button type="button" className="button secondary" onClick={logout}>Salir</button></div>
+      <div className="warehouse-tablet-header-actions"><button type="button" className="warehouse-tablet-back-button" onClick={goBackInWarehouse} disabled={active === "Preparación de pedidos"} aria-label="Volver a la pestaña anterior" title="Volver a la pestaña anterior">← Atrás</button><span><b>{currentUser.username}</b><small>{currentUser.role === "admin" ? "Administrador" : "Almacén"}</small></span><div className="warehouse-tablet-quick-actions" aria-label="Acciones de la vista"><button type="button" className="warehouse-tablet-icon-button" onClick={printWarehouseView} aria-label="Imprimir vista" title="Imprimir vista"><ToolbarIcon name="print" /></button><button type="button" className="warehouse-tablet-icon-button" onClick={downloadWarehouseExcel} aria-label="Descargar Excel" title="Descargar Excel"><ToolbarIcon name="download" /></button></div><button type="button" className="warehouse-tablet-force-refresh" onClick={forceWarehouseRefresh} aria-busy={refreshing}>{refreshing ? "Actualizando…" : "Forzar actualización"}</button><a className="warehouse-reparto-link" href="/reparto">Reparto</a><button type="button" className="button secondary" onClick={logout}>Salir</button></div>
     </header>
-    <nav className="warehouse-tablet-nav" aria-label="Secciones de almacén">{sections.map((section) => <button type="button" key={section.id} className={active === section.id ? "is-active" : ""} aria-pressed={active === section.id} onClick={() => setActive(section.id)}><b>{section.short}</b></button>)}</nav>
+    <nav className="warehouse-tablet-nav" aria-label="Secciones de almacén">{warehouseTabletSections.map((section) => <button type="button" key={section.id} className={active === section.id ? "is-active" : ""} aria-pressed={active === section.id} onClick={() => selectWarehouseSection(section.id)}><b>{section.short}</b></button>)}</nav>
     <section className="warehouse-tablet-content">
-      {active === "Preparación de pedidos" && <Manager active="Preparación de pedidos" user={currentUser} warehouseMode onNavigate={(module, date) => { if (date) setLoadDate(date); setActive(module); }} />}
-      {active === "Carga de vehículos" && <VehicleLoadManager user={currentUser} initialDate={loadDate} />}
-      {active === "Entradas" && <Manager active="Entradas" user={currentUser} onNavigate={(module) => setActive(module)} />}
-      {active === "Crear incidencia" && <WarehouseIncidentManager user={currentUser} />}
+      {active === "Preparación de pedidos" && <Manager active="Preparación de pedidos" user={currentUser} warehouseMode refreshSignal={refreshSignal} onNavigate={(module, date) => { if (date) setLoadDate(date); selectWarehouseSection(module); }} />}
+      {active === "Carga de vehículos" && <VehicleLoadManager user={currentUser} initialDate={loadDate} refreshSignal={refreshSignal} />}
+      {active === "Entradas" && <Manager active="Entradas" user={currentUser} refreshSignal={refreshSignal} onNavigate={(module) => selectWarehouseSection(module)} />}
+      {active === "Crear incidencia" && <WarehouseIncidentManager user={currentUser} refreshSignal={refreshSignal} />}
     </section>
     <footer className="warehouse-tablet-footer"><span>Vista almacén · {APP_VERSION}</span><span>Base de datos sincronizada</span></footer>
   </main>;
