@@ -6494,6 +6494,8 @@ body:has(.warehouse-tablet-app) .settings-panel {
 .reparto-stop-status{align-self:center}
 .reparto-stop-actions>button,
 .reparto-stop-actions>a{display:inline-flex;align-items:center;justify-content:center;line-height:1.2;text-align:center}
+.reparto-detail-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:stretch}.reparto-detail-actions>.button,.reparto-detail-actions>.reparto-no-map{display:flex;align-items:center;justify-content:center;box-sizing:border-box;min-height:42px;margin:0;line-height:1.2;text-align:center}.reparto-line button{display:inline-flex;align-items:center;justify-content:center;min-height:28px;line-height:1.2}.delivery-signature-client-cta .button,.delivery-signature-actions .button{display:inline-flex;align-items:center;justify-content:center;min-height:40px;margin:0;line-height:1.2;text-align:center}
+@media (max-width:560px){.reparto-detail-actions{grid-template-columns:1fr}}
 
 /* El detalle ocupa la pantalla del tablet: sólo él debe desplazarse. */
 body.reparto-modal-open {
