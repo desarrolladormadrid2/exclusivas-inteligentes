@@ -12,7 +12,7 @@ declare global {
   }
 }
 
-const APP_VERSION = "2.0.213";
+const APP_VERSION = "2.0.214";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
@@ -1982,7 +1982,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
     if (!invoice?.id) return;
     const popup = window.open("about:blank", "_blank");
     try {
-      const response = await fetch(`/api/invoices/${invoice.id}/pdf`, { method: "POST", headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Usuario local" }, body: JSON.stringify({}) });
+      const response = await fetch(`/api/invoices/${invoice.id}/pdf`, { method: "POST", headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Usuario local" }, body: JSON.stringify({ force: true }) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "No se ha podido preparar la factura.");
       const url = data.share_url || `/api/invoices/share/${encodeURIComponent(data.share_token || "")}`;
@@ -2005,7 +2005,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
       for (const shipment of loaded) invoiceRows.push(await ensureInvoiceForShipment(shipment));
       for (let index = 0; index < invoiceRows.length; index += 1) {
         const invoice = invoiceRows[index];
-        const response = await fetch(`/api/invoices/${invoice.id}/pdf`, { method: "POST", headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Usuario local" }, body: JSON.stringify({}) });
+        const response = await fetch(`/api/invoices/${invoice.id}/pdf`, { method: "POST", headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Usuario local" }, body: JSON.stringify({ force: true }) });
         const body = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(body.error || `No se pudo preparar la factura ${invoice.code || invoice.id}.`);
         const url = body.share_url || `/api/invoices/share/${encodeURIComponent(body.share_token || "")}`;
@@ -2029,6 +2029,8 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
   const renderBoardCard = (item: any, targetKey: string, orderIndex = -1, orderTotal = 0) => {
     const stats = getLoadStats(item);
     const invoice = invoices.find((row: any) => Number(row.order_id) === Number(item.order_id));
+    const vehicleColumn = vehicleColumns.find((column: any) => String(column.id) === String(targetKey));
+    const vehicleLabel = vehicleColumn ? vehicleColumn.plate || vehicleColumn.name || `Camión ${vehicleColumn.id}` : "";
     const preparationReady = ["Preparado", "Preparado con incidencia"].includes(String(item.status || "")) && Boolean(String(item.preparation_closed_at || "").trim());
     const reception = item.opening_time && item.closing_time ? `Recepción ${String(item.opening_time).slice(0, 5)}–${String(item.closing_time).slice(0, 5)}` : "Horario pendiente";
     const statusLabel = preparationReady ? (item.status === "Preparado con incidencia" ? "Preparado con incidencia" : "Preparado") : item.status === "Preparando" ? "En preparación" : "Pendiente de preparar";
@@ -2036,7 +2038,7 @@ function VehicleLoadManager({ user, initialDate }: { user: any; initialDate?: st
     return <article className="vehicle-load-board-card" key={item.id} draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", String(item.id)); setDraggedShipmentId(Number(item.id)); }} onDragEnd={() => { setDraggedShipmentId(null); setDragOverSlot(""); }} onDragOver={(event) => allowShipmentDrop(event, canReorder ? `${targetKey}-${item.id}-before` : undefined)} onDrop={(event) => { event.preventDefault(); moveShipment(readDraggedShipmentId(event), targetKey, Number(item.id)); }}>
       <div className="vehicle-load-board-card-top"><b>{item.code}</b><strong>{item.distance_km === null ? "—" : `${String(item.distance_km).replace(".", ",")} km`}</strong></div>
       <strong>{item.client_name}</strong>
-      <div className="vehicle-load-board-card-meta"><span className="vehicle-load-card-reception">{reception}</span><span className={`vehicle-load-card-status${preparationReady ? " is-ready" : ""}`}>{statusLabel}</span><small>{stats.lines.length ? `${stats.quantityLabel}${stats.lines.length > 2 ? ` · ${stats.lines.length} líneas` : ""}` : "Sin líneas preparadas"}</small><small className="vehicle-load-card-invoice-status">{invoice?.status === "Cobrada" ? "Facturado y cobrado" : invoice?.id ? `Facturado · ${invoice.status || "Pendiente de cobro"}` : "Pendiente de facturar"}</small></div>
+      <div className="vehicle-load-board-card-meta"><span className="vehicle-load-card-reception">{reception}</span><span className={`vehicle-load-card-status${preparationReady ? " is-ready" : ""}`}>{statusLabel}</span>{vehicleLabel && <small className="vehicle-load-card-route">Camión: {vehicleLabel}</small>}<small>{stats.lines.length ? `${stats.quantityLabel}${stats.lines.length > 2 ? ` · ${stats.lines.length} líneas` : ""}` : "Sin líneas preparadas"}</small><small className="vehicle-load-card-invoice-status">{invoice?.status === "Cobrada" ? "Facturado y cobrado" : invoice?.id ? `Facturado · ${invoice.status || "Pendiente de cobro"}` : "Pendiente de facturar"}</small></div>
       <div className="vehicle-load-card-actions">
         {canReorder && <div className="vehicle-load-order-actions" aria-label="Cambiar posición del pedido">
           <button type="button" className="vehicle-load-order-button" disabled={orderIndex === 0} title="Subir posición" aria-label="Subir posición" onClick={(event) => { event.stopPropagation(); moveShipmentWithinVehicle(Number(item.id), targetKey, -1); }}>↑</button>

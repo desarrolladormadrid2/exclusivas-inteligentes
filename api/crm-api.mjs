@@ -152,6 +152,7 @@ function pdfLiteral(value) {
 }
 function createInvoicePdf(invoice) {
   const lineRows = Array.isArray(invoice.lines) ? invoice.lines : [];
+  const routeAssignments = Array.isArray(invoice.route_assignments) ? invoice.route_assignments : [];
   const lineTotal = lineRows.reduce((sum, line) => sum + Number(line.amount || Number(line.quantity || 0) * Number(line.unit_price || 0)), 0);
   const vatRate = Number(invoice.vat || 21);
   const base = lineTotal || (Number(invoice.amount || 0) / (1 + vatRate / 100));
@@ -168,6 +169,7 @@ function createInvoicePdf(invoice) {
     `Direccion: ${invoice.client_address || "No indicada"}`,
     `Ciudad: ${invoice.client_city || "No indicada"}`,
     `Correo: ${invoice.client_email || "No indicado"}`,
+    ...(routeAssignments.length ? ["", "REPARTO", ...routeAssignments.map((assignment) => `Camion: ${assignment.vehicle_label || "Sin camión"} · Ruta: ${assignment.route_code || "Sin ruta"}${assignment.driver ? ` · Conductor: ${assignment.driver}` : ""}`)] : []),
     "",
     "CONCEPTOS",
     ...(lineRows.length ? lineRows.flatMap((line) => {
@@ -221,11 +223,30 @@ function createInvoicePdf(invoice) {
   pdf += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogId} 0 R >>\nstartxref\n${xref}\n%%EOF`;
   return Buffer.from(pdf, "binary");
 }
+function invoiceRouteAssignments(invoice) {
+  const orderIds = [...new Set([
+    Number(invoice?.order_id || 0),
+    ...db.prepare("SELECT order_id FROM invoice_orders WHERE invoice_id=?").all(Number(invoice?.id || 0)).map((row) => Number(row.order_id || 0)),
+  ].filter((id) => Number.isInteger(id) && id > 0))];
+  if (!orderIds.length) return [];
+  const marks = orderIds.map(() => "?").join(",");
+  return db.prepare(`SELECT DISTINCT dr.code route_code,dr.vehicle,dr.driver,v.name vehicle_name,v.plate vehicle_plate
+    FROM delivery_route_stops drs
+    JOIN shipments s ON s.id=drs.shipment_id
+    JOIN delivery_routes dr ON dr.id=drs.route_id
+    LEFT JOIN vehicles v ON v.id=dr.vehicle_id
+    WHERE s.order_id IN (${marks}) AND CAST(COALESCE(drs.deleted,0) AS INTEGER)=0 AND CAST(COALESCE(dr.deleted,0) AS INTEGER)=0
+    ORDER BY dr.id DESC`).all(...orderIds).map((row) => ({
+      route_code: row.route_code || "",
+      driver: row.driver || "",
+      vehicle_label: row.vehicle_plate || row.vehicle || row.vehicle_name || "Sin camión",
+    }));
+}
 function invoicePdfData(invoiceId) {
   const invoice = db.prepare("SELECT i.*,c.name client_name,c.address client_address,c.city client_city,c.email client_email,c.phone client_phone FROM invoices i LEFT JOIN clients c ON c.id=i.client_id WHERE i.id=? AND CAST(COALESCE(i.deleted,0) AS INTEGER)=0").get(Number(invoiceId));
   if (!invoice) return null;
   const lines = db.prepare("SELECT il.*,p.name product_name,p.sku FROM invoice_lines il LEFT JOIN products p ON p.id=il.product_id WHERE il.invoice_id=? ORDER BY il.id").all(Number(invoiceId));
-  return { ...invoice, lines };
+  return { ...invoice, lines, route_assignments: invoiceRouteAssignments(invoice) };
 }
 async function uploadInvoicePdf(buffer, invoice) {
   if (!cloudinaryReady()) return null;
