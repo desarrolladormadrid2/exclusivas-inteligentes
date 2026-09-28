@@ -12,7 +12,7 @@ declare global {
   }
 }
 
-const APP_VERSION = "2.0.217";
+const APP_VERSION = "2.0.218";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
@@ -1453,6 +1453,10 @@ function VehicleOperationsPanel({ user, routeDate, vehicles, onReload }: { user:
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [selectedIncident, setSelectedIncident] = useState<any>(null);
+  const [incidentAction, setIncidentAction] = useState("review");
+  const [incidentResolution, setIncidentResolution] = useState("");
+  const [incidentActionSaving, setIncidentActionSaving] = useState(false);
   async function loadOperations() {
     try {
       const [tripsResponse, refuelsResponse, maintenanceResponse, closuresResponse] = await Promise.all([fetch(`/api/vehicle_trips?date=${encodeURIComponent(routeDate)}`), fetch("/api/vehicle_refuels"), fetch("/api/vehicle_maintenance"), fetch(`/api/driver_daily_closures?date=${encodeURIComponent(routeDate)}`)]);
@@ -12056,6 +12060,38 @@ function WarehouseIncidentManager({ user, refreshSignal = 0 }: { user: any; refr
     }
   }
   useEffect(() => { void load(); }, [refreshSignal]);
+
+  function openIncident(item: any) {
+    setSelectedIncident(item);
+    setIncidentAction(item.completed || item.status === "Resuelta" ? "reopen" : "review");
+    setIncidentResolution(item.resolution || "");
+    setError("");
+  }
+
+  async function applyIncidentAction() {
+    if (!selectedIncident) return;
+    const isReopen = incidentAction === "reopen";
+    const isResolved = incidentAction === "resolve";
+    setIncidentActionSaving(true);
+    setError("");
+    try {
+      const status = isReopen ? "Pendiente" : isResolved ? "Resuelta" : "En revisión";
+      const response = await fetch(`/api/notes/${selectedIncident.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "X-Actor": actor },
+        body: JSON.stringify({ ...selectedIncident, status, resolution: incidentResolution.trim() || (isResolved ? "Incidencia resuelta desde Almacén." : "Pendiente de revisión."), completed: isResolved ? 1 : 0, resolved_at: isReopen ? null : new Date().toISOString(), resolved_by: isReopen ? null : actor }),
+      });
+      const updated = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(updated.error || "No se pudo actualizar la incidencia.");
+      setRecent((current) => current.map((item) => Number(item.id) === Number(selectedIncident.id) ? { ...item, ...updated, status, completed: isResolved ? 1 : 0, resolution: incidentResolution.trim() || (isResolved ? "Incidencia resuelta desde Almacén." : "Pendiente de revisión.") } : item));
+      setSelectedIncident(null);
+      setMessage(isResolved ? "Incidencia resuelta." : isReopen ? "Incidencia reabierta." : "Incidencia marcada en revisión.");
+    } catch (caught: any) {
+      setError(caught?.message || "No se pudo actualizar la incidencia.");
+    } finally {
+      setIncidentActionSaving(false);
+    }
+  }
   useEffect(() => {
     const value = referenceSearch.trim();
     if (value.length < 2 || selectedReference) {
@@ -12150,9 +12186,10 @@ function WarehouseIncidentManager({ user, refreshSignal = 0 }: { user: any; refr
       </form>
       <section className="warehouse-recent-incidents panel">
         <div className="panel-head"><div><h3>Incidencias recientes</h3><p className="muted">Las más recientes de la operativa de almacén.</p></div><button type="button" className="button secondary" onClick={() => void load()} disabled={loading}>Actualizar</button></div>
-        {loading ? <div className="data-loading" role="status">Cargando incidencias…</div> : recent.length ? <div className="warehouse-recent-list">{recent.map((item: any) => <article key={item.id} className={`warehouse-recent-item${item.completed ? " is-complete" : ""}`}><div><b>{item.title}</b><small>{item.module || "Almacén"} · {item.priority || "Normal"} · {item.created_at ? formatSpanishDateValue(item.created_at, true) : "Sin fecha"}</small><p>{String(item.content || "").split("\n")[0]}</p></div><span>{item.completed ? "Resuelta" : "Pendiente"}</span></article>)}</div> : <p className="empty-state">Todavía no hay incidencias de almacén.</p>}
+        {loading ? <div className="data-loading" role="status">Cargando incidencias…</div> : recent.length ? <div className="warehouse-recent-list">{recent.map((item: any) => <article key={item.id} className={`warehouse-recent-item${item.completed ? " is-complete" : ""}`}><button type="button" className="warehouse-recent-item-main" onClick={() => openIncident(item)}><div><b>{item.title}</b><small>{item.module || "Almacén"} · {item.priority || "Normal"} · {item.created_at ? formatSpanishDateValue(item.created_at, true) : "Sin fecha"}</small><p>{String(item.content || "").split("\n")[0]}</p></div><span>{item.completed ? "Resuelta" : item.status === "En revisión" ? "En revisión" : "Pendiente"}</span></button><button type="button" className="warehouse-recent-open" onClick={() => openIncident(item)}>Abrir</button></article>)}</div> : <p className="empty-state">Todavía no hay incidencias de almacén.</p>}
       </section>
     </div>
+    {selectedIncident && <div className="preview-overlay warehouse-incident-preview" role="dialog" aria-modal="true" aria-label="Detalle de incidencia" onMouseDown={(event) => event.target === event.currentTarget && !incidentActionSaving && setSelectedIncident(null)}><article className="note-preview-card warehouse-incident-detail-modal" onClick={(event) => event.stopPropagation()}><button type="button" className="preview-close" onClick={() => !incidentActionSaving && setSelectedIncident(null)} aria-label="Cerrar">×</button><p className="eyebrow">ALMACÉN · INCIDENCIA</p><h2>{selectedIncident.title || "Incidencia"}</h2><div className="note-preview-meta"><span><b>Área</b>{selectedIncident.module || "Almacén"}</span><span><b>Prioridad</b>{selectedIncident.priority || "Normal"}</span><span><b>Estado</b>{selectedIncident.completed ? "Resuelta" : selectedIncident.status || "Pendiente"}</span></div><div className="note-preview-content">{selectedIncident.content || "Sin descripción."}</div>{selectedIncident.resolution && <div className="warehouse-incident-last-resolution"><b>Última actuación</b><span>{selectedIncident.resolution}{selectedIncident.resolved_by ? ` · ${selectedIncident.resolved_by}` : ""}</span></div>}<div className="note-preview-resolution warehouse-incident-action-box"><div className="note-preview-resolution-head"><b>Acción</b><small>Actualiza el estado y deja constancia desde Almacén.</small></div><div className="note-preview-resolution-controls"><select aria-label="Acción sobre la incidencia" value={incidentAction} onChange={(event) => setIncidentAction(event.target.value)} disabled={incidentActionSaving}><option value="review">Marcar en revisión</option><option value="resolve">Resolver incidencia</option><option value="reopen">Reabrir incidencia</option></select><textarea aria-label="Actuación sobre la incidencia" rows={3} value={incidentResolution} onChange={(event) => setIncidentResolution(event.target.value)} placeholder="Qué se ha hecho o qué queda pendiente…" disabled={incidentActionSaving} /><button type="button" className="button primary" disabled={incidentActionSaving} onClick={() => void applyIncidentAction()}>{incidentActionSaving ? "Guardando…" : "Guardar actuación"}</button></div></div><div className="note-preview-actions"><button type="button" className="button secondary" onClick={() => !incidentActionSaving && setSelectedIncident(null)}>Cerrar</button></div></article></div>}
   </section>;
 }
 
