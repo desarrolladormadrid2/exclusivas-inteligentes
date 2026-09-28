@@ -1543,11 +1543,29 @@ function VehicleLoadManager({ user, initialDate, refreshSignal = 0 }: { user: an
   const [roadEstimates, setRoadEstimates] = useState<Record<string, any>>({});
   const [roadEstimateLoading, setRoadEstimateLoading] = useState(false);
   const [optimizingVehicle, setOptimizingVehicle] = useState("");
+  const [collapsedVehicles, setCollapsedVehicles] = useState<Record<string, boolean>>({});
   const [routeAlternatives, setRouteAlternatives] = useState<any[]>([]);
   const [alternativesLoading, setAlternativesLoading] = useState(false);
   const draftSaveTimer = useRef<number | null>(null);
   const draftSaveRequest = useRef(0);
   const [bulkInvoicePrinting, setBulkInvoicePrinting] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = window.sessionStorage.getItem("vehicle-load-collapsed");
+      if (saved) setCollapsedVehicles(JSON.parse(saved));
+    } catch {
+      // La vista funciona igualmente si el navegador bloquea el almacenamiento de sesión.
+    }
+  }, []);
+
+  function toggleVehicleCollapsed(key: string) {
+    setCollapsedVehicles((current) => {
+      const next = { ...current, [key]: !current[key] };
+      try { window.sessionStorage.setItem("vehicle-load-collapsed", JSON.stringify(next)); } catch { /* almacenamiento opcional */ }
+      return next;
+    });
+  }
 
   async function load(force = false) {
     const cached = vehicleLoadMemoryCache.get(routeDate);
@@ -2088,9 +2106,10 @@ function VehicleLoadManager({ user, initialDate, refreshSignal = 0 }: { user: an
             const displayedMinutes = roadStats?.total_minutes ?? planStats.minutes;
             const overDailyLimit = displayedMinutes > 600;
             const lateStops = Number(roadStats?.time_window_warnings?.length || 0);
-            return <section className="vehicle-load-column" key={key} onDragOver={(event) => allowShipmentDrop(event)} onDrop={(event) => { event.preventDefault(); moveShipment(readDraggedShipmentId(event), key); }}>
-              <header className="vehicle-load-column-head"><div><h3>{column.plate || column.name || `Camión ${key}`}</h3><span>{columnItems.length} pedidos</span><small className={overDailyLimit || lateStops ? "is-over-limit" : ""}>{roadStats ? `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km carretera · ${formatLoadDuration(roadStats.driving_minutes)} conducción + ${roadStats.waiting_minutes || 0} min espera + ${roadStats.service_minutes} min entregas = ${formatLoadDuration(displayedMinutes)}` : roadEstimateLoading ? "Calculando tiempo real de carretera…" : `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km aprox. · ${formatLoadDuration(planStats.drivingMinutes)} conducción + ${planStats.waitingMinutes} min espera + ${columnItems.length * DEFAULT_DELIVERY_SERVICE_MINUTES} min entregas = ${formatLoadDuration(displayedMinutes)}`}{overDailyLimit ? " · supera 10 h" : ""}{lateStops ? ` · ${lateStops} fuera de horario` : ""}</small></div><div className="vehicle-load-column-tools"><button type="button" className="button secondary vehicle-load-optimize" disabled={optimizingVehicle === key || columnItems.length < 2} onClick={() => void optimizeVehicle(key)}>{optimizingVehicle === key ? "Optimizando…" : "Optimizar orden"}</button><label>Conductor<input value={driverByVehicle[key] || column.driver || user?.username || ""} onChange={(event) => { const value = event.target.value; setDriverByVehicle((current) => { const next = { ...current, [key]: value }; scheduleBoardDraft(boardAssignments, next); return next; }); }} placeholder="Nombre" /></label></div></header>
-              <div className="vehicle-load-column-list">{columnItems.length ? [renderDropSlot(key, `${key}-start`, Number(columnItems[0].id)), ...columnItems.flatMap((item: any, index: number) => [renderBoardCard(item, key, index, columnItems.length), renderDropSlot(key, `${key}-${item.id}-after`, Number(columnItems[index + 1]?.id) || undefined)])] : <p className="vehicle-load-column-empty">Suelta aquí los pedidos</p>}</div>
+            const collapsed = Boolean(collapsedVehicles[key]);
+            return <section className={`vehicle-load-column${collapsed ? " is-collapsed" : ""}`} key={key} onDragOver={(event) => allowShipmentDrop(event)} onDrop={(event) => { event.preventDefault(); moveShipment(readDraggedShipmentId(event), key); }}>
+              <header className="vehicle-load-column-head"><div className="vehicle-load-column-heading"><div><h3>{column.plate || column.name || `Camión ${key}`}</h3><span>{columnItems.length} pedidos</span><small className={overDailyLimit || lateStops ? "is-over-limit" : ""}>{roadStats ? `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km carretera · ${formatLoadDuration(roadStats.driving_minutes)} conducción + ${roadStats.waiting_minutes || 0} min espera + ${roadStats.service_minutes} min entregas = ${formatLoadDuration(displayedMinutes)}` : roadEstimateLoading ? "Calculando tiempo real de carretera…" : `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km aprox. · ${formatLoadDuration(planStats.drivingMinutes)} conducción + ${planStats.waitingMinutes} min espera + ${columnItems.length * DEFAULT_DELIVERY_SERVICE_MINUTES} min entregas = ${formatLoadDuration(displayedMinutes)}`}{overDailyLimit ? " · supera 10 h" : ""}{lateStops ? ` · ${lateStops} fuera de horario` : ""}</small></div><button type="button" className="vehicle-load-column-toggle" aria-expanded={!collapsed} aria-controls={`vehicle-load-list-${key}`} onClick={() => toggleVehicleCollapsed(key)}>{collapsed ? "Mostrar pedidos" : "Colapsar camión"}</button></div>{!collapsed && <div className="vehicle-load-column-tools"><button type="button" className="button secondary vehicle-load-optimize" disabled={optimizingVehicle === key || columnItems.length < 2} onClick={() => void optimizeVehicle(key)}>{optimizingVehicle === key ? "Optimizando…" : "Optimizar orden"}</button><label>Conductor<input value={driverByVehicle[key] || column.driver || user?.username || ""} onChange={(event) => { const value = event.target.value; setDriverByVehicle((current) => { const next = { ...current, [key]: value }; scheduleBoardDraft(boardAssignments, next); return next; }); }} placeholder="Nombre" /></label></div>}</header>
+              {!collapsed && <div id={`vehicle-load-list-${key}`} className="vehicle-load-column-list">{columnItems.length ? [renderDropSlot(key, `${key}-start`, Number(columnItems[0].id)), ...columnItems.flatMap((item: any, index: number) => [renderBoardCard(item, key, index, columnItems.length), renderDropSlot(key, `${key}-${item.id}-after`, Number(columnItems[index + 1]?.id) || undefined)])] : <p className="vehicle-load-column-empty">Suelta aquí los pedidos</p>}</div>}
             </section>;
           })}
         </section>

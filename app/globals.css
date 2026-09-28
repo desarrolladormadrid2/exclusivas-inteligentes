@@ -6036,6 +6036,7 @@ body:has(.warehouse-tablet-app) .settings-panel {
 .vehicle-load-dropzone{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:5px;max-height:320px;min-height:52px;overflow-y:auto;padding:6px;background:#f7f9fa}
 .vehicle-load-board{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;align-items:start}
 .vehicle-load-column{min-height:190px}
+.vehicle-load-column.is-collapsed{min-height:0}.vehicle-load-column-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;min-width:0}.vehicle-load-column-heading>div{min-width:0}.vehicle-load-column-toggle{flex:0 0 auto;min-height:28px;padding:0 8px;border:1px solid #cbd7dc;background:#fff;color:#bd2027;cursor:pointer;font:inherit;font-size:9px;font-weight:700;white-space:nowrap}.vehicle-load-column-toggle:hover{background:#fff5f5}
 .vehicle-load-column-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-bottom:3px solid #bd2027;background:#fff8f8}
 .vehicle-load-column-head h3{margin:0;color:#26343d;font-size:14px}
 .vehicle-load-column-head span{color:#71818a;font-size:10px}
