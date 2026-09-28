@@ -12,7 +12,7 @@ declare global {
   }
 }
 
-const APP_VERSION = "2.0.216";
+const APP_VERSION = "2.0.217";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
@@ -12032,6 +12032,11 @@ export function OcrIntelligent({ user = { username: "Usuario local" } }: { user?
 function WarehouseIncidentManager({ user, refreshSignal = 0 }: { user: any; refreshSignal?: number }) {
   const actor = user?.username || "Usuario local";
   const [draft, setDraft] = useState({ area: "Preparación de pedidos", priority: "Urgente", reference: "", title: "", content: "" });
+  const [referenceSearch, setReferenceSearch] = useState("");
+  const [referenceResults, setReferenceResults] = useState<any[]>([]);
+  const [selectedReference, setSelectedReference] = useState<any>(null);
+  const [referenceSearching, setReferenceSearching] = useState(false);
+  const referenceRequestRef = useRef(0);
   const [recent, setRecent] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -12051,6 +12056,51 @@ function WarehouseIncidentManager({ user, refreshSignal = 0 }: { user: any; refr
     }
   }
   useEffect(() => { void load(); }, [refreshSignal]);
+  useEffect(() => {
+    const value = referenceSearch.trim();
+    if (value.length < 2 || selectedReference) {
+      setReferenceResults([]);
+      setReferenceSearching(false);
+      return;
+    }
+    const requestId = ++referenceRequestRef.current;
+    const timer = window.setTimeout(async () => {
+      setReferenceSearching(true);
+      try {
+        const encoded = encodeURIComponent(value);
+        const [ordersResponse, clientsResponse] = await Promise.all([
+          fetch(`/api/orders?view=lookup&search=${encoded}&limit=8`),
+          fetch(`/api/clients?view=lookup&search=${encoded}&limit=8`),
+        ]);
+        const orders = ordersResponse.ok ? await ordersResponse.json() : [];
+        const clients = clientsResponse.ok ? await clientsResponse.json() : [];
+        if (requestId !== referenceRequestRef.current) return;
+        setReferenceResults([
+          ...(Array.isArray(orders) ? orders : []).map((row: any) => ({ type: "order", id: Number(row.id), code: row.code, name: row.client_name || "Cliente sin asignar", detail: [row.status || "Pendiente", row.client_city].filter(Boolean).join(" · ") })),
+          ...(Array.isArray(clients) ? clients : []).map((row: any) => ({ type: "client", id: Number(row.id), name: row.name, detail: [row.city, row.address].filter(Boolean).join(" · ") || "Cliente" })),
+        ]);
+      } catch {
+        if (requestId === referenceRequestRef.current) setReferenceResults([]);
+      } finally {
+        if (requestId === referenceRequestRef.current) setReferenceSearching(false);
+      }
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [referenceSearch, selectedReference]);
+
+  function chooseReference(item: any) {
+    const label = item.type === "order" ? `Pedido ${item.code}` : `Cliente ${item.name}`;
+    setSelectedReference(item);
+    setReferenceSearch(label);
+    setReferenceResults([]);
+    setDraft((current) => ({ ...current, reference: label }));
+  }
+
+  function clearReference() {
+    setSelectedReference(null);
+    setReferenceSearch("");
+    setDraft((current) => ({ ...current, reference: "" }));
+  }
 
   async function createIncident(event: FormEvent) {
     event.preventDefault();
@@ -12066,12 +12116,14 @@ function WarehouseIncidentManager({ user, refreshSignal = 0 }: { user: any; refr
       const response = await fetch("/api/notes", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Actor": actor },
-        body: JSON.stringify({ title: `Incidencia · ${draft.title.trim()}`, content, priority: draft.priority, module: draft.area, important: 1, completed: 0, created_by: actor }),
+        body: JSON.stringify({ title: `Incidencia · ${draft.title.trim()}`, content, priority: draft.priority, module: draft.area, record_id: selectedReference?.id || null, important: 1, completed: 0, created_by: actor }),
       });
       const created = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(created.error || "No se pudo registrar la incidencia.");
       setRecent((current) => [created, ...current].slice(0, 8));
       setDraft((current) => ({ ...current, reference: "", title: "", content: "" }));
+      setSelectedReference(null);
+      setReferenceSearch("");
       setMessage("Incidencia registrada y visible en el CRM.");
     } catch (caught: any) {
       setError(caught?.message || "No se pudo registrar la incidencia.");
@@ -12088,7 +12140,7 @@ function WarehouseIncidentManager({ user, refreshSignal = 0 }: { user: any; refr
         <div className="warehouse-incident-fields">
           <label>Área<select value={draft.area} onChange={(event) => setDraft({ ...draft, area: event.target.value })}><option>Preparación de pedidos</option><option>Carga de vehículos</option><option>Entradas</option><option>Stock</option></select></label>
           <label>Prioridad<select value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: event.target.value })}><option>Urgente</option><option>Alta</option><option>Normal</option></select></label>
-          <label className="warehouse-incident-wide">Pedido, entrada o referencia<input value={draft.reference} onChange={(event) => setDraft({ ...draft, reference: event.target.value })} placeholder="Ej. ENV-2026-000123 · A-101" /></label>
+          <div className="warehouse-incident-wide warehouse-incident-reference-picker"><label>Pedido o cliente<input value={referenceSearch} onChange={(event) => { setReferenceSearch(event.target.value); if (selectedReference) { setSelectedReference(null); setDraft({ ...draft, reference: event.target.value }); } else setDraft({ ...draft, reference: event.target.value }); }} placeholder="Busca por número de pedido o cliente…" autoComplete="off" /></label>{selectedReference && <div className="warehouse-incident-reference-selected"><span><b>{selectedReference.type === "order" ? "Pedido vinculado" : "Cliente vinculado"}</b>{selectedReference.type === "order" ? `${selectedReference.code} · ${selectedReference.name}` : selectedReference.name}</span><button type="button" className="link-button" onClick={clearReference}>Cambiar</button></div>}{!selectedReference && referenceSearch.trim().length >= 2 && <div className="warehouse-incident-reference-results" role="listbox" aria-label="Resultados de pedidos y clientes">{referenceSearching ? <small>Buscando…</small> : referenceResults.length ? referenceResults.map((item) => <button type="button" key={`${item.type}-${item.id}`} role="option" onClick={() => chooseReference(item)}><span><b>{item.type === "order" ? item.code : item.name}</b><small>{item.type === "order" ? `Cliente: ${item.name}` : "Cliente"} · {item.detail}</small></span><strong>{item.type === "order" ? "Pedido" : "Cliente"}</strong></button>) : <small>No hay pedidos o clientes que coincidan. Puedes dejar una referencia manual.</small>}</div>}<small className="warehouse-incident-reference-help">Busca por código, nombre o ciudad. También puedes escribir una referencia manual.</small></div>
           <label className="warehouse-incident-wide">Título<input required value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Ej. Faltan 2 cajas de cerveza" /></label>
           <label className="warehouse-incident-wide">Qué ha ocurrido<textarea required rows={6} value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.target.value })} placeholder="Describe el problema y cualquier dato que deba revisar el responsable…" /></label>
         </div>

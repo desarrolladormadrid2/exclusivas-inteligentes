@@ -3651,6 +3651,17 @@ export async function crmApiHandler(req, res) {
             filterParams.push(...requestedOrderIds);
           } else filters.push("1=0");
         }
+        const searchValue = String(query.get("search") || "").trim().toLocaleLowerCase();
+        if (searchValue && ["clients", "orders"].includes(t)) {
+          const searchTerm = `%${searchValue}%`;
+          if (t === "clients") {
+            filters.push("(LOWER(COALESCE(clients.name,'')) LIKE ? OR LOWER(COALESCE(clients.external_code,'')) LIKE ? OR LOWER(COALESCE(clients.address,'')) LIKE ? OR LOWER(COALESCE(clients.city,'')) LIKE ?)");
+            filterParams.push(searchTerm, searchTerm, searchTerm, searchTerm);
+          } else {
+            filters.push("(LOWER(COALESCE(orders.code,'')) LIKE ? OR CAST(orders.id AS TEXT) LIKE ? OR LOWER(COALESCE(order_client.name,'')) LIKE ? OR LOWER(COALESCE(order_client.city,'')) LIKE ?)");
+            filterParams.push(searchTerm, searchTerm, searchTerm, searchTerm);
+          }
+        }
         if (isPublicCatalog) {
           filters.push("CAST(COALESCE(products.active,1) AS INTEGER)=1", "LOWER(COALESCE(products.product_status,'Activo')) NOT IN ('inactivo','baja','descatalogado')", "TRIM(COALESCE(products.name,''))<>''", "LOWER(products.name) NOT GLOB '__test*'", "LOWER(products.name) NOT GLOB '__dbg*'", "LOWER(products.name) NOT GLOB '__debug*'", "LOWER(products.name) NOT GLOB 'demo*'");
         } else if (!includeInactive && ["suppliers", "clients", "products"].includes(t)) {
