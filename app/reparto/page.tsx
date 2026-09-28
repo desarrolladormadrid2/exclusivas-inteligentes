@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { DeliverySignaturePanel, DriverDailyClosingPanel } from "../page";
 import BarcodeScanner from "../components/BarcodeScanner";
 
@@ -236,6 +236,8 @@ export default function RepartoPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [actor, setActor] = useState("Reparto móvil");
+  const selectedShipmentRef = useRef<any>(null);
+  const returnsOpenRef = useRef(false);
 
   useEffect(() => {
     try {
@@ -243,6 +245,44 @@ export default function RepartoPage() {
       const session = raw ? JSON.parse(raw) : null;
       if (session?.username) setActor(String(session.username));
     } catch {}
+  }, []);
+
+  useEffect(() => {
+    selectedShipmentRef.current = selectedShipment;
+    returnsOpenRef.current = returnsOpen;
+    document.body.classList.toggle("reparto-modal-open", Boolean(selectedShipment || returnsOpen));
+    return () => { document.body.classList.remove("reparto-modal-open"); };
+  }, [selectedShipment, returnsOpen]);
+
+  useEffect(() => {
+    const repartoHistoryState = { reparto: true };
+    const closeCurrentOverlay = () => {
+      if (returnsOpenRef.current) {
+        setReturnsOpen(false);
+        return true;
+      }
+      if (selectedShipmentRef.current) {
+        setSelectedShipment(null);
+        setSelectedLines([]);
+        return true;
+      }
+      return false;
+    };
+    const handlePopState = () => {
+      closeCurrentOverlay();
+      window.history.pushState(repartoHistoryState, "", window.location.href);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      closeCurrentOverlay();
+    };
+    window.history.pushState(repartoHistoryState, "", window.location.href);
+    window.addEventListener("popstate", handlePopState);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
   }, []);
 
   async function load() {

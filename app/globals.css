@@ -6442,3 +6442,30 @@ body:has(.warehouse-tablet-app) .settings-panel {
     z-index: 40;
   }
 }
+
+/* El detalle ocupa la pantalla del tablet: sólo él debe desplazarse. */
+body.reparto-modal-open {
+  overflow: hidden;
+}
+
+@media (max-width: 800px) {
+  .reparto-detail-overlay,
+  .reparto-return-overlay {
+    overflow: hidden;
+  }
+
+  .reparto-detail-modal,
+  .reparto-return-modal {
+    width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .reparto-detail-head {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+}
