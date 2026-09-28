@@ -6314,3 +6314,131 @@ body:has(.warehouse-tablet-app) .settings-panel {
   .reparto-detail-actions{gap:5px}
   .reparto-detail-actions .button{min-height:38px;padding:0 8px;font-size:10px}
 }
+
+/* Ajustes de trabajo para tablet: una mano, una ruta visible y sin controles
+   comprimidos. Estas reglas sólo afectan al rango intermedio (560–800 px). */
+@media (min-width: 561px) and (max-width: 800px) {
+  .warehouse-tablet-header {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+  }
+
+  .warehouse-tablet-nav {
+    position: sticky;
+    top: 72px;
+    z-index: 35;
+    box-shadow: 0 2px 6px rgba(38, 52, 61, .08);
+  }
+
+  .vehicle-load-toolbar {
+    grid-template-columns: 110px minmax(0, 1fr) 105px 145px 115px;
+    align-items: stretch;
+    gap: 6px;
+  }
+
+  .vehicle-load-toolbar > label {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .vehicle-load-toolbar > .vehicle-load-toolbar-summary {
+    grid-column: 2 / -1;
+    grid-row: 1;
+    min-width: 0;
+  }
+
+  .vehicle-load-toolbar > button {
+    min-width: 0;
+    min-height: 38px;
+    padding: 6px 7px;
+    font-size: 9px;
+    white-space: normal;
+  }
+
+  .vehicle-load-toolbar > button:nth-of-type(1) { grid-column: 1; grid-row: 2; }
+  .vehicle-load-toolbar > button:nth-of-type(2) { grid-column: 2; grid-row: 2; }
+  .vehicle-load-toolbar > button:nth-of-type(3) { grid-column: 3 / 5; grid-row: 2; }
+  .vehicle-load-toolbar > button:nth-of-type(4) { grid-column: 5; grid-row: 2; }
+
+  /* En tablet los camiones siguen siendo una columna vertical, aunque el
+     panel permanezca fijo a la derecha para poder arrastrar desde pedidos. */
+  .vehicle-load-trucks-panel .vehicle-load-board {
+    grid-template-columns: 1fr;
+  }
+
+  .vehicle-load-trucks-panel .vehicle-load-column-head {
+    padding: 8px;
+  }
+
+  .vehicle-load-trucks-panel .vehicle-load-column-head h3 {
+    font-size: 13px;
+  }
+
+  .reparto-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+  }
+
+  .reparto-shell {
+    width: calc(100% - 24px);
+    padding-top: 18px;
+  }
+
+  .reparto-head {
+    align-items: start;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .reparto-head-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    gap: 8px;
+  }
+
+  .reparto-head-actions .button,
+  .reparto-head-actions .reparto-refresh {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .reparto-datebar > button,
+  .reparto-datebar > label {
+    min-height: 48px;
+    padding: 8px 10px;
+  }
+
+  .reparto-stop-actions > button,
+  .reparto-stop-actions > a {
+    min-height: 40px;
+  }
+
+  .reparto-reorder button {
+    width: 40px;
+    min-height: 40px;
+  }
+}
+
+@media (max-width: 600px) {
+  .warehouse-tablet-header {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+  }
+
+  .warehouse-tablet-nav {
+    position: sticky;
+    top: 59px;
+    z-index: 35;
+    box-shadow: 0 2px 6px rgba(38, 52, 61, .08);
+  }
+
+  .reparto-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+  }
+}
