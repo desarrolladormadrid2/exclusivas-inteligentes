@@ -114,6 +114,7 @@ const migrationsByTable = {
     ["load_confirmed", "ALTER TABLE delivery_route_stops ADD COLUMN load_confirmed INTEGER DEFAULT 0"],
     ["driver_notes", "ALTER TABLE delivery_route_stops ADD COLUMN driver_notes TEXT"],
     ["invoice_delivery_method", "ALTER TABLE delivery_route_stops ADD COLUMN invoice_delivery_method TEXT"],
+    ["deleted", "ALTER TABLE delivery_route_stops ADD COLUMN deleted INTEGER DEFAULT 0"],
   ],
   order_lines: [
     ["order_line_lots_table", "CREATE TABLE IF NOT EXISTS order_line_lots(id INTEGER PRIMARY KEY AUTOINCREMENT,order_line_id INTEGER NOT NULL,lot_id INTEGER,lot_code TEXT,expiry_date TEXT,quantity REAL DEFAULT 0,created_at TEXT,updated_at TEXT)"],
