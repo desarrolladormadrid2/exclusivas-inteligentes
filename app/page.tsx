@@ -12,7 +12,7 @@ declare global {
   }
 }
 
-const APP_VERSION = "2.0.221";
+const APP_VERSION = "2.0.223";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
@@ -10316,7 +10316,7 @@ function tabletDateOffset(days: number) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function ClientPortalDashboard({ data, onNewOrder, onRepeat, onLogout }: { data: any; onNewOrder: () => void; onRepeat: (order: any) => void; onLogout: () => void }) {
+function ClientPortalDashboard({ data, onNewOrder, onRepeat, onLogout, onChangePassword, onRefresh }: { data: any; onNewOrder: () => void; onRepeat: (order: any) => void; onLogout: () => void; onChangePassword: (form: { current_password: string; new_password: string }) => Promise<void>; onRefresh: () => Promise<void> }) {
   const orders = Array.isArray(data?.orders) ? data.orders : [];
   const shipments = Array.isArray(data?.shipments) ? data.shipments : [];
   const invoices = Array.isArray(data?.invoices) ? data.invoices : [];
@@ -10327,11 +10327,37 @@ function ClientPortalDashboard({ data, onNewOrder, onRepeat, onLogout }: { data:
   const orderShipment = (orderId: number) => shipments.find((shipment) => Number(shipment.order_id) === Number(orderId));
   const statusClass = (value: any) => String(value || "pendiente").toLowerCase().replace(/\s+/g, "-");
   const invoiceForPayment = (invoiceId: any) => invoices.find((invoice) => Number(invoice.id) === Number(invoiceId));
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({ current_password: "", new_password: "", confirm_password: "" });
+  const [passwordMessage, setPasswordMessage] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [orderSearch, setOrderSearch] = useState("");
+  const [orderFilter, setOrderFilter] = useState("Todos");
+  const filteredOrders = orders.filter((order: any) => {
+    const shipment = orderShipment(order.id);
+    const status = shipment?.status || order.status || "Pendiente";
+    return (!orderSearch || `${order.code || ""} ${order.address || ""}`.toLocaleLowerCase().includes(orderSearch.toLocaleLowerCase())) && (orderFilter === "Todos" || status === orderFilter);
+  });
+  async function submitPassword(event: FormEvent) {
+    event.preventDefault();
+    setPasswordMessage("");
+    setPasswordError("");
+    if (passwordForm.new_password !== passwordForm.confirm_password) { setPasswordError("Las nuevas contraseñas no coinciden."); return; }
+    setPasswordSaving(true);
+    try {
+      await onChangePassword({ current_password: passwordForm.current_password, new_password: passwordForm.new_password });
+      setPasswordMessage("Contraseña actualizada correctamente.");
+      setPasswordForm({ current_password: "", new_password: "", confirm_password: "" });
+    } catch (caught) { setPasswordError(caught instanceof Error ? caught.message : "No se ha podido actualizar la contraseña."); }
+    finally { setPasswordSaving(false); }
+  }
   return <section className="client-portal-dashboard">
-    <div className="client-portal-dashboard-head"><div><p className="eyebrow">ÁREA DE CLIENTE</p><h2>Hola, {data?.profile?.name || "cliente"}.</h2><p>Consulta tus pedidos, documentos, entregas y pagos desde un mismo sitio.</p></div><div className="client-portal-head-actions"><button type="button" className="button primary" onClick={onNewOrder}>＋ Nuevo pedido</button><button type="button" className="client-portal-logout" onClick={onLogout}>Cerrar sesión</button></div></div>
+    <div className="client-portal-dashboard-head"><div><p className="eyebrow">ÁREA DE CLIENTE</p><h2>Hola, {data?.profile?.name || "cliente"}.</h2><p>Consulta tus pedidos, documentos, entregas y pagos desde un mismo sitio.</p></div><div className="client-portal-head-actions"><button type="button" className="button primary" onClick={onNewOrder}>＋ Nuevo pedido</button><button type="button" className="client-portal-password-toggle" onClick={() => setPasswordOpen((open) => !open)}>Cambiar contraseña</button><button type="button" className="client-portal-logout" onClick={onLogout}>Cerrar sesión</button></div></div>
+    {passwordOpen && <form className="client-portal-password-form" onSubmit={submitPassword}><label>Contraseña actual<input type="password" value={passwordForm.current_password} onChange={(event) => setPasswordForm((form) => ({ ...form, current_password: event.target.value }))} autoComplete="current-password" /></label><label>Nueva contraseña<input type="password" value={passwordForm.new_password} onChange={(event) => setPasswordForm((form) => ({ ...form, new_password: event.target.value }))} minLength={8} autoComplete="new-password" /></label><label>Repite la nueva contraseña<input type="password" value={passwordForm.confirm_password} onChange={(event) => setPasswordForm((form) => ({ ...form, confirm_password: event.target.value }))} minLength={8} autoComplete="new-password" /></label><button type="submit" className="button primary" disabled={passwordSaving}>{passwordSaving ? "Guardando…" : "Guardar contraseña"}</button>{passwordMessage && <span className="client-portal-password-ok">{passwordMessage}</span>}{passwordError && <span className="client-portal-password-error">{passwordError}</span>}</form>}
     <div className="client-portal-stat-grid"><article><strong>{data?.summary?.orders || 0}</strong><span>Pedidos realizados</span></article><article><strong>{data?.summary?.in_progress || 0}</strong><span>Pedidos en curso</span></article><article><strong>{data?.summary?.shipments || 0}</strong><span>Entregas activas</span></article><article><strong>{data?.summary?.pending_invoices || 0}</strong><span>Facturas pendientes</span></article></div>
     <div className="client-portal-columns">
-      <article className="client-portal-panel"><div className="client-portal-panel-head"><div><b>Mis pedidos</b><small>Estado, contenido, preparación y entrega</small></div><button type="button" onClick={onNewOrder}>Repetir o crear</button></div>{orders.length ? <div className="client-portal-order-list">{orders.slice(0, 8).map((order: any) => { const shipment = orderShipment(order.id); const currentStatus = shipment?.status || order.status || "Pendiente"; return <details className="client-portal-order-row client-portal-order-details" key={order.id}><summary><div><b>{order.code}</b><small>{date(order.created_at)} · {order.lines?.length || 0} referencias · {money(order.amount)}</small></div><span className={`client-portal-status status-${statusClass(currentStatus)}`}>{currentStatus}</span></summary><div className="client-portal-order-timeline"><span><b>Pedido</b>{date(order.created_at)}</span><span><b>Preparación</b>{date(order.preparation_date)}</span><span><b>Envío</b>{date(order.shipping_date || shipment?.expected_delivery_at)}</span><span><b>Dirección</b>{order.address || shipment?.address || "No indicada"}</span></div><div className="client-portal-order-lines">{Array.isArray(order.lines) && order.lines.length ? order.lines.map((line: any, index: number) => <div key={`${line.product_id}-${index}`}><span>{line.quantity_requested || line.quantity || 0} {line.quantity_unit || "uds."}</span><b>{line.product_name || `Producto #${line.product_id}`}</b><small>{money(Number(line.amount || Number(line.quantity || 0) * Number(line.unit_price || 0)))}</small></div>) : <p>Sin líneas de producto asociadas.</p>}</div><div className="client-portal-order-links">{shipment?.public_tracking_token && <a href={`/seguimiento/${shipment.public_tracking_token}`}>Seguimiento de entrega</a>}<button type="button" onClick={(event) => { event.preventDefault(); onRepeat(order); }}>Repetir pedido</button></div></details>; })}</div> : <p className="client-portal-empty">Todavía no tienes pedidos. Crea el primero desde aquí.</p>}</article>
+      <article className="client-portal-panel"><div className="client-portal-panel-head"><div><b>Mis pedidos</b><small>Estado, contenido, preparación y entrega</small></div><div className="client-portal-panel-actions"><button type="button" onClick={() => void onRefresh()}>Actualizar</button><button type="button" onClick={onNewOrder}>Repetir o crear</button></div></div><div className="client-portal-order-filters"><input value={orderSearch} onChange={(event) => setOrderSearch(event.target.value)} placeholder="Buscar pedido o dirección…" aria-label="Buscar pedidos" /><select value={orderFilter} onChange={(event) => setOrderFilter(event.target.value)} aria-label="Filtrar pedidos"><option>Todos</option><option>Pendiente</option><option>Preparando</option><option>Enviado</option><option>En reparto</option><option>Entregado</option><option>Cancelado</option></select></div>{filteredOrders.length ? <div className="client-portal-order-list">{filteredOrders.slice(0, 20).map((order: any) => { const shipment = orderShipment(order.id); const currentStatus = shipment?.status || order.status || "Pendiente"; return <details className="client-portal-order-row client-portal-order-details" key={order.id}><summary><div><b>{order.code}</b><small>{date(order.created_at)} · {order.lines?.length || 0} referencias · {money(order.amount)}</small></div><span className={`client-portal-status status-${statusClass(currentStatus)}`}>{currentStatus}</span></summary><div className="client-portal-order-timeline"><span><b>Pedido</b>{date(order.created_at)}</span><span><b>Preparación</b>{date(order.preparation_date)}</span><span><b>Envío</b>{date(order.shipping_date || shipment?.expected_delivery_at)}</span><span><b>Dirección</b>{order.address || shipment?.address || "No indicada"}</span></div><div className="client-portal-order-lines">{Array.isArray(order.lines) && order.lines.length ? order.lines.map((line: any, index: number) => <div key={`${line.product_id}-${index}`}><span>{line.quantity_requested || line.quantity || 0} {line.quantity_unit || "uds."}</span><b>{line.product_name || `Producto #${line.product_id}`}</b><small>{money(Number(line.amount || Number(line.quantity || 0) * Number(line.unit_price || 0)))}</small></div>) : <p>Sin líneas de producto asociadas.</p>}</div><div className="client-portal-order-links">{shipment?.public_tracking_token && <a href={`/seguimiento/${shipment.public_tracking_token}`}>Seguimiento de entrega</a>}<button type="button" onClick={(event) => { event.preventDefault(); onRepeat(order); }}>Repetir pedido</button></div></details>; })}</div> : <p className="client-portal-empty">{orders.length ? "No hay pedidos que coincidan con el filtro." : "Todavía no tienes pedidos. Crea el primero desde aquí."}</p>}</article>
       <article className="client-portal-panel"><div className="client-portal-panel-head"><div><b>Mis documentos</b><small>Facturas y albaranes disponibles</small></div></div><div className="client-portal-document-list">{[...invoices.map((item: any) => ({ ...item, kind: "Factura" })), ...deliveries.map((item: any) => ({ ...item, kind: "Albarán" }))].slice(0, 10).map((item: any) => <div className="client-portal-document-row" key={`${item.kind}-${item.id}`}><div><b>{item.code}</b><small>{item.kind}{item.kind === "Albarán" && item.delivery_signature_status ? ` · ${item.delivery_signature_status}` : ""} · {date(item.issue_date || item.created_at)}{item.amount !== undefined ? ` · ${money(item.amount)}` : ""}</small></div>{item.share_url || item.pdf_url ? <a href={item.share_url || item.pdf_url} target="_blank" rel="noreferrer">{item.kind === "Albarán" && item.signed ? "Albarán firmado" : "Ver PDF"}</a> : <span className="client-portal-document-pending">{item.kind === "Albarán" && !item.signed ? "Pendiente de firma" : "Pendiente"}</span>}</div>)}{!invoices.length && !deliveries.length && <p className="client-portal-empty">Aún no hay documentos asociados.</p>}</div></article>
     </div>
     <div className="client-portal-columns client-portal-secondary-columns"><article className="client-portal-panel"><div className="client-portal-panel-head"><div><b>Pagos realizados</b><small>Importes recibidos asociados a tus facturas</small></div></div><div className="client-portal-payment-list">{payments.length ? payments.map((payment: any) => { const invoice = invoiceForPayment(payment.invoice_id); return <div className="client-portal-payment-row" key={payment.id}><div><b>{money(payment.amount)}</b><small>{date(payment.payment_date)} · {payment.method || "Método no indicado"}</small></div><span>{invoice?.code || "Factura"}</span></div>; }) : <p className="client-portal-empty">Todavía no hay pagos registrados.</p>}</div></article><article className="client-portal-panel client-portal-balance-panel"><div className="client-portal-panel-head"><div><b>Estado de facturación</b><small>Pagado y pendiente por factura</small></div></div><div className="client-portal-invoice-balance-list">{invoices.length ? invoices.slice(0, 8).map((invoice: any) => <div key={invoice.id}><span><b>{invoice.code}</b><small>{invoice.status || "Pendiente"}</small></span><strong className={Number(invoice.outstanding_amount || 0) > 0 ? "pending" : "paid"}>{Number(invoice.outstanding_amount || 0) > 0 ? `Pendiente ${money(invoice.outstanding_amount)}` : "Pagada"}</strong></div>) : <p className="client-portal-empty">No hay facturas asociadas.</p>}</div></article></div>
@@ -10532,6 +10558,24 @@ export function ClientOrderPortal({
     try { localStorage.removeItem("excluvas.portal.session"); } catch {}
     window.location.href = "/web#login";
   }
+  async function changePortalPassword(form: { current_password: string; new_password: string }) {
+    if (!portalSession?.token) throw new Error("La sesión ha caducado. Vuelve a iniciar sesión.");
+    const response = await fetch("/api/public_portal/password", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${portalSession.token}` }, body: JSON.stringify(form) });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || "No se ha podido actualizar la contraseña.");
+  }
+  async function refreshPortal() {
+    if (!portalSession?.token) return;
+    setPortalLoading(true);
+    setPortalError("");
+    try {
+      const response = await fetch("/api/public_portal", { headers: { Authorization: `Bearer ${portalSession.token}` }, cache: "no-store" });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "No se ha podido actualizar el área de cliente.");
+      setPortalData(body);
+    } catch (caught) { setPortalError(caught instanceof Error ? caught.message : "No se ha podido actualizar el área de cliente."); }
+    finally { setPortalLoading(false); }
+  }
   return (
     <div className={standalone ? "web-order-page" : "web-order-overlay"}>
       <div className={standalone ? "web-order-window web-order-page-window" : "web-order-window"} role={standalone ? undefined : "dialog"} aria-modal={standalone ? undefined : true} aria-label="Portal web de pedidos">
@@ -10542,7 +10586,7 @@ export function ClientOrderPortal({
         </header>
         {standalone && portalSession === undefined ? <div className="web-order-access-required"><div className="web-order-access-icon">E</div><p className="eyebrow">ACCESO PROFESIONAL</p><h2>Comprueba tu cuenta para continuar.</h2><p>Inicia sesión desde la web para consultar tus pedidos y preparar uno nuevo.</p><a className="button primary" href="/web#login">Iniciar sesión</a></div> : standalone && portalSession?.kind !== "cliente" ? <div className="web-order-access-required"><div className="web-order-access-icon">E</div><p className="eyebrow">PORTAL DE CLIENTES</p><h2>Este portal es para hacer pedidos.</h2><p>La cuenta de proveedor está activa, pero su área profesional todavía está en preparación.</p><a className="button secondary" href="/web">Volver a la web</a></div> : !saved ? (
           <>
-            {standalone && portalData && <ClientPortalDashboard data={portalData} onNewOrder={() => setPortalTab("pedir")} onRepeat={repeatOrder} onLogout={logoutPortal} />}
+            {standalone && portalData && <ClientPortalDashboard data={portalData} onNewOrder={() => setPortalTab("pedir")} onRepeat={repeatOrder} onLogout={logoutPortal} onChangePassword={changePortalPassword} onRefresh={refreshPortal} />}
             {standalone && portalLoading && <div className="client-portal-loading" role="status"><span className="loading-spinner" />Cargando tu área de cliente…</div>}
             {standalone && portalError && <div className="client-portal-error" role="alert">{portalError} <a href="/web#login">Volver a iniciar sesión</a></div>}
             {standalone && portalData && <div className="client-portal-tabs" role="tablist" aria-label="Área de cliente"><button type="button" className={portalTab === "actividad" ? "active" : ""} onClick={() => setPortalTab("actividad")}>Mi actividad</button><button type="button" className={portalTab === "pedir" ? "active" : ""} onClick={() => setPortalTab("pedir")}>Nuevo pedido</button></div>}

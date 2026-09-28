@@ -1,9 +1,10 @@
 import http from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { gunzipSync, gzipSync } from "node:zlib";
+import { deflateSync, gunzipSync, gzipSync } from "node:zlib";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { PNG } from "pngjs";
 import { createRemoteDatabaseSync } from "../remote-db-sync.mjs";
 const APP_VERSION = (() => {
   try {
@@ -403,22 +404,42 @@ function createCommercialDocumentPdf(document, type) {
   const pages = [];
   for (let offset = 0; offset < wrapped.length; offset += 38) pages.push(wrapped.slice(offset, offset + 38));
   if (!pages.length) pages.push([`${config.label} sin contenido`]);
+  let signatureImage = null;
+  if (type === "delivery" && document.delivery_signature_status === "Firmado" && String(document.delivery_signature_data || "").startsWith("data:image/png;base64,")) {
+    try {
+      const png = PNG.sync.read(Buffer.from(String(document.delivery_signature_data).split(",", 2)[1], "base64"));
+      const rgb = Buffer.alloc(png.width * png.height * 3);
+      for (let source = 0, target = 0; source < png.data.length; source += 4, target += 3) {
+        const alpha = png.data[source + 3] / 255;
+        rgb[target] = Math.round(png.data[source] * alpha + 255 * (1 - alpha));
+        rgb[target + 1] = Math.round(png.data[source + 1] * alpha + 255 * (1 - alpha));
+        rgb[target + 2] = Math.round(png.data[source + 2] * alpha + 255 * (1 - alpha));
+      }
+      signatureImage = { width: png.width, height: png.height, compressed: deflateSync(rgb) };
+    } catch {}
+  }
   const objects = [];
   const addObject = (value) => { objects.push(value); return objects.length; };
   const catalogId = addObject("");
   const pagesId = addObject("");
   const fontId = addObject("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+  const signatureImageId = signatureImage
+    ? addObject(`<< /Type /XObject /Subtype /Image /Width ${signatureImage.width} /Height ${signatureImage.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length ${signatureImage.compressed.length} >>\nstream\n${signatureImage.compressed.toString("binary")}\nendstream`)
+    : null;
   const pageIds = [];
-  for (const pageLines of pages) {
+  for (let pageIndex = 0; pageIndex < pages.length; pageIndex += 1) {
+    const pageLines = pages[pageIndex];
     const commands = ["BT", "/F1 10 Tf", "50 790 Td"];
     pageLines.forEach((line, index) => {
       if (index) commands.push("0 -18 Td");
       commands.push(`${pdfLiteral(line)} Tj`);
     });
     commands.push("ET");
+    if (signatureImageId && pageIndex === pages.length - 1) commands.push("q", "280 0 0 105 50 70 cm", "/Im1 Do", "Q");
     const contentId = addObject(`<< /Length ${Buffer.byteLength(commands.join("\n"), "ascii")} >>\nstream\n${commands.join("\n")}\nendstream`);
     const pageId = addObject("");
-    objects[pageId - 1] = `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 ${fontId} 0 R >> >> /Contents ${contentId} 0 R >>`;
+    const xObject = signatureImageId ? ` /XObject << /Im1 ${signatureImageId} 0 R >>` : "";
+    objects[pageId - 1] = `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 ${fontId} 0 R >>${xObject} >> /Contents ${contentId} 0 R >>`;
     pageIds.push(pageId);
   }
   objects[catalogId - 1] = `<< /Type /Catalog /Pages ${pagesId} 0 R >>`;
@@ -1422,6 +1443,26 @@ async function sendInvoiceEmail(invoice, pdf, shareUrl, recipient) {
   if (!response.ok) throw new Error(result?.message || result?.error || "El proveedor de correo rechazó el envío");
   return { mode: "resend", provider_id: result.id || null, to, subject, share_url: shareUrl };
 }
+async function sendPortalOrderEmail(order, shareUrl, recipient) {
+  const apiKey = String(process.env.RESEND_API_KEY || "").trim();
+  const from = String(process.env.RESEND_FROM_EMAIL || "").trim();
+  const to = String(recipient || "").trim();
+  if (!apiKey || !from || !to || !to.includes("@")) return { mode: "disabled", to: to || null, share_url: shareUrl };
+  const subject = `Pedido ${order.code || `#${order.id}`} recibido · Exclusivas Inteligentes`;
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from,
+      to: [to],
+      subject,
+      html: `<p>Hemos recibido tu pedido <strong>${pdfSafeText(order.code || `#${order.id}`)}</strong>.</p><p>Queda pendiente de revisión y preparación por nuestro equipo.</p>${shareUrl ? `<p><a href="${shareUrl}">Consultar el pedido</a></p>` : ""}<p>Un saludo.</p>`,
+    }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result?.message || result?.error || "El proveedor de correo rechazó el aviso del pedido");
+  return { mode: "resend", provider_id: result.id || null, to, share_url: shareUrl };
+}
 const readCache = new Map();
 const READ_CACHE_MS = 60000;
 const REMOTE_READ_CACHE_MS = 5000;
@@ -1849,6 +1890,25 @@ function verifyPortalSessionToken(token) {
     if (!parsed?.id || !["cliente", "proveedor"].includes(String(parsed.kind)) || Number(parsed.exp) < Date.now()) return null;
     return { kind: String(parsed.kind), id: Number(parsed.id) };
   } catch { return null; }
+}
+const portalLoginAttempts = new Map();
+function portalLoginKey(req, email) {
+  const forwarded = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  return `${forwarded || req.socket?.remoteAddress || "unknown"}:${email}`;
+}
+function portalLoginBlocked(key) {
+  const now = Date.now();
+  const current = portalLoginAttempts.get(key);
+  if (!current || now - current.startedAt > 15 * 60 * 1000) {
+    portalLoginAttempts.set(key, { startedAt: now, failures: 0 });
+    return false;
+  }
+  return current.failures >= 5;
+}
+function recordPortalLoginFailure(key) {
+  const current = portalLoginAttempts.get(key) || { startedAt: Date.now(), failures: 0 };
+  current.failures += 1;
+  portalLoginAttempts.set(key, current);
 }
 const read = (req) =>
   new Promise((ok) => {
@@ -2460,13 +2520,34 @@ export async function crmApiHandler(req, res) {
         const email = String(d.email || "").trim().toLowerCase();
         const password = String(d.password || "");
         if (!email || !password) return send(res, 400, { error: "El email y la contraseña son obligatorios" });
+        const loginKey = portalLoginKey(req, email);
+        if (portalLoginBlocked(loginKey)) return send(res, 429, { error: "Demasiados intentos. Espera unos minutos antes de volver a intentarlo." });
         const table = kind === "proveedor" ? "suppliers" : "clients";
         const account = db.prepare(`SELECT id,name,email,portal_password_hash,portal_access_enabled,active FROM ${table} WHERE LOWER(TRIM(COALESCE(email,'')))=? AND CAST(COALESCE(active,1) AS INTEGER)=1 AND CAST(COALESCE(deleted,0) AS INTEGER)=0 LIMIT 1`).get(email);
         const passwordHash = createHash("sha256").update(password).digest("hex");
         if (!account?.id || !account.portal_password_hash || account.portal_password_hash !== passwordHash || Number(account.portal_access_enabled || 0) !== 1) {
+          recordPortalLoginFailure(loginKey);
           return send(res, 401, { error: "No encontramos una cuenta activa con esos datos. Si acabas de registrarte, espera a que validemos tu solicitud." });
         }
+        portalLoginAttempts.delete(loginKey);
         return send(res, 200, { ok: true, portal: { kind, id: Number(account.id), name: account.name, email: account.email, token: createPortalSessionToken(kind, account.id) } });
+      }
+      if (p[1] === "public_portal" && p[2] === "password" && req.method === "POST") {
+        const authorization = String(req.headers.authorization || "");
+        const session = verifyPortalSessionToken(authorization.replace(/^Bearer\s+/i, ""));
+        if (!session || !["cliente", "proveedor"].includes(session.kind)) return send(res, 401, { error: "La sesión del portal ha caducado. Inicia sesión de nuevo." });
+        const body = await read(req);
+        const currentPassword = String(body.current_password || "");
+        const newPassword = String(body.new_password || "");
+        if (newPassword.length < 8) return send(res, 400, { error: "La nueva contraseña debe tener al menos 8 caracteres." });
+        if (!currentPassword || currentPassword === newPassword) return send(res, 400, { error: "Indica la contraseña actual y una contraseña nueva diferente." });
+        const table = session.kind === "proveedor" ? "suppliers" : "clients";
+        const account = db.prepare(`SELECT id,portal_password_hash FROM ${table} WHERE id=? AND CAST(COALESCE(active,1) AS INTEGER)=1 AND CAST(COALESCE(deleted,0) AS INTEGER)=0`).get(session.id);
+        const currentHash = createHash("sha256").update(currentPassword).digest("hex");
+        if (!account?.id || account.portal_password_hash !== currentHash) return send(res, 401, { error: "La contraseña actual no es correcta." });
+        const nextHash = createHash("sha256").update(newPassword).digest("hex");
+        db.prepare(`UPDATE ${table} SET portal_password_hash=?,updated_at=? WHERE id=?`).run(nextHash, new Date().toISOString(), session.id);
+        return send(res, 200, { ok: true, message: "Contraseña actualizada correctamente." });
       }
       if (p[1] === "public_portal" && req.method === "GET") {
         const authorization = String(req.headers.authorization || "");
@@ -4084,6 +4165,16 @@ export async function crmApiHandler(req, res) {
           } catch (error) {
             createdRecord.pdf_status = "Pendiente · PDF no generado";
             createdRecord.pdf_error = error?.message || "No se pudo generar el PDF";
+          }
+        }
+        if (t === "orders") {
+          try {
+            const orderForNotification = db.prepare("SELECT o.*,c.email client_email FROM orders o LEFT JOIN clients c ON c.id=o.client_id WHERE o.id=?").get(Number(r.lastInsertRowid));
+            const notification = await sendPortalOrderEmail(orderForNotification, createdRecord.share_url || null, orderForNotification?.client_email);
+            createdRecord.client_notification = notification.mode === "resend" ? "Enviada" : "No configurada";
+          } catch (error) {
+            createdRecord.client_notification = "Pendiente";
+            createdRecord.client_notification_error = error?.message || "No se pudo enviar el aviso";
           }
         }
         return send(res, 201, createdRecord);
