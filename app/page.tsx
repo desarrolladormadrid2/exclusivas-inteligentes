@@ -1506,7 +1506,7 @@ function VehicleOperationsPanel({ user, routeDate, vehicles, onReload }: { user:
     } catch (caught: any) { setError(caught?.message || "No se pudo revisar el cierre."); } finally { setSaving(false); }
   }
   return <section className="vehicle-operations panel">
-    <div className="panel-head"><div><h3>Control de flota</h3><p className="muted">Kilómetros, repostajes y mantenimiento de cada camión.</p></div><div className="vehicle-operations-actions"><button type="button" className="button secondary" onClick={() => { setVehicleFormOpen((current) => !current); setFuelFormOpen(false); setMaintenanceFormOpen(false); }}>{vehicleFormOpen ? "Cerrar" : "Añadir camión"}</button><button type="button" className="button secondary" disabled={!vehicles.length} onClick={() => { setFuelFormOpen((current) => !current); setVehicleFormOpen(false); setMaintenanceFormOpen(false); }}>{fuelFormOpen ? "Cerrar" : "Registrar gasoil"}</button><button type="button" className="button secondary" disabled={!vehicles.length} onClick={() => { setMaintenanceFormOpen((current) => !current); setVehicleFormOpen(false); setFuelFormOpen(false); }}>{maintenanceFormOpen ? "Cerrar" : "Registrar mantenimiento"}</button></div></div>
+    <div className="panel-head"><div><h3>Control de flota</h3><p className="muted">Kilómetros, repostajes y mantenimiento de cada camión.</p></div><div className="vehicle-operations-actions"><button type="button" className="button secondary" onClick={() => { setVehicleFormOpen((current) => !current); setFuelFormOpen(false); setMaintenanceFormOpen(false); }}>{vehicleFormOpen ? "Cerrar" : "Añadir camión"}</button><button type="button" className="button secondary" disabled={!vehicles.length} onClick={() => { setMaintenanceFormOpen((current) => !current); setVehicleFormOpen(false); setFuelFormOpen(false); }}>{maintenanceFormOpen ? "Cerrar" : "Registrar mantenimiento"}</button></div></div>
     {(error || message) && <p className={error ? "error-message" : "success-message"} role={error ? "alert" : "status"}>{error || message}</p>}
     <div className="vehicle-daily-closures">
       <div className="vehicle-subhead"><div><b>Cierres diarios de reparto</b><small>Entregas, incidencias, cobros, kilómetros y gasoil del {formatSpanishDateValue(routeDate, false)}.</small></div><span>{closures.length} cierre{closures.length === 1 ? "" : "s"}</span></div>
@@ -1520,6 +1520,49 @@ function VehicleOperationsPanel({ user, routeDate, vehicles, onReload }: { user:
     {refuels.length > 0 && <div className="vehicle-history"><div className="vehicle-subhead"><b>Últimos repostajes</b><small>El importe queda contabilizado por camión.</small></div>{refuels.slice(0, 5).map((fuel: any) => <span key={fuel.id}><b>{fuel.vehicle_plate || fuel.vehicle_name}</b> · {formatSpanishDateValue(fuel.fuel_date, false)} · {Number(fuel.amount || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}{fuel.ticket_reference ? ` · Ticket ${fuel.ticket_reference}` : ""}</span>)}</div>}
     {maintenance.length > 0 && <div className="vehicle-history"><div className="vehicle-subhead"><b>Histórico de mantenimiento</b><small>Las altas recalculan automáticamente el siguiente límite.</small></div>{maintenance.slice(0, 5).map((item: any) => <span key={item.id}><b>{item.vehicle_plate || item.vehicle_name}</b> · {formatSpanishDateValue(item.maintenance_date, false)} · {item.maintenance_type} · {Number(item.maintenance_km || 0).toLocaleString("es-ES")} km</span>)}</div>}
   </section>;
+}
+
+function VehicleFuelQuickAction({ user, routeDate, vehicle, onSaved }: { user: any; routeDate: string; vehicle: any; onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [draft, setDraft] = useState<any>({ fuel_date: routeDate, station: "", liters: "", amount: "", ticket_reference: "", odometer_km: vehicle?.odometer_km || "", notes: "" });
+  useEffect(() => {
+    setDraft((current: any) => ({ ...current, fuel_date: routeDate, odometer_km: vehicle?.odometer_km || "" }));
+  }, [routeDate, vehicle?.id, vehicle?.odometer_km]);
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch("/api/vehicle_refuels", { method: "POST", headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Usuario local" }, body: JSON.stringify({ ...draft, vehicle_id: Number(vehicle.id) }) });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "No se pudo registrar el repostaje");
+      setOpen(false);
+      setMessage("Gasoil registrado.");
+      onSaved();
+    } catch (caught: any) {
+      setError(caught?.message || "No se pudo registrar el repostaje.");
+    } finally {
+      setSaving(false);
+    }
+  }
+  return <div className="vehicle-load-fuel-action">
+    <button type="button" className="button secondary" onClick={() => { setOpen((current) => !current); setError(""); }}>{open ? "Cerrar gasoil" : "Registrar gasoil"}</button>
+    {message && <small className="vehicle-load-fuel-message" role="status">{message}</small>}
+    {error && <small className="vehicle-load-fuel-error" role="alert">{error}</small>}
+    {open && <form className="vehicle-form vehicle-load-fuel-form" onSubmit={save}>
+      <label>Fecha<input type="date" value={draft.fuel_date} onChange={(event) => setDraft({ ...draft, fuel_date: event.target.value })} /></label>
+      <label>Importe (€)<input type="number" min="0" step="0.01" required={!draft.liters} value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} /></label>
+      <label>Litros<input type="number" min="0" step="0.01" value={draft.liters} onChange={(event) => setDraft({ ...draft, liters: event.target.value })} /></label>
+      <label>Km al repostar<input type="number" min="0" value={draft.odometer_km} onChange={(event) => setDraft({ ...draft, odometer_km: event.target.value })} /></label>
+      <label>Gasolinera<input value={draft.station} onChange={(event) => setDraft({ ...draft, station: event.target.value })} /></label>
+      <label>N.º de ticket<input value={draft.ticket_reference} onChange={(event) => setDraft({ ...draft, ticket_reference: event.target.value })} /></label>
+      <div className="vehicle-form-actions"><button type="submit" className="button primary" disabled={saving}>{saving ? "Guardando…" : "Guardar repostaje"}</button></div>
+    </form>}
+  </div>;
 }
 
 function VehicleLoadManager({ user, initialDate, refreshSignal = 0 }: { user: any; initialDate?: string; refreshSignal?: number }) {
@@ -2114,7 +2157,7 @@ function VehicleLoadManager({ user, initialDate, refreshSignal = 0 }: { user: an
             const lateStops = Number(roadStats?.time_window_warnings?.length || 0);
             const collapsed = Boolean(collapsedVehicles[key]);
             return <section className={`vehicle-load-column${collapsed ? " is-collapsed" : ""}`} key={key} onDragOver={(event) => allowShipmentDrop(event)} onDrop={(event) => { event.preventDefault(); moveShipment(readDraggedShipmentId(event), key); }}>
-              <header className="vehicle-load-column-head"><div className="vehicle-load-column-heading"><div><h3>{column.plate || column.name || `Camión ${key}`}</h3><span>{columnItems.length} pedidos</span><small className={overDailyLimit || lateStops ? "is-over-limit" : ""}>{roadStats ? `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km carretera · ${formatLoadDuration(roadStats.driving_minutes)} conducción + ${roadStats.waiting_minutes || 0} min espera + ${roadStats.service_minutes} min entregas = ${formatLoadDuration(displayedMinutes)}` : roadEstimateLoading ? "Calculando tiempo real de carretera…" : `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km aprox. · ${formatLoadDuration(planStats.drivingMinutes)} conducción + ${planStats.waitingMinutes} min espera + ${columnItems.length * DEFAULT_DELIVERY_SERVICE_MINUTES} min entregas = ${formatLoadDuration(displayedMinutes)}`}{overDailyLimit ? " · supera 10 h" : ""}{lateStops ? ` · ${lateStops} fuera de horario` : ""}</small></div><button type="button" className="vehicle-load-column-toggle" aria-expanded={!collapsed} aria-controls={`vehicle-load-list-${key}`} onClick={() => toggleVehicleCollapsed(key)}>{collapsed ? "Mostrar pedidos" : "Colapsar camión"}</button></div>{!collapsed && <div className="vehicle-load-column-tools"><button type="button" className="button secondary vehicle-load-optimize" disabled={optimizingVehicle === key || columnItems.length < 2} onClick={() => void optimizeVehicle(key)}>{optimizingVehicle === key ? "Optimizando…" : "Optimizar orden"}</button><label>Conductor<input value={driverByVehicle[key] || column.driver || user?.username || ""} onChange={(event) => { const value = event.target.value; setDriverByVehicle((current) => { const next = { ...current, [key]: value }; scheduleBoardDraft(boardAssignments, next); return next; }); }} placeholder="Nombre" /></label></div>}</header>
+              <header className="vehicle-load-column-head"><div className="vehicle-load-column-heading"><div><h3>{column.plate || column.name || `Camión ${key}`}</h3><span>{columnItems.length} pedidos</span><small className={overDailyLimit || lateStops ? "is-over-limit" : ""}>{roadStats ? `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km carretera · ${formatLoadDuration(roadStats.driving_minutes)} conducción + ${roadStats.waiting_minutes || 0} min espera + ${roadStats.service_minutes} min entregas = ${formatLoadDuration(displayedMinutes)}` : roadEstimateLoading ? "Calculando tiempo real de carretera…" : `${Number(displayedDistance).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km aprox. · ${formatLoadDuration(planStats.drivingMinutes)} conducción + ${planStats.waitingMinutes} min espera + ${columnItems.length * DEFAULT_DELIVERY_SERVICE_MINUTES} min entregas = ${formatLoadDuration(displayedMinutes)}`}{overDailyLimit ? " · supera 10 h" : ""}{lateStops ? ` · ${lateStops} fuera de horario` : ""}</small></div><button type="button" className="vehicle-load-column-toggle" aria-expanded={!collapsed} aria-controls={`vehicle-load-list-${key}`} onClick={() => toggleVehicleCollapsed(key)}>{collapsed ? "Mostrar pedidos" : "Colapsar camión"}</button></div>{!collapsed && <div className="vehicle-load-column-tools"><button type="button" className="button secondary vehicle-load-optimize" disabled={optimizingVehicle === key || columnItems.length < 2} onClick={() => void optimizeVehicle(key)}>{optimizingVehicle === key ? "Optimizando…" : "Optimizar orden"}</button><label>Conductor<input value={driverByVehicle[key] || column.driver || user?.username || ""} onChange={(event) => { const value = event.target.value; setDriverByVehicle((current) => { const next = { ...current, [key]: value }; scheduleBoardDraft(boardAssignments, next); return next; }); }} placeholder="Nombre" /></label>{Number.isInteger(Number(column.id)) && <VehicleFuelQuickAction user={user} routeDate={routeDate} vehicle={column} onSaved={() => void load(true)} />}</div>}</header>
               {!collapsed && <div id={`vehicle-load-list-${key}`} className="vehicle-load-column-list">{columnItems.length ? [renderDropSlot(key, `${key}-start`, Number(columnItems[0].id)), ...columnItems.flatMap((item: any, index: number) => [renderBoardCard(item, key, index, columnItems.length), renderDropSlot(key, `${key}-${item.id}-after`, Number(columnItems[index + 1]?.id) || undefined)])] : <p className="vehicle-load-column-empty">Suelta aquí los pedidos</p>}</div>}
             </section>;
           })}
