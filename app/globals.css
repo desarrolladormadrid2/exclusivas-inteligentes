@@ -6051,7 +6051,7 @@ body:has(.warehouse-tablet-app) .settings-panel {
 .vehicle-load-board-card:active{cursor:grabbing}
 .vehicle-load-board-card:hover{border-color:#bd2027;background:#fffdfd}
 .vehicle-load-board-card-top{display:flex;grid-area:top;align-items:center;justify-content:space-between;gap:8px}
-.vehicle-load-board-card-top b{color:#bd2027;font-size:10px}
+.vehicle-load-board-card-top b{color:#bd2027;font-size:10px}.vehicle-load-board-card-sequence{display:grid;place-items:center;flex:0 0 21px;width:21px;height:21px;border-radius:50%;background:#bd2027;color:#fff;font-size:9px;font-weight:800}
 .vehicle-load-board-card-top strong{color:#26343d;font-size:10px}
 .vehicle-load-board-card>strong{grid-area:client;overflow:hidden;color:#26343d;font-size:12px;text-overflow:ellipsis;white-space:nowrap}
 .vehicle-load-board-card-meta{display:flex;grid-area:meta;align-items:center;flex-wrap:wrap;gap:2px 8px;min-width:0}
