@@ -1320,8 +1320,9 @@ function VehicleLoadLeafletMap({ points, origin, selectedStopId, onSelect }: { p
           const position: [number, number] = duplicateTotal > 1
             ? [latitude + Math.sin((duplicateIndex * Math.PI * 2) / duplicateTotal) * 0.00045, longitude + Math.cos((duplicateIndex * Math.PI * 2) / duplicateTotal) * 0.00045 / Math.max(0.7, Math.cos(latitude * Math.PI / 180))]
             : [latitude, longitude];
-          const marker = L.marker(position, { icon: markerIcon(L, String(index + 1), false, false, Boolean(point.coordinates_estimated)) }).addTo(map);
-          marker.bindTooltip(`${index + 1}. ${point.code || point.shipment_code || point.order_code || `Pedido #${point.id}`} · ${point.client_name || "Cliente sin nombre"}${point.coordinates_estimated ? " · Ubicación aproximada" : ""}`);
+          const sequence = Number(point.load_position || index + 1);
+          const marker = L.marker(position, { icon: markerIcon(L, String(sequence), false, false, Boolean(point.coordinates_estimated)) }).addTo(map);
+          marker.bindTooltip(`${sequence}. ${point.code || point.shipment_code || point.order_code || `Pedido #${point.id}`} · ${point.client_name || "Cliente sin nombre"}${point.coordinates_estimated ? " · Ubicación aproximada" : ""}`);
           marker.on("click", () => onSelectRef.current(Number(point.id)));
           nextMarkers[id] = marker;
           nextPositions[id] = position;
@@ -1347,7 +1348,7 @@ function VehicleLoadLeafletMap({ points, origin, selectedStopId, onSelect }: { p
     if (!L) return;
     Object.entries(markersRef.current).forEach(([id, marker]) => {
       const point = points.find((item) => String(item.id) === id);
-      marker.setIcon(markerIcon(L, String(Math.max(1, points.indexOf(point) + 1)), Number(selectedStopId) === Number(id), false, Boolean(point?.coordinates_estimated)));
+      marker.setIcon(markerIcon(L, String(Math.max(1, Number(point?.load_position || points.indexOf(point) + 1))), Number(selectedStopId) === Number(id), false, Boolean(point?.coordinates_estimated)));
     });
     const position = selectedStopId === null ? null : positionsRef.current[String(selectedStopId)];
     if (position && mapRef.current) mapRef.current.flyTo(position, Math.max(mapRef.current.getZoom(), 14), { duration: 0.35 });
@@ -2063,7 +2064,7 @@ function VehicleLoadManager({ user, initialDate, refreshSignal = 0 }: { user: an
     const reception = item.opening_time && item.closing_time ? `Recepción ${String(item.opening_time).slice(0, 5)}–${String(item.closing_time).slice(0, 5)}` : "Horario pendiente";
     const statusLabel = preparationReady ? (item.status === "Preparado con incidencia" ? "Preparado con incidencia" : "Preparado") : item.status === "Preparando" ? "En preparación" : "Pendiente de preparar";
     const canReorder = targetKey !== "unassigned" && orderIndex >= 0;
-    const sequence = canReorder ? orderIndex + 1 : Number(item.load_position || 0);
+    const sequence = Number(item.load_position || (canReorder ? orderIndex + 1 : 0));
     return <article className="vehicle-load-board-card" key={item.id} draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", String(item.id)); setDraggedShipmentId(Number(item.id)); }} onDragEnd={() => { setDraggedShipmentId(null); setDragOverSlot(""); }} onDragOver={(event) => allowShipmentDrop(event, canReorder ? `${targetKey}-${item.id}-before` : undefined)} onDrop={(event) => { event.preventDefault(); moveShipment(readDraggedShipmentId(event), targetKey, Number(item.id)); }}>
       <div className="vehicle-load-board-card-top">{sequence > 0 && <span className="vehicle-load-board-card-sequence" aria-label={`Parada ${sequence}`}>{sequence}</span>}<b>{item.code}</b><strong>{item.distance_km === null ? "—" : `${String(item.distance_km).replace(".", ",")} km`}</strong></div>
       <strong>{item.client_name}</strong>
