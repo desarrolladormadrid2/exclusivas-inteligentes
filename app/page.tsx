@@ -2097,7 +2097,7 @@ function VehicleLoadManager({ user, initialDate, refreshSignal = 0 }: { user: an
       <section className="vehicle-load-unassigned panel">
         <div className="panel-head"><div><h3>Pedidos preparados</h3><p className="muted">Solo aparecen pedidos preparados y enviados a carga. Ordenados del más lejano al más cercano. Se muestra la ventana de recepción; arrastra los no asignados a un camión. Los camiones quedan visibles a la derecha.</p></div><strong>{unassigned.length} sin asignar</strong></div>
         <div className="vehicle-load-dropzone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveShipment(Number(event.dataTransfer.getData("text/plain")) || draggedShipmentId || 0, "unassigned"); }}>
-          {loading ? <div className="data-loading" role="status"><LoadingIndicator label="Cargando pedidos preparados…" /></div> : unassigned.length ? unassigned.map((item: any) => renderBoardCard(item, "unassigned")) : <p className="empty-state">Todos los pedidos están asignados a un camión.</p>}
+          {loading ? <div className="data-loading" role="status"><LoadingIndicator label="Cargando pedidos preparados…" /></div> : unassigned.length ? unassigned.map((item: any) => renderBoardCard(item, "unassigned")) : dayShipments.length ? <p className="empty-state">Todos los pedidos están asignados a un camión.</p> : <p className="empty-state">No hay pedidos preparados y cerrados para esta fecha.</p>}
         </div>
       </section>
       <aside className="vehicle-load-trucks-panel panel" aria-label="Camiones y pedidos asignados">
