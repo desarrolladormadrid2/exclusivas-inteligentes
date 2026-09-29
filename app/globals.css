@@ -6430,7 +6430,7 @@ body:has(.warehouse-tablet-app) .settings-panel {
 
   .warehouse-tablet-nav button {
     min-height: 58px;
-    align-items: flex-start;
+    align-items: center;
   }
 
   .warehouse-tablet-nav small {
@@ -6486,6 +6486,21 @@ body:has(.warehouse-tablet-app) .settings-panel {
 
   .reparto-driver-brief>header {
     display: grid;
+  }
+}
+
+@media (max-width: 900px) {
+  .warehouse-tablet-nav button,
+  .vehicle-load-toolbar > button,
+  .vehicle-load-column-toggle,
+  .vehicle-load-optimize,
+  .vehicle-load-print,
+  .vehicle-load-order-button,
+  .vehicle-load-confirm {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1.2;
   }
 }
 
