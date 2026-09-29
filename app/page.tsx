@@ -1740,6 +1740,7 @@ function VehicleLoadManager({ user, initialDate, refreshSignal = 0 }: { user: an
   };
   const dayShipments = shipments
     .filter((item) => String(item.shipping_date || item.expected_delivery_at || item.delivery_date || item.preparation_date || "").slice(0, 10) === routeDate)
+    .filter((item) => ["Preparado", "Preparado con incidencia"].includes(String(item.status || "")) && Boolean(String(item.preparation_closed_at || "").trim()))
     .sort((a, b) => {
       const distanceOrder = Number(b.distance_km ?? Number.NEGATIVE_INFINITY) - Number(a.distance_km ?? Number.NEGATIVE_INFINITY);
       const openingOrder = receptionMinutes(b.opening_time) - receptionMinutes(a.opening_time);
@@ -1747,7 +1748,8 @@ function VehicleLoadManager({ user, initialDate, refreshSignal = 0 }: { user: an
       return distanceOrder || openingOrder || closingOrder || String(a.address || "").localeCompare(String(b.address || ""), "es", { numeric: true });
     })
     .map((item, index) => ({ ...item, load_position: index + 1 }));
-  const assignedIds = new Set(Object.values(boardAssignments).flat().map(Number));
+  const loadableShipmentIds = new Set(dayShipments.map((item: any) => Number(item.id)));
+  const assignedIds = new Set(Object.values(boardAssignments).flat().map(Number).filter((id) => loadableShipmentIds.has(id)));
   const unassigned = dayShipments.filter((item) => !assignedIds.has(Number(item.id)));
   const vehicleColumnSignature = vehicleColumns.map((column: any) => String(column.id)).join(",");
   const dayShipmentSignature = dayShipments.map((item: any) => `${item.id}:${item.latitude || ""}:${item.longitude || ""}`).join("|");
@@ -1790,7 +1792,7 @@ function VehicleLoadManager({ user, initialDate, refreshSignal = 0 }: { user: an
       vehicle_id: Number.isInteger(Number(column.id)) ? Number(column.id) : null,
       vehicle: column.plate || column.name || `Camión ${column.id}`,
       driver: drivers[String(column.id)] || column.driver || user?.username || "",
-      shipment_ids: assignments[String(column.id)] || [],
+      shipment_ids: (assignments[String(column.id)] || []).filter((id) => loadableShipmentIds.has(Number(id))),
     })).filter((column) => column.shipment_ids.length);
   }
 
@@ -2082,7 +2084,7 @@ function VehicleLoadManager({ user, initialDate, refreshSignal = 0 }: { user: an
   return <section className="vehicle-load-manager">
     <div className="vehicle-load-toolbar">
       <label>Fecha de carga<input type="date" value={routeDate} onChange={(event) => setRouteDate(event.target.value)} /></label>
-      <span className="vehicle-load-toolbar-summary"><b>{dayShipments.length} pedidos del día</b><small>{dayShipments.filter((item: any) => ["Preparado", "Preparado con incidencia"].includes(String(item.status || ""))).length} listos para cargar · distancia primero, apertura de entrega después</small></span>
+      <span className="vehicle-load-toolbar-summary"><b>{dayShipments.length} pedidos preparados para cargar</b><small>Solo pedidos cerrados desde Preparación · distancia primero, apertura de entrega después</small></span>
       <button type="button" className="button secondary" onClick={() => void proposeRouteAlternatives()} disabled={alternativesLoading || loading}>{alternativesLoading ? "Calculando rutas…" : "Proponer 4 rutas"}</button>
       <button type="button" className="button secondary" onClick={() => void load(true)} disabled={loading}>{loading ? "Actualizando…" : "Actualizar"}</button>
       <button type="button" className="button secondary" onClick={() => void printLoadedInvoices()} disabled={bulkInvoicePrinting || !assignedIds.size}>{bulkInvoicePrinting ? "Preparando facturas…" : "Imprimir facturas cargadas"}</button>
@@ -2093,7 +2095,7 @@ function VehicleLoadManager({ user, initialDate, refreshSignal = 0 }: { user: an
     {message && <p className="success-message" role="status">{message}</p>}
     <div className="vehicle-load-workspace">
       <section className="vehicle-load-unassigned panel">
-        <div className="panel-head"><div><h3>Pedidos del día</h3><p className="muted">Ordenados del más lejano al más cercano. Se muestra la ventana de recepción; arrastra los no asignados a un camión. Los camiones quedan visibles a la derecha.</p></div><strong>{unassigned.length} sin asignar</strong></div>
+        <div className="panel-head"><div><h3>Pedidos preparados</h3><p className="muted">Solo aparecen pedidos preparados y enviados a carga. Ordenados del más lejano al más cercano. Se muestra la ventana de recepción; arrastra los no asignados a un camión. Los camiones quedan visibles a la derecha.</p></div><strong>{unassigned.length} sin asignar</strong></div>
         <div className="vehicle-load-dropzone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveShipment(Number(event.dataTransfer.getData("text/plain")) || draggedShipmentId || 0, "unassigned"); }}>
           {loading ? <div className="data-loading" role="status"><LoadingIndicator label="Cargando pedidos preparados…" /></div> : unassigned.length ? unassigned.map((item: any) => renderBoardCard(item, "unassigned")) : <p className="empty-state">Todos los pedidos están asignados a un camión.</p>}
         </div>
