@@ -1725,8 +1725,10 @@ function VehicleLoadManager({ user, initialDate, refreshSignal = 0 }: { user: an
     const columns = [...vehicles, ...legacyColumns];
     const unique = new Map<string, any>();
     columns.forEach((column: any) => unique.set(String(column.id), column));
-    if (!unique.size) {
-      unique.set("manual-1", { id: "manual-1", name: "Camión 1" });
+    if (!unique.has("manual-1")) {
+      if (!unique.size) unique.set("manual-1", { id: "manual-1", name: "Camión 1" });
+    }
+    if (unique.size < 2 && !unique.has("manual-2")) {
       unique.set("manual-2", { id: "manual-2", name: "Camión 2" });
     }
     return Array.from(unique.values());
