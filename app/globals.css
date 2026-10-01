@@ -6543,3 +6543,23 @@ body.reparto-modal-open {
     z-index: 2;
   }
 }
+.reparto-stop.sent {
+  border-left: 3px solid #2563a6;
+  background: #f3f8ff;
+}
+.reparto-stop.in-progress {
+  border-left: 3px solid #b45309;
+  background: #fffaf0;
+}
+.reparto-stop-status.sent {
+  background: #e5f0ff;
+  color: #2563a6;
+}
+.reparto-stop-status.in-progress {
+  background: #fff0d7;
+  color: #a45a00;
+}
+.reparto-stop-status.delivered {
+  background: #e7f7ed;
+  color: #138a47;
+}
