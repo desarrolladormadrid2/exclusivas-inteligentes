@@ -575,7 +575,7 @@ export default function RepartoPage() {
       const rawLines = lineResponse?.ok ? await lineResponse.json() : [];
       const lineRows = (Array.isArray(rawLines) ? rawLines : []).filter((line: any) => Number(line.order_id) === Number(detail.order_id));
       const productIds = [...new Set(lineRows.map((line: any) => Number(line.product_id)).filter((value) => Number.isInteger(value) && value > 0))].join(",") || "0";
-      const productResponse = productIds !== "0" ? await fetch(`/api/products?view=lookup&ids=${productIds}`) : null;
+      const productResponse = productIds !== "0" ? await fetch(`/api/products?view=lookup&profile=lines&ids=${productIds}`) : null;
       const loadedProducts = productResponse?.ok ? await productResponse.json() : [];
       const productRows = [...(Array.isArray(products) ? products : []), ...(Array.isArray(loadedProducts) ? loadedProducts : [])];
       setProducts((current) => [...new Map(productRows.map((product: any) => [Number(product.id), product])).values()]);

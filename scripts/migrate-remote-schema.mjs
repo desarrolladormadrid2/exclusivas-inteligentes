@@ -384,6 +384,7 @@ for (const sql of [
   "CREATE INDEX IF NOT EXISTS idx_order_lines_order ON order_lines(order_id)",
   "CREATE INDEX IF NOT EXISTS idx_order_line_lots_line ON order_line_lots(order_line_id)",
   "CREATE INDEX IF NOT EXISTS idx_invoices_client ON invoices(client_id)",
+  "CREATE INDEX IF NOT EXISTS idx_payments_invoice_date ON payments(invoice_id, payment_date)",
   "CREATE INDEX IF NOT EXISTS idx_shipments_order ON shipments(order_id)",
   "CREATE INDEX IF NOT EXISTS idx_shipments_public_tracking ON shipments(public_tracking_token)",
   "CREATE INDEX IF NOT EXISTS idx_goods_receipt_incidents_receipt ON goods_receipt_incidents(receipt_id, status)",
@@ -391,6 +392,9 @@ for (const sql of [
   "CREATE INDEX IF NOT EXISTS idx_backup_snapshots_created ON backup_snapshots(created_at)",
   "CREATE INDEX IF NOT EXISTS idx_delivery_routes_date ON delivery_routes(route_date, status)",
   "CREATE INDEX IF NOT EXISTS idx_delivery_route_stops_route ON delivery_route_stops(route_id, position)",
+  "CREATE INDEX IF NOT EXISTS idx_delivery_route_positions_route ON delivery_route_positions(route_id, id)",
+  "CREATE INDEX IF NOT EXISTS idx_vehicle_trips_route ON vehicle_trips(route_id, id)",
+  "CREATE INDEX IF NOT EXISTS idx_collection_points_client ON collection_points(client_id, id)",
   "CREATE INDEX IF NOT EXISTS idx_web_promotions_status_dates ON web_promotions(status, start_at, end_at)",
 ]) await client.execute(sql);
 await client.execute("INSERT OR IGNORE INTO invoice_orders(invoice_id,order_id) SELECT id,order_id FROM invoices WHERE order_id IS NOT NULL");

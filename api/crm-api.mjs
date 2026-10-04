@@ -1346,11 +1346,15 @@ for (const [name, table, columns] of [
   ["idx_invoice_lines_invoice", "invoice_lines", "invoice_id"],
   ["idx_delivery_notes_order", "delivery_notes", "order_id"],
   ["idx_delivery_note_lines_note", "delivery_note_lines", "delivery_note_id"],
+  ["idx_collection_points_client", "collection_points", "client_id, id"],
   ["idx_shipments_status_date", "shipments", "status, expected_delivery_at"],
   ["idx_shipments_expected_date", "shipments", "expected_delivery_at"],
   ["idx_shipments_preparation_date", "shipments", "preparation_date"],
   ["idx_shipments_order", "shipments", "order_id"],
   ["idx_inventory_product_date", "inventory_movements", "product_id, movement_date"],
+  ["idx_payments_invoice_date", "payments", "invoice_id, payment_date"],
+  ["idx_delivery_route_positions_route", "delivery_route_positions", "route_id, id"],
+  ["idx_vehicle_trips_route", "vehicle_trips", "route_id, id"],
   ["idx_goods_receipts_supplier_date", "goods_receipts", "supplier_id, receipt_date"],
   ["idx_goods_receipt_lines_receipt", "goods_receipt_lines", "receipt_id, product_id"],
   ["idx_goods_receipt_incidents_receipt", "goods_receipt_incidents", "receipt_id, status"],
@@ -1546,6 +1550,12 @@ const lookupFields = {
   product_lots: ["id", "product_id", "lot_code", "quantity", "quarantine_quantity", "waste_quantity", "expiry_date", "received_date", "warehouse_id", "barcode"],
   expenses: ["id", "code", "client_id", "expense_date", "category", "vendor", "amount", "vat", "payment_method", "notes", "attachment_name", "status", "created_by", "created_at"],
 };
+const lookupProfiles = {
+  products: {
+    order: ["id", "name", "sku", "barcode", "brand", "format", "unit", "units_per_case", "units_per_pallet", "unit_price", "stock", "stock_reserved", "active", "product_status"],
+    lines: ["id", "name", "sku", "barcode"],
+  },
+};
 function listSelectFor(resource) {
   if (!["products", "expenses"].includes(resource)) return "*";
   if (!listColumnsCache.has(resource)) {
@@ -1564,17 +1574,18 @@ function listSelectFor(resource) {
   }
   return listColumnsCache.get(resource);
 }
-function lookupSelectFor(resource) {
-  const requested = lookupFields[resource];
+function lookupSelectFor(resource, profile = "") {
+  const requested = lookupProfiles[resource]?.[profile] || lookupFields[resource];
   if (!requested) return listSelectFor(resource);
-  if (!listColumnsCache.has(`lookup:${resource}`)) {
+  const cacheKey = `lookup:${resource}:${profile || "default"}`;
+  if (!listColumnsCache.has(cacheKey)) {
     const available = new Set(db.prepare(`PRAGMA table_info(${resource})`).all().map((column) => String(column.name || "")));
     const tablePrefix = resource === "orders" ? "orders." : resource === "shipments" ? "shipments." : "";
     const columns = requested.filter((column) => available.has(column)).map((column) => `${tablePrefix}"${column.replaceAll('"', '""')}"`);
     if (resource === "orders") columns.push("order_client.name AS client_name", "order_client.city AS client_city");
-    listColumnsCache.set(`lookup:${resource}`, columns.length ? columns.join(",") : "*");
+    listColumnsCache.set(cacheKey, columns.length ? columns.join(",") : "*");
   }
-  return listColumnsCache.get(`lookup:${resource}`);
+  return listColumnsCache.get(cacheKey);
 }
 function queryBatch(statements) {
   if (remoteMode && typeof db.batch === "function") return db.batch(statements);
@@ -1798,10 +1809,7 @@ function restoreSnapshotData(snapshot, actor) {
   db.prepare("INSERT INTO audit_logs(actor,method,resource,action,details,created_at) VALUES(?,?,?,?,?,?)").run(actor, "POST", "backups", "Restauración de copia", JSON.stringify({ source: snapshot.source, tables: Object.keys(snapshot.tables).length, inserted }), new Date().toISOString());
   return inserted;
 }
-function getRouteWithStops(id) {
-  const route = db.prepare("SELECT * FROM delivery_routes WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(id));
-  if (!route) return null;
-  const stops = db.prepare("SELECT * FROM delivery_route_stops WHERE route_id=? ORDER BY position").all(Number(id));
+function buildRouteWithStops(route, stops, vehicle, vehicleTrip) {
   const coordinates = stops.filter((stop) => stop.latitude != null && stop.longitude != null).map((stop) => `${stop.latitude},${stop.longitude}`);
   const mapsUrl = coordinates.length ? `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(route.origin_address || coordinates[0])}&destination=${encodeURIComponent(coordinates[coordinates.length - 1])}${coordinates.length > 2 ? `&waypoints=${encodeURIComponent(coordinates.slice(0, -1).join("|"))}` : ""}` : "";
   const parseTime = (value) => {
@@ -1809,8 +1817,6 @@ function getRouteWithStops(id) {
     return match ? Number(match[1]) * 60 + Number(match[2]) : null;
   };
   const totalDistanceKm = stops.reduce((total, stop) => total + Number(stop.distance_km || 0), 0);
-  const vehicle = route.vehicle_id ? db.prepare("SELECT * FROM vehicles WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(route.vehicle_id)) : null;
-  const vehicleTrip = db.prepare("SELECT * FROM vehicle_trips WHERE route_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 1").get(Number(id));
   const warnings = [];
   let elapsedMinutes = 0;
   const departureMinutes = 8 * 60;
@@ -1825,6 +1831,38 @@ function getRouteWithStops(id) {
     elapsedMinutes += 15;
   }
   return { ...route, vehicle_name: vehicle?.name || "", vehicle_plate: vehicle?.plate || "", vehicle: route.vehicle || vehicle?.plate || vehicle?.name || "", vehicle_summary: vehicle ? { ...vehicle, ...vehicleMaintenanceState(vehicle) } : null, vehicle_trip: vehicleTrip, stops, maps_url: mapsUrl, total_distance_km: Number(totalDistanceKm.toFixed(1)), estimated_minutes: Math.max(0, Math.round(elapsedMinutes)), time_window_warnings: warnings };
+}
+function getRouteWithStops(id) {
+  const route = db.prepare("SELECT * FROM delivery_routes WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(id));
+  if (!route) return null;
+  const stops = db.prepare("SELECT * FROM delivery_route_stops WHERE route_id=? ORDER BY position").all(Number(id));
+  const vehicle = route.vehicle_id ? db.prepare("SELECT * FROM vehicles WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(route.vehicle_id)) : null;
+  const vehicleTrip = db.prepare("SELECT * FROM vehicle_trips WHERE route_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 1").get(Number(id));
+  return buildRouteWithStops(route, stops, vehicle, vehicleTrip);
+}
+function getRoutesWithStops(routeRows) {
+  if (!routeRows.length) return [];
+  const routeIds = routeRows.map((route) => Number(route.id)).filter(Boolean);
+  const routeMarks = routeIds.map(() => "?").join(",");
+  const vehicleIds = [...new Set(routeRows.map((route) => Number(route.vehicle_id || 0)).filter(Boolean))];
+  const vehicleMarks = vehicleIds.map(() => "?").join(",");
+  const statements = [
+    { sql: `SELECT * FROM delivery_route_stops WHERE route_id IN (${routeMarks}) ORDER BY route_id,position`, args: routeIds },
+    { sql: vehicleIds.length ? `SELECT * FROM vehicles WHERE id IN (${vehicleMarks}) AND CAST(COALESCE(deleted,0) AS INTEGER)=0` : "SELECT * FROM vehicles WHERE 1=0", args: vehicleIds },
+    { sql: `SELECT * FROM vehicle_trips WHERE route_id IN (${routeMarks}) AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY route_id,id DESC`, args: routeIds },
+  ];
+  const [stops, vehicles, trips] = queryBatch(statements);
+  const stopsByRoute = new Map();
+  for (const stop of stops) {
+    const key = Number(stop.route_id);
+    const list = stopsByRoute.get(key) || [];
+    list.push(stop);
+    stopsByRoute.set(key, list);
+  }
+  const vehiclesById = new Map(vehicles.map((vehicle) => [Number(vehicle.id), vehicle]));
+  const tripsByRoute = new Map();
+  for (const trip of trips) if (!tripsByRoute.has(Number(trip.route_id))) tripsByRoute.set(Number(trip.route_id), trip);
+  return routeRows.map((route) => buildRouteWithStops(route, stopsByRoute.get(Number(route.id)) || [], vehiclesById.get(Number(route.vehicle_id || 0)) || null, tripsByRoute.get(Number(route.id)) || null));
 }
 function getRouteCloseSummary(routeId) {
   const stops = db.prepare("SELECT id,shipment_id,status FROM delivery_route_stops WHERE route_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY position").all(Number(routeId));
@@ -2389,7 +2427,7 @@ export async function crmApiHandler(req, res) {
         if (p[2]) return send(res, 200, getRouteWithStops(p[2]) || { error: "Ruta no encontrada" });
         const routeDate = new URL(req.url, "http://local").searchParams.get("date");
         const routes = db.prepare(`SELECT * FROM delivery_routes WHERE CAST(COALESCE(deleted,0) AS INTEGER)=0 ${routeDate ? "AND route_date=?" : ""} ORDER BY route_date DESC,id DESC LIMIT 100`).all(...(routeDate ? [routeDate] : []));
-        return send(res, 200, routes.map((route) => getRouteWithStops(route.id)));
+        return send(res, 200, getRoutesWithStops(routes));
       }
       if (p[1] === "routes" && req.method === "PUT" && p[2] === "board") {
         const body = await read(req);
@@ -3786,6 +3824,7 @@ export async function crmApiHandler(req, res) {
         const includeDeleted = query.get("include_deleted") === "1";
         const includeInactive = query.get("include_inactive") === "1";
         const isLookup = query.get("view") === "lookup";
+        const lookupProfile = String(query.get("profile") || "").trim().toLowerCase();
         const isPublicCatalog = t === "products" && query.get("view") === "public";
         const dateFilter = String(query.get("date") || "").slice(0, 10);
         const preparationDateFilter = String(query.get("preparation_date") || "").slice(0, 10);
@@ -3831,7 +3870,7 @@ export async function crmApiHandler(req, res) {
         const selection = isPublicCatalog
           ? "products.id,products.name,products.family,products.category,products.subfamily,products.brand,products.format,products.sku,products.description,products.photo_url,products.photo_thumbnail_url,products.photo_web_url"
           : isLookup
-          ? lookupSelectFor(t)
+          ? lookupSelectFor(t, lookupProfile)
           : t === "orders"
             ? "orders.*,order_client.name AS client_name,order_client.city AS client_city,CASE WHEN orders.status='Facturado' OR EXISTS(SELECT 1 FROM invoice_orders io JOIN invoices bi ON bi.id=io.invoice_id WHERE io.order_id=orders.id AND COALESCE(bi.status,'')<>'Anulada' AND COALESCE(bi.deleted,0)=0) OR EXISTS(SELECT 1 FROM invoices bi WHERE bi.order_id=orders.id AND COALESCE(bi.status,'')<>'Anulada' AND COALESCE(bi.deleted,0)=0) THEN 'Facturado' ELSE 'Sin facturar' END AS billing_status"
           : t === "shipments"

@@ -36,7 +36,8 @@ function searchMatches(value: unknown, query: string) {
 }
 
 async function readList(resource: string) {
-  const response = await fetch(`/api/${resource}?view=lookup&limit=2000`, { cache: "no-store" });
+  const profile = resource === "products" ? "&profile=order" : "";
+  const response = await fetch(`/api/${resource}?view=lookup&limit=2000${profile}`, { cache: "no-store" });
   if (!response.ok) throw new Error(`No se ha podido cargar ${resource}.`);
   const data = await response.json();
   return Array.isArray(data) ? data : [];
@@ -130,7 +131,7 @@ export default function ComercialPage() {
     try {
       const [orderResponse, linesResponse] = await Promise.all([
         fetch(`/api/orders/${order.id}`, { cache: "no-store" }),
-        fetch("/api/order_lines?view=lookup&limit=2000", { cache: "no-store" }),
+        fetch(`/api/order_lines?view=lookup&order_ids=${encodeURIComponent(String(order.id))}`, { cache: "no-store" }),
       ]);
       const detailBody = orderResponse.ok ? await orderResponse.json().catch(() => order) : order;
       const detail = Array.isArray(detailBody) ? detailBody.find((item: any) => Number(item.id) === Number(order.id)) || order : detailBody?.data || detailBody || order;
