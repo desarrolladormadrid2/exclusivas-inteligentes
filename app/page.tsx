@@ -4717,6 +4717,10 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     if (showDeleted) params.set("include_deleted", "1");
     if (showInactive && ["suppliers", "clients", "products"].includes(c.api)) params.set("include_inactive", "1");
     if (preparationCacheDate && c.api === "shipments") params.set("preparation_date", preparationCacheDate);
+    if (c.api === "products") {
+      params.set("view", "lookup");
+      params.set("limit", "2000");
+    }
     if (forceRefresh) params.set("refresh", String(Date.now()));
     const requestUrl = "/api/" + c.api + (params.toString() ? `?${params.toString()}` : "");
     fetchWithRetry(requestUrl, {
@@ -5423,7 +5427,14 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   async function openRecordModal(row: any) {
     setInlineEditing(null);
     setInlineDraft({});
-    beginForm({ ...row }, row);
+    let record = row;
+    if (active === "Productos" && row?.id) {
+      try {
+        const response = await fetch(`/api/products/${row.id}`, { headers: actorHeaders });
+        if (response.ok) record = await response.json();
+      } catch { /* El listado compacto sigue permitiendo abrir el formulario. */ }
+    }
+    beginForm({ ...record }, record);
     if (active === "Pedidos") {
       const selectedClient = (lookups.clients || []).find((item: any) => Number(item.id) === Number(row.client_id));
       setClientSearch(selectedClient ? `${selectedClient.name}${selectedClient.city ? ` · ${selectedClient.city}` : ""}` : "");
