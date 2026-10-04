@@ -6555,6 +6555,32 @@ body:has(.warehouse-tablet-app) .settings-panel {
 @media(max-width:700px){.reparto-route-settings form{grid-template-columns:1fr 1fr}.reparto-route-settings form .button{grid-column:1/-1}.reparto-history-row{grid-template-columns:80px minmax(160px,1fr) 70px 100px}.reparto-history-row span:nth-child(3){display:none}.reparto-expense-context{grid-template-columns:1fr}}
 @media(max-width:460px){.reparto-route-settings form{grid-template-columns:1fr}.reparto-route-settings form .button{grid-column:auto}.reparto-history-row{grid-template-columns:72px minmax(150px,1fr) 90px}.reparto-history-row span:nth-child(4){display:none}}
 
+/* Reparto se organiza por bloques plegables para que la primera pantalla sea
+   manejable en tablet y móvil. Todos empiezan cerrados y se abren bajo demanda. */
+.reparto-accordion-toggle{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-width:72px;min-height:32px;padding:5px 9px;border:1px solid #cbd7dc;background:#fff;color:#bd2027;cursor:pointer;font:inherit;font-size:10px;font-weight:700;white-space:nowrap}
+.reparto-accordion-toggle span{font-size:16px;line-height:1}
+.reparto-accordion-content{min-width:0}
+.reparto-truck-selector>header,.reparto-route-settings>header,.reparto-history>header{align-items:center}
+.reparto-next-stop{display:grid;gap:0;padding:0}
+.reparto-next-stop>header{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:13px 15px}
+.reparto-next-stop>header>div{display:grid;gap:4px;min-width:0}
+.reparto-next-stop h2{margin:2px 0;color:#26343d;font-size:16px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.reparto-next-stop>header span:not(.eyebrow){color:#687782;font-size:10px}
+.reparto-next-stop-content{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 15px;border-top:1px solid #ead2d3}
+.reparto-next-stop-content>small{color:#687782;font-size:10px;overflow-wrap:anywhere}
+.reparto-help{padding:0}
+.reparto-help-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 15px}
+.reparto-help-head h2{margin:4px 0 0}
+.reparto-help>p{margin:0;padding:0 15px 15px}
+.reparto-route-map-content{display:grid;gap:12px}
+.reparto-route-map .reparto-accordion-toggle{flex:0 0 auto}
+.reparto-panel-toggle{display:inline-flex}
+.reparto-payment-panel:not(.is-expanded)>:not(.reparto-payment-head),.reparto-expense-panel:not(.is-expanded)>:not(.reparto-expense-head),.driver-daily-closing:not(.is-expanded)>:not(.driver-section-title){display:none}
+.reparto-payment-panel:not(.is-expanded),.reparto-expense-panel:not(.is-expanded),.driver-daily-closing:not(.is-expanded){gap:0}
+.reparto-payment-head,.reparto-expense-head,.driver-daily-closing>.driver-section-title{align-items:center}
+@media(max-width:800px){.reparto-next-stop-content{align-items:stretch;flex-direction:column}.reparto-next-stop-content .button{width:100%}}
+@media(max-width:560px){.reparto-truck-selector>header,.reparto-route-settings>header,.reparto-history>header{align-items:center}.reparto-next-stop>header{padding:11px 12px}.reparto-next-stop-content{padding:10px 12px}.reparto-help-head{padding:11px 12px}.reparto-help>p{padding:0 12px 12px}.reparto-accordion-toggle{min-height:30px}}
+
 /* Las tarjetas de reparto mantienen el número, los estados y las acciones
    centrados aunque el contenido del pedido ocupe varias líneas. */
 .reparto-stop{align-items:center}
