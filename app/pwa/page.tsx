@@ -28,6 +28,10 @@ function pwaViewPath(view: PwaView) {
   return view === "almacen" ? "/almacen" : view === "reparto" ? "/reparto" : "/comercial";
 }
 
+function PwaTruckIcon() {
+  return <svg viewBox="0 0 32 32" aria-hidden="true" focusable="false"><path d="M3 8h16v13H3zM19 13h5l5 5v3H19zM24 13v5h5M3 18h16" /><circle cx="8" cy="24" r="3" /><circle cx="25" cy="24" r="3" /></svg>;
+}
+
 function readStoredSession() {
   try {
     const raw = localStorage.getItem("excluvas.session") || sessionStorage.getItem("excluvas.session");
@@ -191,7 +195,7 @@ export default function PwaEntryPage() {
                 <span className="pwa-view-arrow" aria-hidden="true">→</span>
               </button>
               <button type="button" className="pwa-view-card" onClick={() => chooseView("reparto")}>
-                <span className="pwa-view-icon" aria-hidden="true">⌁</span>
+                <span className="pwa-view-icon pwa-view-icon-truck"><PwaTruckIcon /></span>
                 <span><strong>Reparto</strong><small>Ruta, entregas, cobros e incidencias</small></span>
                 <span className="pwa-view-arrow" aria-hidden="true">→</span>
               </button>
@@ -204,7 +208,7 @@ export default function PwaEntryPage() {
           ) : (
             <div className="pwa-login-step">
               <div className="pwa-selected-view">
-                <span className="pwa-selected-view-icon" aria-hidden="true">{view === "almacen" ? "▦" : view === "reparto" ? "⌁" : "€"}</span>
+                <span className={`pwa-selected-view-icon${view === "reparto" ? " pwa-view-icon-truck" : ""}`}>{view === "almacen" ? "▦" : view === "reparto" ? <PwaTruckIcon /> : "€"}</span>
                 <span><small>Vista seleccionada</small><strong>{PWA_VIEW_LABELS[view]}</strong></span>
                 <button type="button" className="pwa-change-view" onClick={resetView}>Cambiar</button>
               </div>

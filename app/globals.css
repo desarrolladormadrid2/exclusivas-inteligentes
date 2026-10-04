@@ -6683,6 +6683,8 @@ body.reparto-modal-open {
 .pwa-view-card:hover,
 .pwa-view-card:focus-visible { border-color: #b91c1c; background: #fff8f8; outline: none; }
 .pwa-view-icon { width: 46px; height: 46px; font-size: 24px; }
+.pwa-view-icon-truck svg { width: 29px; height: 29px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.pwa-selected-view-icon.pwa-view-icon-truck svg { width: 23px; height: 23px; }
 .pwa-view-card > span:nth-child(2) { display: grid; gap: 4px; min-width: 0; }
 .pwa-view-card strong { font-size: 15px; }
 .pwa-view-card small { color: #6d7c82; font-size: 11px; line-height: 1.25; }
