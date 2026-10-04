@@ -615,7 +615,7 @@ db.exec(`CREATE TABLE IF NOT EXISTS expenses(id INTEGER PRIMARY KEY AUTOINCREMEN
 for (const column of ["status TEXT DEFAULT 'Pendiente'", "created_by TEXT"]) { try { db.exec(`ALTER TABLE expenses ADD COLUMN ${column}`); } catch {} }
 db.exec(`CREATE TABLE IF NOT EXISTS ocr_documents(id INTEGER PRIMARY KEY AUTOINCREMENT,file_name TEXT NOT NULL,mime_type TEXT,file_size INTEGER DEFAULT 0,document_type TEXT DEFAULT 'Otro',detected_email TEXT,detected_total TEXT,extracted_text TEXT,status TEXT DEFAULT 'Pendiente',created_by TEXT DEFAULT 'Usuario local',created_at TEXT,updated_at TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS web_registrations(id INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL DEFAULT 'cliente',company_name TEXT NOT NULL,tax_id TEXT,contact_name TEXT NOT NULL,email TEXT NOT NULL,phone TEXT,address TEXT,city TEXT,message TEXT,status TEXT NOT NULL DEFAULT 'Pendiente de validar',created_at TEXT,updated_at TEXT,reviewed_by TEXT,reviewed_at TEXT);`);
-for (const column of ["crm_record_id INTEGER", "crm_record_type TEXT", "rejection_reason TEXT"]) {
+for (const column of ["commercial_name TEXT", "delivery_address TEXT", "delivery_city TEXT", "crm_record_id INTEGER", "crm_record_type TEXT", "rejection_reason TEXT"]) {
   try { db.exec(`ALTER TABLE web_registrations ADD COLUMN ${column}`); } catch {}
 }
 db.exec(`CREATE TABLE IF NOT EXISTS web_promotions(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,title TEXT NOT NULL,promotion_type TEXT NOT NULL DEFAULT 'flash',description TEXT,kicker TEXT,discount_type TEXT NOT NULL DEFAULT 'percent',discount_value REAL DEFAULT 0,start_at TEXT NOT NULL,end_at TEXT NOT NULL,min_quantity REAL DEFAULT 0,stock_limit REAL,product_ids TEXT NOT NULL DEFAULT '[]',image_url TEXT,conditions TEXT,status TEXT NOT NULL DEFAULT 'Borrador',created_by TEXT,created_at TEXT,updated_at TEXT,published_at TEXT,published_by TEXT,paused_at TEXT,paused_by TEXT,deleted INTEGER DEFAULT 0,deleted_at TEXT,deleted_by TEXT);`);
@@ -662,11 +662,11 @@ for (const column of ["notes TEXT", "reference TEXT", "deleted INTEGER DEFAULT 0
 // Las cuentas del portal deben disponer de estas columnas tanto en una base
 // nueva como en instalaciones existentes. El bloque anterior a las tablas
 // base solo cubre instalaciones antiguas.
-for (const [table, columns] of [["web_registrations", ["portal_password_hash TEXT"]], ["clients", ["portal_password_hash TEXT", "portal_access_enabled INTEGER DEFAULT 0"]], ["suppliers", ["portal_password_hash TEXT", "portal_access_enabled INTEGER DEFAULT 0"]]]) {
+for (const [table, columns] of [["web_registrations", ["portal_password_hash TEXT"]], ["clients", ["portal_password_hash TEXT", "portal_access_enabled INTEGER DEFAULT 0", "legal_name TEXT"]], ["suppliers", ["portal_password_hash TEXT", "portal_access_enabled INTEGER DEFAULT 0"]]]) {
   for (const column of columns) { try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${column}`); } catch {} }
 }
 if (remoteMode && process.env.RUN_REMOTE_MIGRATIONS === "1") {
-  for (const [table, columns] of [["web_registrations", ["portal_password_hash TEXT"]], ["clients", ["portal_password_hash TEXT", "portal_access_enabled INTEGER DEFAULT 0"]], ["suppliers", ["portal_password_hash TEXT", "portal_access_enabled INTEGER DEFAULT 0"]]]) {
+  for (const [table, columns] of [["web_registrations", ["portal_password_hash TEXT"]], ["clients", ["portal_password_hash TEXT", "portal_access_enabled INTEGER DEFAULT 0", "legal_name TEXT"]], ["suppliers", ["portal_password_hash TEXT", "portal_access_enabled INTEGER DEFAULT 0"]]]) {
     for (const column of columns) { try { db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column}`).run(); } catch {} }
   }
 }
@@ -2944,23 +2944,27 @@ export async function crmApiHandler(req, res) {
       if (t === "web_registrations") {
         if (req.method === "GET") {
           const includeClosed = new URL(req.url, "http://local").searchParams.get("include_closed") === "1";
-          return send(res, 200, db.prepare(`SELECT id,kind,company_name,tax_id,contact_name,email,phone,address,city,message,status,created_at,updated_at,reviewed_by,reviewed_at,crm_record_id,crm_record_type,rejection_reason FROM web_registrations ${includeClosed ? "" : "WHERE status NOT IN ('Validada','Rechazada')"} ORDER BY id DESC LIMIT 500`).all());
+          return send(res, 200, db.prepare(`SELECT id,kind,company_name,commercial_name,tax_id,contact_name,email,phone,address,city,delivery_address,delivery_city,message,status,created_at,updated_at,reviewed_by,reviewed_at,crm_record_id,crm_record_type,rejection_reason FROM web_registrations ${includeClosed ? "" : "WHERE status NOT IN ('Validada','Rechazada')"} ORDER BY id DESC LIMIT 500`).all());
         }
         const d = await read(req);
         if (req.method === "POST") {
           const kind = ["cliente", "proveedor"].includes(String(d.kind)) ? String(d.kind) : "cliente";
           const companyName = String(d.company_name || "").trim();
+          const commercialName = String(d.commercial_name || "").trim();
           const contactName = String(d.contact_name || "").trim();
           const email = String(d.email || "").trim();
-          if (!companyName || !contactName || !email) return send(res, 400, { error: "Empresa, contacto y email son obligatorios" });
+          const deliveryAddress = String(d.delivery_address || d.address || "").trim();
+          const deliveryCity = String(d.delivery_city || d.city || "").trim();
+          if (!companyName || !commercialName || !contactName || !email) return send(res, 400, { error: "Razón social, nombre comercial, contacto y email son obligatorios" });
+          if (kind === "cliente" && (!deliveryAddress || !deliveryCity)) return send(res, 400, { error: "La dirección y ciudad de entrega son obligatorias para el alta de cliente" });
           const password = String(d.password || "");
           if (password.length < 8) return send(res, 400, { error: "La contraseña debe tener al menos 8 caracteres" });
           const portalPasswordHash = createHash("sha256").update(password).digest("hex");
           const now = new Date().toISOString();
-          const created = db.prepare("INSERT INTO web_registrations(kind,company_name,tax_id,contact_name,email,phone,address,city,message,status,created_at,updated_at,portal_password_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)").run(kind, companyName, String(d.tax_id || "").trim(), contactName, email, String(d.phone || "").trim(), String(d.address || "").trim(), String(d.city || "").trim(), String(d.message || "").trim(), "Pendiente de validar", now, now, portalPasswordHash);
+          const created = db.prepare("INSERT INTO web_registrations(kind,company_name,commercial_name,tax_id,contact_name,email,phone,address,city,delivery_address,delivery_city,message,status,created_at,updated_at,portal_password_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(kind, companyName, commercialName, String(d.tax_id || "").trim(), contactName, email, String(d.phone || "").trim(), String(d.address || "").trim(), String(d.city || "").trim(), deliveryAddress, deliveryCity, String(d.message || "").trim(), "Pendiente de validar", now, now, portalPasswordHash);
           const id = Number(created.lastInsertRowid);
           const label = kind === "proveedor" ? "proveedor" : "cliente";
-          db.prepare("INSERT INTO notes(title,content,priority,module,record_id,important,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)").run(`Validar alta web · ${companyName}`, `Solicitud de alta de ${label} recibida desde la web. Contacto: ${contactName}. Email: ${email}. Teléfono: ${String(d.phone || "").trim() || "No indicado"}. NIF/CIF: ${String(d.tax_id || "").trim() || "No indicado"}. Dirección: ${String(d.address || "").trim() || "No indicada"}. ${String(d.message || "").trim()}`, "Alta", "Web", id, 1, now, now);
+          db.prepare("INSERT INTO notes(title,content,priority,module,record_id,important,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)").run(`Validar alta web · ${commercialName}`, `Solicitud de alta de ${label} recibida desde la web. Razón social: ${companyName}. Nombre comercial: ${commercialName}. Contacto: ${contactName}. Email: ${email}. Teléfono: ${String(d.phone || "").trim() || "No indicado"}. NIF/CIF: ${String(d.tax_id || "").trim() || "No indicado"}. Domicilio fiscal: ${String(d.address || "").trim() || "No indicado"}. Dirección de entrega: ${deliveryAddress || "No indicada"} · ${deliveryCity || ""}. ${String(d.message || "").trim()}`, "Alta", "Web", id, 1, now, now);
           recordAudit("Portal web", "POST", `web_registrations/${id}`, "Alta web", JSON.stringify({ id, kind, company_name: companyName, contact_name: contactName, email }));
           return send(res, 201, { id, status: "Pendiente de validar" });
         }
@@ -2979,6 +2983,7 @@ export async function crmApiHandler(req, res) {
             const taxId = String(registration.tax_id || "").trim();
             const email = String(registration.email || "").trim().toLowerCase();
             const companyName = String(registration.company_name || "").trim();
+            const commercialName = String(registration.commercial_name || companyName).trim();
             const existing = table === "suppliers"
               ? (taxId && hasColumn(table, "tax_id") ? db.prepare("SELECT id FROM suppliers WHERE LOWER(TRIM(COALESCE(tax_id,'')))=LOWER(TRIM(?)) AND CAST(COALESCE(deleted,0) AS INTEGER)=0 LIMIT 1").get(taxId) : null)
                 || (email ? db.prepare("SELECT id FROM suppliers WHERE LOWER(TRIM(COALESCE(email,'')))=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 LIMIT 1").get(email) : null)
@@ -2988,15 +2993,29 @@ export async function crmApiHandler(req, res) {
                 || db.prepare("SELECT id FROM clients WHERE LOWER(TRIM(name))=LOWER(TRIM(?)) AND CAST(COALESCE(deleted,0) AS INTEGER)=0 LIMIT 1").get(companyName);
             if (existing?.id) {
               crmRecordId = Number(existing.id);
+              if (table === "clients" && hasColumn(table, "legal_name") && companyName) {
+                db.prepare("UPDATE clients SET legal_name=COALESCE(NULLIF(legal_name,''),?) WHERE id=?").run(companyName, crmRecordId);
+              }
               if (registration.portal_password_hash && hasColumn(table, "portal_password_hash")) {
                 db.prepare(`UPDATE ${table} SET portal_password_hash=?,portal_access_enabled=1 WHERE id=?`).run(registration.portal_password_hash, crmRecordId);
               }
             } else {
-              const values = { name: companyName, tax_id: taxId, contact: String(registration.contact_name || "").trim(), phone: String(registration.phone || "").trim(), email: String(registration.email || "").trim(), address: String(registration.address || "").trim(), city: String(registration.city || "").trim(), active: 1, portal_password_hash: registration.portal_password_hash || null, portal_access_enabled: registration.portal_password_hash ? 1 : 0, created_at: now, updated_at: now, source_system: "Portal web" };
+              const values = { name: commercialName, legal_name: companyName, tax_id: taxId, contact: String(registration.contact_name || "").trim(), phone: String(registration.phone || "").trim(), email: String(registration.email || "").trim(), address: String(registration.address || "").trim(), city: String(registration.city || "").trim(), active: 1, portal_password_hash: registration.portal_password_hash || null, portal_access_enabled: registration.portal_password_hash ? 1 : 0, created_at: now, updated_at: now, source_system: "Portal web" };
               const keys = Object.keys(values).filter((key) => hasColumn(table, key));
               const inserted = db.prepare(`INSERT INTO ${table} (${keys.join(",")}) VALUES (${keys.map(() => "?").join(",")})`).run(...keys.map((key) => values[key]));
               crmRecordId = Number(inserted.lastInsertRowid);
               createdInCrm = true;
+            }
+            if (table === "clients" && crmRecordId) {
+              const deliveryAddress = String(registration.delivery_address || registration.address || "").trim();
+              const deliveryCity = String(registration.delivery_city || registration.city || "").trim();
+              if (deliveryAddress && deliveryCity) {
+                const existingPoint = db.prepare("SELECT id FROM collection_points WHERE client_id=? AND LOWER(TRIM(COALESCE(address,'')))=LOWER(TRIM(?)) AND LOWER(TRIM(COALESCE(city,'')))=LOWER(TRIM(?)) LIMIT 1").get(crmRecordId, deliveryAddress, deliveryCity);
+                if (!existingPoint) {
+                  const code = `LOC-WEB-${id}`;
+                  db.prepare("INSERT OR IGNORE INTO collection_points(code,name,client_id,address,city,contact,phone,email,notes) VALUES(?,?,?,?,?,?,?,?,?)").run(code, commercialName || "Dirección principal", crmRecordId, deliveryAddress, deliveryCity, String(registration.contact_name || "").trim(), String(registration.phone || "").trim(), String(registration.email || "").trim(), "Ubicación principal indicada en el alta del portal cliente.");
+                }
+              }
             }
             db.prepare("UPDATE notes SET completed=1,status='Resuelta',resolution=?,resolved_by=?,resolved_at=?,updated_at=? WHERE module='Web' AND record_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").run(`Alta validada y vinculada a ${crmRecordType} #${crmRecordId}`, actor, now, now, id);
           }

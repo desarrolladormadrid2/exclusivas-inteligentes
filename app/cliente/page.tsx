@@ -28,12 +28,15 @@ type InstallPromptEvent = Event & {
 
 const EMPTY_REGISTRATION = {
   company_name: "",
+  commercial_name: "",
   tax_id: "",
   contact_name: "",
   email: "",
   phone: "",
   address: "",
   city: "",
+  delivery_address: "",
+  delivery_city: "",
   message: "",
   password: "",
   passwordConfirm: "",
@@ -207,13 +210,16 @@ export default function CustomerPwaPage() {
           ) : (
             <form className="customer-pwa-form customer-pwa-register-form" onSubmit={submitRegistration}>
               <div className="customer-pwa-form-grid">
-                <label>Empresa *<input required value={registration.company_name} onChange={(event) => updateRegistration("company_name", event.target.value)} /></label>
+                <label>Razón social / empresa *<input required value={registration.company_name} onChange={(event) => updateRegistration("company_name", event.target.value)} /></label>
+                <label>Nombre comercial *<input required value={registration.commercial_name} onChange={(event) => updateRegistration("commercial_name", event.target.value)} placeholder="Cómo te conocen tus clientes" /></label>
                 <label>NIF/CIF<input value={registration.tax_id} onChange={(event) => updateRegistration("tax_id", event.target.value)} /></label>
                 <label>Persona de contacto *<input required value={registration.contact_name} onChange={(event) => updateRegistration("contact_name", event.target.value)} /></label>
                 <label>Email *<input type="email" required value={registration.email} onChange={(event) => updateRegistration("email", event.target.value)} /></label>
                 <label>Teléfono<input value={registration.phone} onChange={(event) => updateRegistration("phone", event.target.value)} /></label>
-                <label>Ciudad<input value={registration.city} onChange={(event) => updateRegistration("city", event.target.value)} /></label>
-                <label className="wide">Dirección<input value={registration.address} onChange={(event) => updateRegistration("address", event.target.value)} /></label>
+                <label>Ciudad fiscal<input value={registration.city} onChange={(event) => updateRegistration("city", event.target.value)} /></label>
+                <label className="wide">Domicilio fiscal<input value={registration.address} onChange={(event) => updateRegistration("address", event.target.value)} /></label>
+                <label className="wide">Dirección principal de entrega *<input required value={registration.delivery_address} onChange={(event) => updateRegistration("delivery_address", event.target.value)} placeholder="La dirección donde recibes los pedidos" /></label>
+                <label>Ciudad de entrega *<input required value={registration.delivery_city} onChange={(event) => updateRegistration("delivery_city", event.target.value)} /></label>
                 <label>Contraseña *<input type="password" minLength={8} required value={registration.password} onChange={(event) => updateRegistration("password", event.target.value)} /></label>
                 <label>Repite la contraseña *<input type="password" minLength={8} required value={registration.passwordConfirm} onChange={(event) => updateRegistration("passwordConfirm", event.target.value)} /></label>
                 <label className="wide">¿Qué necesitas?<textarea rows={3} value={registration.message} onChange={(event) => updateRegistration("message", event.target.value)} /></label>
