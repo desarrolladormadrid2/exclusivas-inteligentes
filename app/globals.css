@@ -5787,6 +5787,38 @@ body:has(.warehouse-tablet-app) .settings-panel {
   background: #991b1b;
 }
 
+/* La hoja de preparación embebida no necesita ocupar toda la pantalla
+   cuando no hay pedidos: el vacío debe quedar junto al mensaje y sus
+   acciones, sin una zona blanca que obligue a buscar el siguiente paso. */
+@media (max-width: 520px) {
+  .collective-load-overlay.is-embedded .collective-load-modal {
+    min-height: 0;
+  }
+
+  .collective-load-overlay.is-embedded .collective-load-empty {
+    padding: 22px 12px;
+  }
+
+  .collective-load-overlay.is-embedded .collective-load-actions {
+    flex-wrap: wrap;
+    justify-content: stretch;
+    gap: 6px;
+  }
+
+  .collective-load-overlay.is-embedded .collective-load-actions .button {
+    flex: 1 1 130px;
+    min-height: 38px;
+  }
+
+  .collective-load-overlay.is-embedded .collective-load-actions .button:disabled {
+    border-color: #d8e0e3;
+    background: #eef2f3;
+    color: #8a989e;
+    box-shadow: none;
+    cursor: not-allowed;
+  }
+}
+
 /* En la preparación integrada dejamos sólo el selector del día y la hoja de trabajo. */
 .collective-load-overlay.is-embedded .collective-load-header {
   display: block;
@@ -6562,4 +6594,57 @@ body.reparto-modal-open {
 .reparto-stop-status.delivered {
   background: #e7f7ed;
   color: #138a47;
+}
+
+/* En pantallas estrechas la tarjeta de entrega conserva el contexto mínimo
+   necesario: código, dirección completa y botones táctiles sin cortes. */
+@media (max-width: 560px) {
+  .reparto-stop-title small {
+    display: block;
+    color: #71818a;
+    font-size: 9px;
+  }
+
+  .reparto-stop-main > p {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.35;
+  }
+
+  .reparto-stop-window,
+  .reparto-stop-proof {
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  .reparto-stop-actions > button,
+  .reparto-stop-actions > a {
+    flex: 1 1 132px;
+    min-height: 36px;
+  }
+
+  .reparto-stop-actions .reparto-check-button {
+    flex-basis: 100%;
+  }
+}
+
+/* La cabecera de Almacén deja las exportaciones como acciones secundarias en
+   móvil y mantiene visible la actualización y el acceso a Reparto. */
+.warehouse-refresh-icon { display: none; }
+.warehouse-nav-label { display: grid; gap: 3px; min-width: 0; }
+.warehouse-nav-label small { color: #71818a; font-size: 9px; font-weight: 400; }
+.warehouse-tablet-nav button.is-active .warehouse-nav-label small { color: rgba(255, 255, 255, .8); }
+@media (max-width: 600px) {
+  .warehouse-tablet-header { gap: 6px; }
+  .warehouse-tablet-header-actions { flex-wrap: nowrap; min-width: 0; }
+  .warehouse-tablet-header-actions > span,
+  .warehouse-tablet-quick-actions { display: none; }
+  .warehouse-tablet-back-button:disabled { display: none; }
+  .warehouse-tablet-force-refresh { padding: 0 8px; }
+  .warehouse-refresh-label { display: none; }
+  .warehouse-refresh-icon { display: inline; font-size: 18px; line-height: 1; }
+  .warehouse-tablet-nav button { min-width: 0; }
+  .warehouse-nav-label small { display: none; }
 }
