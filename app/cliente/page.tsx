@@ -14,6 +14,13 @@ type CustomerSession = {
   token: string;
 };
 
+type RegistrationStatus = {
+  id: number;
+  email: string;
+  status: "Pendiente de validar" | "Validada" | "Rechazada";
+  message?: string;
+};
+
 type InstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
@@ -54,9 +61,14 @@ export default function CustomerPwaPage() {
   const [message, setMessage] = useState("");
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [installed, setInstalled] = useState(false);
+  const [registrationStatus, setRegistrationStatus] = useState<RegistrationStatus | null>(null);
 
   useEffect(() => {
     setSession(readCustomerSession());
+    try {
+      const raw = localStorage.getItem("excluvas.portal.registration");
+      if (raw) setRegistrationStatus(JSON.parse(raw) as RegistrationStatus);
+    } catch {}
     const onBeforeInstallPrompt = (event: Event) => {
       event.preventDefault();
       setInstallPrompt(event as InstallPromptEvent);
@@ -100,8 +112,18 @@ export default function CustomerPwaPage() {
         body: JSON.stringify({ kind: "cliente", email, password }),
       });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok || !body.portal) throw new Error(body.error || "No se ha podido iniciar sesión.");
+      if (!response.ok || !body.portal) {
+        if (body.code === "ACCOUNT_PENDING" || body.code === "ACCOUNT_REJECTED") {
+          const nextStatus = { id: Number(body.registration_id || 0), email, status: body.status || (body.code === "ACCOUNT_PENDING" ? "Pendiente de validar" : "Rechazada"), message: body.error } as RegistrationStatus;
+          localStorage.setItem("excluvas.portal.registration", JSON.stringify(nextStatus));
+          setRegistrationStatus(nextStatus);
+          setMessage(body.error || "Tu cuenta todavía no está activa.");
+        }
+        throw new Error(body.error || "No se ha podido iniciar sesión.");
+      }
       localStorage.setItem("excluvas.portal.session", JSON.stringify(body.portal));
+      localStorage.removeItem("excluvas.portal.registration");
+      setRegistrationStatus(null);
       setSession(body.portal);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "No se ha podido iniciar sesión.");
@@ -134,7 +156,10 @@ export default function CustomerPwaPage() {
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || "No se ha podido enviar el registro.");
-      setMessage("Solicitud recibida. El equipo comercial validará tus datos y activará tu acceso.");
+      const nextStatus: RegistrationStatus = { id: Number(body.id), email: registration.email.trim(), status: body.status || "Pendiente de validar", message: "El equipo comercial revisará tus datos y activará tu acceso." };
+      localStorage.setItem("excluvas.portal.registration", JSON.stringify(nextStatus));
+      setRegistrationStatus(nextStatus);
+      setMessage("");
       setRegistration(EMPTY_REGISTRATION);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "No se ha podido enviar el registro.");
@@ -198,6 +223,11 @@ export default function CustomerPwaPage() {
               <button className="customer-pwa-primary" disabled={busy}>{busy ? "Enviando…" : "Solicitar registro"}</button>
             </form>
           )}
+          {registrationStatus && <section className={`customer-pwa-account-status ${registrationStatus.status === "Validada" ? "is-approved" : registrationStatus.status === "Rechazada" ? "is-rejected" : "is-pending"}`} aria-live="polite">
+            <div className="customer-pwa-account-status-icon">{registrationStatus.status === "Validada" ? "✓" : registrationStatus.status === "Rechazada" ? "!" : "…"}</div>
+            <div><strong>{registrationStatus.status === "Validada" ? "Cuenta validada" : registrationStatus.status === "Rechazada" ? "Solicitud no aprobada" : "Perfil pendiente de validación"}</strong><p>{registrationStatus.message || (registrationStatus.status === "Pendiente de validar" ? "El equipo comercial revisará tus datos antes de activar los pedidos." : "")}</p><small>{registrationStatus.email}</small></div>
+            {registrationStatus.status === "Pendiente de validar" && <button type="button" onClick={() => { setEmail(registrationStatus.email); setMode("login"); setMessage("Cuando el CRM valide tu ficha podrás entrar desde aquí."); }}>Comprobar acceso</button>}
+          </section>}
         </div>
         <footer className="customer-pwa-footer">
           {installPrompt && !installed ? <button type="button" className="customer-pwa-install" onClick={installApp}>＋ Instalar app de cliente</button> : <span>Conexión segura con el CRM</span>}

@@ -6765,3 +6765,17 @@ body.reparto-modal-open {
   .customer-pwa-form-grid .wide { grid-column: auto; }
   .customer-pwa-footer { align-items: flex-start; flex-direction: column; gap: 5px; }
 }
+.customer-pwa-account-status { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 10px; margin-top: 16px; padding: 12px; border: 1px solid #e8d0a4; background: #fffaf0; color: #684d16; }
+.customer-pwa-account-status-icon { display: grid; place-items: center; width: 30px; height: 30px; background: #d89516; color: #fff; font-size: 16px; font-weight: 800; }
+.customer-pwa-account-status strong { display: block; font-size: 12px; }
+.customer-pwa-account-status p { margin: 3px 0 0; font-size: 11px; line-height: 1.35; }
+.customer-pwa-account-status small { display: block; margin-top: 4px; color: #8a7445; font-size: 10px; overflow-wrap: anywhere; }
+.customer-pwa-account-status button { border: 0; background: transparent; color: #8e1717; font-size: 11px; font-weight: 800; cursor: pointer; white-space: nowrap; }
+.customer-pwa-account-status.is-approved { border-color: #bde3ca; background: #f2fbf5; color: #146b36; }
+.customer-pwa-account-status.is-approved .customer-pwa-account-status-icon { background: #168348; }
+.customer-pwa-account-status.is-approved small { color: #4d8663; }
+.customer-pwa-account-status.is-rejected { border-color: #efc4c4; background: #fff5f5; color: #8e1717; }
+.customer-pwa-account-status.is-rejected .customer-pwa-account-status-icon { background: #b91c1c; }
+.client-portal-account-status { display: inline-flex; align-items: center; gap: 5px; padding: 7px 9px; background: #1f5f3a; color: #fff; font-size: 10px; font-weight: 800; white-space: nowrap; }
+.client-portal-account-status i { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: #168348; color: #fff; font-size: 10px; font-style: normal; }
+@media (max-width: 520px) { .customer-pwa-account-status { grid-template-columns: 30px minmax(0, 1fr); } .customer-pwa-account-status button { grid-column: 2; justify-self: start; padding: 4px 0 0; } }

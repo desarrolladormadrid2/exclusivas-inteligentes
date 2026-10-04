@@ -2526,7 +2526,15 @@ export async function crmApiHandler(req, res) {
         const account = db.prepare(`SELECT id,name,email,portal_password_hash,portal_access_enabled,active FROM ${table} WHERE LOWER(TRIM(COALESCE(email,'')))=? AND CAST(COALESCE(active,1) AS INTEGER)=1 AND CAST(COALESCE(deleted,0) AS INTEGER)=0 LIMIT 1`).get(email);
         const passwordHash = createHash("sha256").update(password).digest("hex");
         if (!account?.id || !account.portal_password_hash || account.portal_password_hash !== passwordHash || Number(account.portal_access_enabled || 0) !== 1) {
+          const registration = db.prepare("SELECT id,status,company_name,email,portal_password_hash,rejection_reason FROM web_registrations WHERE kind=? AND LOWER(TRIM(COALESCE(email,'')))=? ORDER BY id DESC LIMIT 1").get(kind, email);
+          const registrationPasswordMatches = registration?.portal_password_hash && registration.portal_password_hash === passwordHash;
           recordPortalLoginFailure(loginKey);
+          if (registrationPasswordMatches && registration.status === "Pendiente de validar") {
+            return send(res, 403, { error: "Tu cuenta está pendiente de validación por nuestro equipo. Te avisaremos cuando esté activa.", code: "ACCOUNT_PENDING", status: registration.status, registration_id: Number(registration.id) });
+          }
+          if (registrationPasswordMatches && registration.status === "Rechazada") {
+            return send(res, 403, { error: registration.rejection_reason ? `La solicitud no ha sido aprobada: ${registration.rejection_reason}` : "La solicitud de tu cuenta no ha sido aprobada. Contacta con nuestro equipo comercial.", code: "ACCOUNT_REJECTED", status: registration.status, registration_id: Number(registration.id) });
+          }
           return send(res, 401, { error: "No encontramos una cuenta activa con esos datos. Si acabas de registrarte, espera a que validemos tu solicitud." });
         }
         portalLoginAttempts.delete(loginKey);
