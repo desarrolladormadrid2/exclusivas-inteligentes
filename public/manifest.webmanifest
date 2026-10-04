@@ -1,0 +1,21 @@
+{
+  "name": "Exclusivas Inteligentes · Operativa móvil",
+  "short_name": "Exclusivas móvil",
+  "description": "Vista móvil de almacén y reparto conectada al CRM de Exclusivas Inteligentes.",
+  "lang": "es",
+  "start_url": "/pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#eef2f3",
+  "theme_color": "#b91c1c",
+  "categories": ["business", "productivity"],
+  "icons": [
+    {
+      "src": "/pwa-icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

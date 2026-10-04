@@ -18,6 +18,8 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Exclusivas Inteligentes · CRM local",
   description: "CRM local para la gestión de una distribuidora de bebidas.",
+  manifest: "/manifest.webmanifest",
+  themeColor: "#b91c1c",
   icons: {
     icon: "/favicon.svg?v=2.0.13",
     shortcut: "/favicon.svg?v=2.0.13",

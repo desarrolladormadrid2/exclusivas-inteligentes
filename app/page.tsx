@@ -5,6 +5,7 @@ import QRCode from "qrcode";
 // @ts-ignore Tipos incluidos por la librería.
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
+import { APP_VERSION } from "./version";
 
 declare global {
   interface Window {
@@ -12,7 +13,6 @@ declare global {
   }
 }
 
-const APP_VERSION = "2.0.248";
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;

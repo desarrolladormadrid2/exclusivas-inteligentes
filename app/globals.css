@@ -6648,3 +6648,71 @@ body.reparto-modal-open {
   .warehouse-tablet-nav button { min-width: 0; }
   .warehouse-nav-label small { display: none; }
 }
+
+/* Entrada PWA para tablet y móvil: mantiene el acceso de trabajo separado del CRM completo. */
+.pwa-auth-shell { min-height: 100dvh; }
+.pwa-entry-page {
+  min-height: 100dvh;
+  background: #eef2f3;
+  color: #18252a;
+  display: flex;
+  justify-content: center;
+  padding: 24px 16px;
+}
+.pwa-entry-shell { width: min(100%, 560px); display: flex; flex-direction: column; gap: 16px; }
+.pwa-entry-header,
+.pwa-entry-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.pwa-entry-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.pwa-entry-brand > div { display: grid; gap: 1px; }
+.pwa-entry-brand strong { font-size: 16px; letter-spacing: -.02em; }
+.pwa-entry-brand span { color: #6d7c82; font-size: 11px; }
+.pwa-entry-mark,
+.pwa-selected-view-icon,
+.pwa-view-icon { display: grid; place-items: center; background: #b91c1c; color: #fff; font-weight: 800; }
+.pwa-entry-mark { width: 36px; height: 36px; font-size: 21px; }
+.pwa-entry-version { color: #839096; font-size: 10px; white-space: nowrap; }
+.pwa-entry-card { background: #fff; border: 1px solid #d9e0e2; padding: 24px; }
+.pwa-entry-intro { display: grid; gap: 8px; margin-bottom: 22px; }
+.pwa-entry-kicker { color: #b91c1c; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.pwa-entry-intro h1 { margin: 0; color: #1e2b30; font-size: clamp(24px, 5vw, 32px); letter-spacing: -.04em; line-height: 1.05; }
+.pwa-entry-intro p { max-width: 430px; margin: 0; color: #6d7c82; font-size: 13px; line-height: 1.45; }
+.pwa-view-grid { display: grid; gap: 10px; }
+.pwa-view-card { min-height: 86px; display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 13px; border: 1px solid #d8e0e2; background: #fbfcfc; color: #233239; text-align: left; cursor: pointer; }
+.pwa-view-card:hover,
+.pwa-view-card:focus-visible { border-color: #b91c1c; background: #fff8f8; outline: none; }
+.pwa-view-icon { width: 46px; height: 46px; font-size: 24px; }
+.pwa-view-card > span:nth-child(2) { display: grid; gap: 4px; min-width: 0; }
+.pwa-view-card strong { font-size: 15px; }
+.pwa-view-card small { color: #6d7c82; font-size: 11px; line-height: 1.25; }
+.pwa-view-arrow { color: #b91c1c; font-size: 22px; }
+.pwa-login-step { display: grid; gap: 16px; }
+.pwa-selected-view { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid #ead0d0; background: #fff8f8; }
+.pwa-selected-view-icon { width: 34px; height: 34px; font-size: 18px; }
+.pwa-selected-view > span:nth-child(2) { display: grid; gap: 2px; flex: 1; }
+.pwa-selected-view small { color: #8b5b5b; font-size: 10px; }
+.pwa-selected-view strong { color: #8e1717; font-size: 14px; }
+.pwa-change-view { border: 0; background: transparent; color: #8e1717; font-size: 11px; font-weight: 700; cursor: pointer; padding: 8px 2px; }
+.pwa-session-box { display: grid; gap: 8px; border: 1px solid #d8e0e2; padding: 16px; }
+.pwa-session-status { color: #138a47; font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.pwa-session-box strong { font-size: 19px; }
+.pwa-session-box p { margin: -2px 0 4px; color: #6d7c82; font-size: 12px; line-height: 1.4; }
+.pwa-login-form { display: grid; gap: 13px; }
+.pwa-login-form label { display: grid; gap: 6px; color: #4e5e64; font-size: 11px; font-weight: 700; }
+.pwa-login-form select,
+.pwa-login-form input[type="password"] { min-height: 44px; width: 100%; border: 1px solid #cbd5d8; background: #fff; color: #1e2b30; padding: 0 11px; font: inherit; font-size: 14px; }
+.pwa-login-form select:focus,
+.pwa-login-form input[type="password"]:focus { border-color: #b91c1c; outline: 2px solid rgba(185, 28, 28, .12); }
+.pwa-remember-option { display: flex !important; grid-template-columns: auto 1fr; align-items: center; gap: 8px !important; font-weight: 500 !important; }
+.pwa-remember-option input { width: 16px; height: 16px; accent-color: #b91c1c; }
+.pwa-entry-button { min-height: 46px; border: 1px solid #b91c1c; background: #b91c1c; color: #fff; font-size: 13px; font-weight: 800; cursor: pointer; }
+.pwa-entry-button:hover { background: #981717; }
+.pwa-entry-button:disabled { cursor: wait; opacity: .65; }
+.pwa-secondary-button { min-height: 38px; border: 0; background: transparent; color: #7d2525; font-size: 12px; cursor: pointer; }
+.pwa-entry-error { color: #b42318; font-size: 11px; line-height: 1.35; }
+.pwa-entry-footer { color: #849197; font-size: 10px; }
+.pwa-install-button { border: 0; background: transparent; color: #a11919; font-size: 11px; font-weight: 800; cursor: pointer; padding: 0; }
+@media (max-width: 420px) {
+  .pwa-entry-page { padding: 14px 10px; }
+  .pwa-entry-card { padding: 18px 14px; }
+  .pwa-entry-footer { align-items: flex-start; flex-direction: column; gap: 5px; }
+}
