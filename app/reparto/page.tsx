@@ -33,6 +33,24 @@ function mapsUrl(item: any) {
   return query ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}` : "";
 }
 
+function haversineKm(aLat: any, aLon: any, bLat: any, bLon: any) {
+  const rad = (value: any) => Number(value) * Math.PI / 180;
+  const dLat = rad(Number(bLat) - Number(aLat)), dLon = rad(Number(bLon) - Number(aLon));
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(aLat)) * Math.cos(rad(bLat)) * Math.sin(dLon / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function suggestedStopsWithDistances(items: any[]) {
+  let previous: any = null;
+  return items.map((item, index) => {
+    const latitude = Number(item.latitude), longitude = Number(item.longitude);
+    const located = Number.isFinite(latitude) && Number.isFinite(longitude) && latitude !== 0 && longitude !== 0;
+    const distance = located && previous ? Number(haversineKm(previous.latitude, previous.longitude, latitude, longitude).toFixed(2)) : 0;
+    if (located) previous = { latitude, longitude };
+    return { ...item, id: `suggested-${item.id}`, shipment_id: item.id, position: index + 1, distance_km: distance, status: item.status === "Entregado" ? "Completada" : "Pendiente" };
+  });
+}
+
 function routeMapsUrl(route: any, stops: any[]) {
   if (route?.maps_url) return String(route.maps_url);
   const located = (Array.isArray(stops) ? stops : []).filter((stop) => Number.isFinite(Number(stop.latitude)) && Number.isFinite(Number(stop.longitude)) || [stop.address, stop.city].some(Boolean));
@@ -322,6 +340,10 @@ export default function RepartoPage() {
   const [gpsActive, setGpsActive] = useState(false);
   const [gpsError, setGpsError] = useState("");
   const [gpsPosition, setGpsPosition] = useState<any>(null);
+  const [suggestedOrderByDate, setSuggestedOrderByDate] = useState<Record<string, number[]>>({});
+  const [orderStorageReady, setOrderStorageReady] = useState(false);
+  const [draggingStopId, setDraggingStopId] = useState<string | number | null>(null);
+  const [dragOverStopId, setDragOverStopId] = useState<string | number | null>(null);
   const gpsWatchRef = useRef<number | null>(null);
   const selectedShipmentRef = useRef<any>(null);
   const returnsOpenRef = useRef(false);
@@ -333,6 +355,20 @@ export default function RepartoPage() {
       if (session?.username) setActor(String(session.username));
     } catch {}
   }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("excluvas.reparto.suggested-order");
+      const parsed = raw ? JSON.parse(raw) : {};
+      if (parsed && typeof parsed === "object") setSuggestedOrderByDate(parsed);
+    } catch {}
+    setOrderStorageReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!orderStorageReady) return;
+    try { localStorage.setItem("excluvas.reparto.suggested-order", JSON.stringify(suggestedOrderByDate)); } catch {}
+  }, [suggestedOrderByDate, orderStorageReady]);
 
   useEffect(() => {
     selectedShipmentRef.current = selectedShipment;
@@ -434,7 +470,15 @@ export default function RepartoPage() {
     .filter((item) => String(item.shipping_date || item.expected_delivery_at || "").slice(0, 10) === date)
     .sort((a, b) => String(a.opening_time || "99:99").localeCompare(String(b.opening_time || "99:99")) || String(a.client_name).localeCompare(String(b.client_name), "es")), [shipments, date]);
   const activeRoute = routes.find((route) => Number(route.id) === Number(activeRouteId)) || null;
-  const routeStops = activeRoute?.stops?.length ? activeRoute.stops : dayShipments.map((item, index) => ({ ...item, id: `suggested-${item.id}`, shipment_id: item.id, position: index + 1, status: item.status === "Entregado" ? "Completada" : "Pendiente" }));
+  const orderedSuggestedShipments = useMemo(() => {
+    const savedIds = suggestedOrderByDate[date] || [];
+    if (!savedIds.length) return dayShipments;
+    const byId = new Map(dayShipments.map((item) => [Number(item.id), item]));
+    const ordered = savedIds.map((id) => byId.get(Number(id))).filter(Boolean);
+    const included = new Set(ordered.map((item: any) => Number(item.id)));
+    return [...ordered, ...dayShipments.filter((item) => !included.has(Number(item.id)))];
+  }, [dayShipments, date, suggestedOrderByDate]);
+  const routeStops = activeRoute?.stops?.length ? activeRoute.stops : suggestedStopsWithDistances(orderedSuggestedShipments);
   const completed = routeStops.filter((stop: any) => ["Completada", "Entregado"].includes(String(stop.status || ""))).length;
   const pending = routeStops.filter((stop: any) => !["Completada", "Entregado"].includes(String(stop.status || ""))).length;
   const incidents = dayShipments.filter((item) => String(item.incidents || "").trim()).length;
@@ -537,17 +581,50 @@ export default function RepartoPage() {
     setMessage(delivered ? "Entrega marcada como entregada." : "Entrega devuelta a estado enviado.");
   }
 
-  async function moveStop(index: number, direction: -1 | 1) {
-    if (!activeRoute) return;
-    const next = [...(activeRoute.stops || [])];
-    const target = index + direction;
-    if (target < 0 || target >= next.length) return;
-    [next[index], next[target]] = [next[target], next[index]];
+  function reorderSuggestedStops(next: any[]) {
+    setSuggestedOrderByDate((current) => ({ ...current, [date]: next.map((stop) => Number(stop.shipment_id)).filter(Boolean) }));
+    setMessage("Orden sugerido actualizado. Se han recalculado los kilómetros estimados y el mapa.");
+  }
+
+  async function reorderStops(next: any[]) {
+    if (!next.length) return;
+    if (!activeRoute) return reorderSuggestedStops(next);
     const response = await fetch(`/api/routes/${activeRoute.id}/stops/reorder`, { method: "PUT", headers: { "Content-Type": "application/json", "X-Actor": actor }, body: JSON.stringify({ stop_ids: next.map((stop) => stop.id) }) });
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) return setMessage(body.error || "No se pudo ajustar el orden de la ruta.");
+    if (!response.ok) return setMessage(body.error || "No se pudo guardar el orden de la ruta.");
     setRoutes((current) => current.map((route) => Number(route.id) === Number(body.id) ? body : route));
+    setMessage(`Ruta reordenada · ${Number(body.total_distance_km || 0).toFixed(1)} km estimados.`);
   }
+
+  function reorderStopsAround(index: number, direction: -1 | 1) {
+    const target = index + direction;
+    if (target < 0 || target >= routeStops.length) return;
+    const next = [...routeStops];
+    [next[index], next[target]] = [next[target], next[index]];
+    void reorderStops(next);
+  }
+
+  function startStopDrag(event: any, stop: any) {
+    setDraggingStopId(stop.id);
+    setDragOverStopId(null);
+    event.dataTransfer?.setData("text/plain", String(stop.id));
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+  }
+
+  function dropStop(event: any, target: any) {
+    event.preventDefault();
+    const sourceId = event.dataTransfer?.getData("text/plain") || draggingStopId;
+    const sourceIndex = routeStops.findIndex((stop: any) => String(stop.id) === String(sourceId));
+    const targetIndex = routeStops.findIndex((stop: any) => String(stop.id) === String(target.id));
+    setDraggingStopId(null);
+    setDragOverStopId(null);
+    if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return;
+    const next = [...routeStops];
+    const [moved] = next.splice(sourceIndex, 1);
+    next.splice(targetIndex, 0, moved);
+    void reorderStops(next);
+  }
+
 
   async function saveReturn(event: FormEvent) {
     event.preventDefault();
@@ -584,7 +661,7 @@ const response = await fetch("/api/returns", { method: "POST", headers: { "Conte
       {routeStops.length > 0 && <RepartoRouteMapPanel stops={routeStops} route={activeRoute} currentPosition={gpsPosition} gpsActive={gpsActive} gpsError={gpsError} onStartGps={startGps} onStopGps={stopGps} />}
       <section className="reparto-next-stop" aria-label="Siguiente entrega">{nextStop ? <><div><span className="eyebrow">SIGUIENTE PARADA</span><b>{nextStop.client_name || "Cliente sin nombre"}</b><small>{[nextStop.address, nextStop.city].filter(Boolean).join(" · ") || "Dirección no indicada"}{nextStop.opening_time && nextStop.closing_time ? ` · ${nextStop.opening_time}–${nextStop.closing_time}` : ""}</small></div><button type="button" className="button primary" onClick={() => { const shipment = shipments.find((item) => Number(item.id) === Number(nextStop.shipment_id)) || nextStop; void openShipment(shipment); }}>Abrir próxima entrega</button></> : <div><span className="eyebrow">RUTA COMPLETADA</span><b>No quedan paradas pendientes</b><small>Revisa las incidencias y justificantes antes de cerrar la jornada.</small></div>}</section>
       {message && <p className="reparto-message" role="status">{message}</p>}
-      <div className="reparto-layout"><section className="reparto-stops panel"><div className="reparto-panel-head"><div><p className="eyebrow">{activeRoute ? activeRoute.code : "ORDEN SUGERIDO"}</p><h2>{activeRoute ? `Ruta de ${activeRoute.driver || "reparto"}` : "Entregas para hoy"}</h2><span>{activeRoute ? `${activeRoute.stops?.length || 0} paradas · ${activeRoute.vehicle || "Vehículo sin indicar"}` : "Ordenadas por horario de apertura"}</span></div>{activeRoute?.maps_url && <a className="button primary" href={activeRoute.maps_url} target="_blank" rel="noreferrer">Navegar toda la ruta</a>}</div>{loading ? <div className="reparto-loading" role="status">Cargando entregas…</div> : !routeStops.length ? <div className="reparto-empty"><b>No hay entregas para esta fecha.</b><span>Prueba otra fecha o vuelve al CRM para planificar la ruta.</span></div> : <ol className="reparto-stop-list">{routeStops.map((stop: any, index: number) => { const shipment = shipments.find((item) => Number(item.id) === Number(stop.shipment_id)) || stop; const delivery = deliveryState(stop, shipment); const done = delivery.key === "delivered"; const signatureDone = String(shipment.delivery_signature_status || "").toLocaleLowerCase() === "firmado"; const paymentDone = String(shipment.payment_received_status || "").toLocaleLowerCase() === "recibido"; const destination = mapsUrl({ ...shipment, ...stop }); return <li className={`reparto-stop ${delivery.key}${done ? " done" : ""}`} key={stop.id}><div className="reparto-stop-number">{done ? "✓" : stop.position || index + 1}</div><div className="reparto-stop-main"><div className="reparto-stop-title"><div><b>{stop.client_name || shipment.client_name}</b><small>{shipment.code || stop.shipment_code || "Envío"}</small></div><span className={`reparto-stop-status ${delivery.key}`}>{delivery.label}</span></div><p>{[stop.address || shipment.address, stop.city || shipment.city].filter(Boolean).join(" · ") || "Dirección no indicada"}</p><small className="reparto-stop-window">{stop.opening_time && stop.closing_time ? `Horario ${stop.opening_time}–${stop.closing_time}` : "Horario pendiente de indicar"}{stop.distance_km ? ` · ${stop.distance_km} km` : ""}</small><small className="reparto-stop-proof">{Math.max(1, Number(shipment.packages || 1))} bultos · {signatureDone ? "✓ Firmado" : "Firma pendiente"} · {paymentDone ? "✓ Cobrado" : "Cobro pendiente"}</small><div className="reparto-stop-actions">{destination ? <a className="reparto-map-button" href={destination} target="_blank" rel="noreferrer">↗ Cómo llegar</a> : <span className="reparto-no-map">Ubicación sin dirección</span>}<button type="button" className="reparto-open-button" onClick={() => void openShipment(shipment)}>Abrir entrega</button><button type="button" className={`reparto-check-button${done ? " checked" : ""}`} onClick={() => void updateStop(stop, done ? "Pendiente" : "Completada")}>{done ? "Deshacer entrega" : "Marcar entregado"}</button>{activeRoute && <span className="reparto-reorder"><button type="button" aria-label="Subir parada" onClick={() => void moveStop(index, -1)} disabled={index === 0}>↑</button><button type="button" aria-label="Bajar parada" onClick={() => void moveStop(index, 1)} disabled={index === routeStops.length - 1}>↓</button></span>}</div></div></li>; })}</ol>}</section>
+      <div className="reparto-layout"><section className="reparto-stops panel"><div className="reparto-panel-head"><div><p className="eyebrow">{activeRoute ? activeRoute.code : "ORDEN SUGERIDO"}</p><h2>{activeRoute ? `Ruta de ${activeRoute.driver || "reparto"}` : "Entregas para hoy"}</h2><span>{activeRoute ? `${activeRoute.stops?.length || 0} paradas · ${activeRoute.vehicle || "Vehículo sin indicar"} · Arrastra para reordenar` : "Ordenadas por horario de apertura · Arrastra para reordenar"}</span></div>{activeRoute?.maps_url && <a className="button primary" href={activeRoute.maps_url} target="_blank" rel="noreferrer">Navegar toda la ruta</a>}</div>{loading ? <div className="reparto-loading" role="status">Cargando entregas…</div> : !routeStops.length ? <div className="reparto-empty"><b>No hay entregas para esta fecha.</b><span>Prueba otra fecha o vuelve al CRM para planificar la ruta.</span></div> : <ol className="reparto-stop-list">{routeStops.map((stop: any, index: number) => { const shipment = shipments.find((item) => Number(item.id) === Number(stop.shipment_id)) || stop; const delivery = deliveryState(stop, shipment); const done = delivery.key === "delivered"; const signatureDone = String(shipment.delivery_signature_status || "").toLocaleLowerCase() === "firmado"; const paymentDone = String(shipment.payment_received_status || "").toLocaleLowerCase() === "recibido"; const destination = mapsUrl({ ...shipment, ...stop }); return <li draggable className={`reparto-stop ${delivery.key}${done ? " done" : ""}${String(draggingStopId) === String(stop.id) ? " dragging" : ""}${String(dragOverStopId) === String(stop.id) ? " drag-over" : ""}`} key={stop.id} onDragStart={(event) => startStopDrag(event, stop)} onDragOver={(event) => { event.preventDefault(); setDragOverStopId(stop.id); }} onDragLeave={() => setDragOverStopId((current) => String(current) === String(stop.id) ? null : current)} onDrop={(event) => dropStop(event, stop)} onDragEnd={() => { setDraggingStopId(null); setDragOverStopId(null); }}><div className="reparto-stop-number">{done ? "✓" : stop.position || index + 1}</div><div className="reparto-stop-main"><div className="reparto-stop-title"><div><b>{stop.client_name || shipment.client_name}</b><small>{shipment.code || stop.shipment_code || "Envío"}</small></div><span className={`reparto-stop-status ${delivery.key}`}>{delivery.label}</span></div><p>{[stop.address || shipment.address, stop.city || shipment.city].filter(Boolean).join(" · ") || "Dirección no indicada"}</p><small className="reparto-stop-window">{stop.opening_time && stop.closing_time ? `Horario ${stop.opening_time}–${stop.closing_time}` : "Horario pendiente de indicar"}{stop.distance_km ? ` · ${Number(stop.distance_km).toFixed(1)} km desde la anterior` : ""}</small><small className="reparto-stop-proof">{Math.max(1, Number(shipment.packages || 1))} bultos · {signatureDone ? "✓ Firmado" : "Firma pendiente"} · {paymentDone ? "✓ Cobrado" : "Cobro pendiente"}</small><div className="reparto-stop-actions">{destination ? <a className="reparto-map-button" href={destination} target="_blank" rel="noreferrer">↗ Cómo llegar</a> : <span className="reparto-no-map">Ubicación sin dirección</span>}<button type="button" className="reparto-open-button" onClick={() => void openShipment(shipment)}>Abrir entrega</button><button type="button" className={`reparto-check-button${done ? " checked" : ""}`} onClick={() => void updateStop(stop, done ? "Pendiente" : "Completada")}>{done ? "Deshacer entrega" : "Marcar entregado"}</button><span className="reparto-reorder"><button type="button" aria-label="Subir parada" onClick={() => reorderStopsAround(index, -1)} disabled={index === 0}>↑</button><button type="button" aria-label="Bajar parada" onClick={() => reorderStopsAround(index, 1)} disabled={index === routeStops.length - 1}>↓</button></span></div></div></li>; })}</ol>}</section>
         <aside className="reparto-side"><section className="reparto-route-picker panel"><div className="reparto-panel-head compact"><div><p className="eyebrow">PLANIFICACIÓN</p><h2>Mis rutas</h2><span>Selecciona la ruta asignada</span></div></div>{routes.length ? routes.map((route) => <button type="button" key={route.id} className={`reparto-route-option${Number(route.id) === Number(activeRouteId) ? " active" : ""}`} onClick={() => setActiveRouteId(Number(route.id))}><span><b>{route.code}</b><small>{dateLabel(route.route_date)} · {route.driver || "Sin repartidor"}</small></span><strong>{route.stops?.length || 0}</strong></button>) : <p className="reparto-empty small">No hay una ruta planificada para esta fecha.</p>}<p className="reparto-plan-link reparto-driver-note">La planificación y los cambios de ruta los gestiona el equipo desde el CRM.</p></section><section className="reparto-help panel"><p className="eyebrow">SECUENCIA RECOMENDADA</p><h2>Una entrega cada vez</h2><p>Abre Maps para llegar, entra en la entrega para enseñar el pedido al cliente y registra firma, fotos o incidencias antes de continuar.</p></section></aside></div>
       {activeRoute && <DriverDailyClosingPanel route={activeRoute} stops={routeStops} shipments={shipments} actor={actor} />}
       <DeliveryExpensePanel actor={actor} />

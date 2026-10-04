@@ -1268,7 +1268,7 @@ async function calculateRoadRouteEstimate(origin, stops) {
   const points = [origin, ...validStops].filter((point) => Number.isFinite(Number(point?.latitude)) && Number.isFinite(Number(point?.longitude)));
   if (points.length < 2) {
     const schedule = calculateSequentialRouteSchedule(stops, stops.map(() => 0));
-    return { provider: "OSRM", distance_km: 0, driving_minutes: schedule.driving_minutes, waiting_minutes: schedule.waiting_minutes, service_minutes: stops.length * DEFAULT_DELIVERY_SERVICE_MINUTES, total_minutes: schedule.total_minutes, located_stops: Math.max(0, points.length - 1), schedule: schedule.schedule, time_window_warnings: schedule.time_window_warnings };
+    return { provider: "OSRM", distance_km: 0, leg_distances_km: validStops.map(() => 0), driving_minutes: schedule.driving_minutes, waiting_minutes: schedule.waiting_minutes, service_minutes: stops.length * DEFAULT_DELIVERY_SERVICE_MINUTES, total_minutes: schedule.total_minutes, located_stops: Math.max(0, points.length - 1), schedule: schedule.schedule, time_window_warnings: schedule.time_window_warnings };
   }
   const coordinates = points.map((point) => `${Number(point.longitude).toFixed(6)},${Number(point.latitude).toFixed(6)}`).join(";");
   const cacheKey = `${coordinates}|${validStops.map((stop) => `${stop.opening_time || ""}-${stop.closing_time || ""}`).join(";")}`;
@@ -1289,6 +1289,7 @@ async function calculateRoadRouteEstimate(origin, stops) {
     const value = {
       provider: "OSRM",
       distance_km: Number((Number(route.distance || 0) / 1000).toFixed(1)),
+      leg_distances_km: validStops.map((_stop, index) => Number((Number(route.legs?.[index]?.distance || 0) / 1000).toFixed(2))),
       driving_minutes: drivingMinutes,
       waiting_minutes: schedule.waiting_minutes,
       service_minutes: stops.length * DEFAULT_DELIVERY_SERVICE_MINUTES,
@@ -2478,13 +2479,38 @@ export async function crmApiHandler(req, res) {
         const body = await read(req);
         const stopIds = Array.isArray(body.stop_ids) ? body.stop_ids.map(Number).filter((id) => Number.isInteger(id) && id > 0) : [];
         const routeId = Number(p[2]);
-        const route = db.prepare("SELECT id FROM delivery_routes WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(routeId);
+        const route = db.prepare("SELECT * FROM delivery_routes WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(routeId);
         if (!route || !stopIds.length) return send(res, 400, { error: "La ruta o el orden de paradas no son válidos" });
-        const allowedStops = db.prepare("SELECT id FROM delivery_route_stops WHERE route_id=?").all(routeId).map((stop) => Number(stop.id));
+        const allowedStops = db.prepare("SELECT id FROM delivery_route_stops WHERE route_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").all(routeId).map((stop) => Number(stop.id));
         if (allowedStops.length !== stopIds.length || allowedStops.some((id) => !stopIds.includes(id))) return send(res, 400, { error: "Las paradas no pertenecen a esta ruta" });
         const now = new Date().toISOString();
-        stopIds.forEach((stopId, index) => db.prepare("UPDATE delivery_route_stops SET position=?,updated_at=? WHERE id=? AND route_id=?").run(index + 1, now, stopId, routeId));
-        recordAudit(actor, "PUT", `routes/${routeId}/stops/reorder`, "Reordenar ruta", JSON.stringify({ stop_ids: stopIds }));
+        const orderedStops = stopIds.map((stopId) => db.prepare("SELECT * FROM delivery_route_stops WHERE id=? AND route_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(stopId, routeId)).filter(Boolean);
+        const validOrigin = Number.isFinite(Number(route.origin_latitude)) && Number.isFinite(Number(route.origin_longitude)) && Number(route.origin_latitude) !== 0 && Number(route.origin_longitude) !== 0;
+        const fallbackDistances = [];
+        let previous = validOrigin ? { latitude: Number(route.origin_latitude), longitude: Number(route.origin_longitude) } : null;
+        for (const stop of orderedStops) {
+          const located = Number.isFinite(Number(stop.latitude)) && Number.isFinite(Number(stop.longitude)) && Number(stop.latitude) !== 0 && Number(stop.longitude) !== 0;
+          fallbackDistances.push(located && previous ? Number(haversineKm(previous.latitude, previous.longitude, Number(stop.latitude), Number(stop.longitude)).toFixed(2)) : 0);
+          if (located) previous = { latitude: Number(stop.latitude), longitude: Number(stop.longitude) };
+        }
+        let legDistances = fallbackDistances;
+        if (validOrigin && orderedStops.some((stop) => Number.isFinite(Number(stop.latitude)) && Number.isFinite(Number(stop.longitude)))) {
+          try {
+            const estimate = await calculateRoadRouteEstimate({ latitude: Number(route.origin_latitude), longitude: Number(route.origin_longitude) }, orderedStops);
+            let locatedIndex = 0;
+            legDistances = orderedStops.map((stop, index) => {
+              const located = Number.isFinite(Number(stop.latitude)) && Number.isFinite(Number(stop.longitude)) && Number(stop.latitude) !== 0 && Number(stop.longitude) !== 0;
+              if (!located) return 0;
+              const distance = Number(estimate.leg_distances_km?.[locatedIndex] ?? fallbackDistances[index] ?? 0);
+              locatedIndex += 1;
+              return distance;
+            });
+          } catch {}
+        }
+        orderedStops.forEach((stop, index) => db.prepare("UPDATE delivery_route_stops SET position=?,distance_km=?,updated_at=? WHERE id=? AND route_id=?").run(index + 1, legDistances[index] || 0, now, stop.id, routeId));
+        const totalDistance = orderedStops.reduce((total, _stop, index) => total + Number(legDistances[index] || 0), 0);
+        db.prepare("UPDATE vehicle_trips SET planned_distance_km=?,updated_at=? WHERE route_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").run(Number(totalDistance.toFixed(1)), now, routeId);
+        recordAudit(actor, "PUT", `routes/${routeId}/stops/reorder`, "Reordenar ruta", JSON.stringify({ stop_ids: stopIds, distance_km: Number(totalDistance.toFixed(1)) }));
         return send(res, 200, getRouteWithStops(routeId));
       }
       if (p[1] === "routes" && req.method === "PUT" && p[2] && p[3] === "stops" && p[4]) {
