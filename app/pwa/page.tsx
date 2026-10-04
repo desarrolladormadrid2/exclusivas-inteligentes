@@ -3,7 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { APP_VERSION } from "../version";
 
-type PwaView = "almacen" | "reparto";
+type PwaView = "almacen" | "reparto" | "comercial";
 
 type PwaUser = {
   username: string;
@@ -17,6 +17,16 @@ type InstallPromptEvent = Event & {
 };
 
 const FALLBACK_USERS: PwaUser[] = [{ username: "Luis" }, { username: "Jose" }];
+
+const PWA_VIEW_LABELS: Record<PwaView, string> = {
+  almacen: "Almacén",
+  reparto: "Reparto",
+  comercial: "Comercial",
+};
+
+function pwaViewPath(view: PwaView) {
+  return view === "almacen" ? "/almacen" : view === "reparto" ? "/reparto" : "/comercial";
+}
 
 function readStoredSession() {
   try {
@@ -106,11 +116,11 @@ export default function PwaEntryPage() {
 
   function continueWithSession() {
     if (!view || !activeSession) return;
-    if (view === "almacen" && activeSession.role === "repartidor") {
+    if (view !== "reparto" && activeSession.role === "repartidor") {
       setError("Este usuario solo tiene acceso a la vista de reparto.");
       return;
     }
-    window.location.assign(view === "almacen" ? "/almacen" : "/reparto");
+    window.location.assign(pwaViewPath(view));
   }
 
   async function login(event: FormEvent<HTMLFormElement>) {
@@ -132,12 +142,12 @@ export default function PwaEntryPage() {
         setError(data.error || "Usuario o contraseña incorrectos.");
         return;
       }
-      if (view === "almacen" && data.user.role === "repartidor") {
+      if (view !== "reparto" && data.user.role === "repartidor") {
         setError("Este usuario solo tiene acceso a la vista de reparto.");
         return;
       }
       persistSession(data.user);
-      window.location.assign(view === "almacen" ? "/almacen" : "/reparto");
+      window.location.assign(pwaViewPath(view));
     } catch {
       setError("No se puede conectar con el CRM. Comprueba la conexión.");
     } finally {
@@ -185,12 +195,17 @@ export default function PwaEntryPage() {
                 <span><strong>Reparto</strong><small>Ruta, entregas, cobros e incidencias</small></span>
                 <span className="pwa-view-arrow" aria-hidden="true">→</span>
               </button>
+              <button type="button" className="pwa-view-card" onClick={() => chooseView("comercial")}>
+                <span className="pwa-view-icon" aria-hidden="true">€</span>
+                <span><strong>Comercial</strong><small>Pedidos, clientes, visitas y gestión comercial</small></span>
+                <span className="pwa-view-arrow" aria-hidden="true">→</span>
+              </button>
             </div>
           ) : (
             <div className="pwa-login-step">
               <div className="pwa-selected-view">
-                <span className="pwa-selected-view-icon" aria-hidden="true">{view === "almacen" ? "▦" : "⌁"}</span>
-                <span><small>Vista seleccionada</small><strong>{view === "almacen" ? "Almacén" : "Reparto"}</strong></span>
+                <span className="pwa-selected-view-icon" aria-hidden="true">{view === "almacen" ? "▦" : view === "reparto" ? "⌁" : "€"}</span>
+                <span><small>Vista seleccionada</small><strong>{PWA_VIEW_LABELS[view]}</strong></span>
                 <button type="button" className="pwa-change-view" onClick={resetView}>Cambiar</button>
               </div>
 
