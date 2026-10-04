@@ -61,8 +61,13 @@ function warehouseOriginFromRows(rows: any[]) {
     || warehouseRows[0];
   const latitude = Number(warehouse?.latitude);
   const longitude = Number(warehouse?.longitude);
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude === 0 || longitude === 0) return null;
-  return { latitude, longitude, label: [warehouse?.name || "Almacén", warehouse?.address || warehouse?.city || ""].filter(Boolean).join(" · ") };
+  const label = [warehouse?.name || "Almacén", warehouse?.address || warehouse?.city || ""].filter(Boolean).join(" · ");
+  if (Number.isFinite(latitude) && Number.isFinite(longitude) && latitude !== 0 && longitude !== 0) return { latitude, longitude, label };
+  const text = `${warehouse?.name || ""} ${warehouse?.address || ""} ${warehouse?.city || ""}`.toLocaleLowerCase();
+  if (text.includes("palencia") || text.includes("34004") || text.includes("inglaterra")) return { latitude: 42.0095, longitude: -4.5288, label: `${label} (estimación)` };
+  if (text.includes("madrid")) return { latitude: 40.4168, longitude: -3.7038, label: `${label} (estimación)` };
+  if (text.includes("getafe")) return { latitude: 40.3083, longitude: -3.7327, label: `${label} (estimación)` };
+  return null;
 }
 
 function routeMapsUrl(route: any, stops: any[], origin: any = null) {
