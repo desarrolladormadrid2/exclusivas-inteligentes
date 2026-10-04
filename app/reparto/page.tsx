@@ -30,6 +30,10 @@ function routeVehicleLabel(route: any) {
   return String(route?.vehicle || route?.vehicle_name || route?.vehicle_plate || "Camión sin indicar").trim() || "Camión sin indicar";
 }
 
+function routeDisplayName(route: any) {
+  return String(route?.route_name || route?.code || "Reparto sin nombre").trim() || "Reparto sin nombre";
+}
+
 function stopAddress(stop: any, shipment: any = null) {
   return [stop?.address || shipment?.address, stop?.city || shipment?.city].filter(Boolean).join(" · ") || "Dirección no indicada";
 }
@@ -296,7 +300,7 @@ function DeliveryPaymentPanel({ shipment, actor, onSaved }: { shipment: any; act
   </section>;
 }
 
-function DeliveryExpensePanel({ actor }: { actor: string }) {
+function DeliveryExpensePanel({ actor, route }: { actor: string; route: any }) {
   const [date, setDate] = useState(todayInput);
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState("Combustible");
@@ -309,6 +313,11 @@ function DeliveryExpensePanel({ actor }: { actor: string }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [expanded, setExpanded] = useState(false);
+  const driver = String(route?.driver || actor).trim() || actor;
+
+  useEffect(() => {
+    if (route?.route_date) setDate(String(route.route_date).slice(0, 10));
+  }, [route?.id, route?.route_date]);
 
   async function load() {
     setLoading(true);
@@ -338,7 +347,7 @@ function DeliveryExpensePanel({ actor }: { actor: string }) {
     setSaving(true); setMessage("");
     try {
       const response = await fetch("/api/expenses", { method: "POST", headers: { "Content-Type": "application/json", "X-Actor": actor }, body: JSON.stringify({
-        code: `GAS-${String(Date.now()).slice(-8)}`, expense_date: date, category, vendor, amount: numericAmount, vat: 21, payment_method: paymentMethod, notes, status: "Pendiente", created_by: actor,
+        code: `GAS-${String(Date.now()).slice(-8)}`, expense_date: date, category, vendor, amount: numericAmount, vat: 21, payment_method: paymentMethod, notes, status: "Pendiente", created_by: actor, route_id: route?.id || null, vehicle_id: route?.vehicle_id || null, driver, route_code: routeDisplayName(route),
         ...(file ? { attachment_name: file.name, attachment_mime: file.mime, attachment_data: file.data } : {}),
       }) });
       const body = await response.json().catch(() => ({}));
@@ -350,14 +359,19 @@ function DeliveryExpensePanel({ actor }: { actor: string }) {
 
   return <section className={`reparto-expense-panel panel${expanded ? " is-expanded" : ""}`} aria-label="Gastos de ruta">
     <header className="reparto-expense-head"><div><p className="eyebrow">GASTOS DE RUTA</p><h2>Subir un gasto</h2><span>Envía combustible, aparcamiento, comidas u otros gastos con una foto del ticket.</span></div><strong>Revisión pendiente</strong><button type="button" className="reparto-panel-toggle" onClick={() => setExpanded((current) => !current)}>{expanded ? "Ocultar" : "Abrir"}</button></header>
+    <div className="reparto-expense-context" aria-label="Datos del gasto"><span><b>Conductor</b>{driver}</span><span><b>Día</b>{dateLabel(date)}</span><span><b>Reparto</b>{route ? `${routeDisplayName(route)} · ${routeVehicleLabel(route)}` : "Sin ruta seleccionada"}</span></div>
     <form className="reparto-expense-form" onSubmit={(event) => void save(event)}>
       <div className="reparto-expense-fields"><label>Importe total *<input required type="number" min="0" step="0.01" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0,00 €" disabled={saving} /></label><label>Fecha *<input required type="date" value={date} onChange={(event) => setDate(event.target.value)} disabled={saving} /></label><label>Categoría<select value={category} onChange={(event) => setCategory(event.target.value)} disabled={saving}><option>Combustible</option><option>Aparcamiento</option><option>Comida</option><option>Peaje</option><option>Material</option><option>Otros</option></select></label><label>Forma de pago<select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)} disabled={saving}><option>Tarjeta</option><option>Efectivo</option><option>Transferencia</option><option>Otro</option></select></label><label>Comercio o proveedor<input value={vendor} onChange={(event) => setVendor(event.target.value)} placeholder="Ej. Gasolinera, restaurante…" disabled={saving} /></label><label className="reparto-expense-wide">Explicación del gasto *<textarea required rows={2} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Ej. Repostaje de la ruta Madrid · Toledo…" disabled={saving} /></label></div>
       <div className="reparto-expense-upload"><label>Ticket o factura<span className="reparto-expense-photo-button">📷 Hacer foto o subir ticket<input type="file" accept="image/*,.pdf" capture="environment" onChange={(event) => { readFile(event.target.files?.[0]); event.currentTarget.value = ""; }} disabled={saving} /></span><small>Haz una foto desde el móvil o sube un PDF · máximo 8 MB</small></label>{file && <div className="reparto-expense-file">{String(file.mime).includes("pdf") ? <b>PDF</b> : <img src={file.data} alt="Vista previa del justificante" />}<span>{file.name}</span><button type="button" onClick={() => setFile(null)} aria-label="Quitar justificante">×</button></div>}</div>
       {message && <p className="reparto-expense-message" role="status">{message}</p>}
-      <footer><span>Se guardará a tu nombre: <b>{actor}</b></span><button type="submit" className="button primary" disabled={saving}>{saving ? "Enviando…" : "Enviar gasto a revisión"}</button></footer>
+      <footer><span>Se guardará a nombre de <b>{driver}</b> y quedará vinculado al reparto del día.</span><button type="submit" className="button primary" disabled={saving || !route}>{saving ? "Enviando…" : "Enviar gasto a revisión"}</button></footer>
     </form>
-    <div className="reparto-expense-history"><div><b>Últimos gastos enviados</b><small>{loading ? "Cargando…" : rows.length ? "Solo visibles para tu usuario" : "Todavía no has enviado gastos"}</small></div>{rows.map((row) => <article key={row.id}><span>{row.category || "Otros"}</span><b>{Number(row.amount || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</b><small>{dateLabel(row.expense_date)} · {row.vendor || "Sin comercio"}{row.attachment_name ? " · 📎 ticket" : ""}</small><em>{row.status || "Pendiente"}</em></article>)}</div>
+    <div className="reparto-expense-history"><div><b>Últimos gastos enviados</b><small>{loading ? "Cargando…" : rows.length ? "Solo visibles para tu usuario" : "Todavía no has enviado gastos"}</small></div>{rows.map((row) => <article key={row.id}><span>{row.category || "Otros"}</span><b>{Number(row.amount || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</b><small>{dateLabel(row.expense_date)} · {row.driver || "Sin conductor"} · {row.route_code || `Ruta #${row.route_id || "—"}`}{row.attachment_name ? " · 📎 ticket" : ""}</small><em>{row.status || "Pendiente"}</em></article>)}</div>
   </section>;
+}
+
+function DeliveryHistoryPanel({ rows, loading, onOpen }: { rows: any[]; loading: boolean; onOpen: (row: any) => void }) {
+  return <section className="reparto-history panel" aria-label="Repartos guardados"><header><div><p className="eyebrow">HISTÓRICO</p><h2>Repartos guardados</h2><span>Consulta qué se repartió con cada camión y conductor por día.</span></div><strong>{rows.length} registros</strong></header>{loading ? <p className="reparto-history-empty">Cargando repartos…</p> : rows.length ? <div className="reparto-history-table" role="table" aria-label="Histórico de repartos"><div className="reparto-history-row reparto-history-head" role="row"><span>Día</span><span>Reparto y conductor</span><span>Camión</span><span>Pedidos</span><span>Estado</span></div>{rows.map((row) => <button type="button" className="reparto-history-row" role="row" key={row.id} onClick={() => onOpen(row)}><span>{dateLabel(row.route_date)}</span><span><b>{routeDisplayName(row)}</b><small>{row.driver || "Sin conductor"}</small></span><span>{row.vehicle_name || row.vehicle_plate || row.vehicle || "Sin camión"}</span><span>{Number(row.delivered_count || 0)}/{Number(row.delivery_count || 0)}</span><span>{row.closure_status || row.status || "Planificado"}</span></button>)}</div> : <p className="reparto-history-empty">Todavía no hay repartos guardados.</p>}</section>;
 }
 
 export default function RepartoPage() {
@@ -367,6 +381,9 @@ export default function RepartoPage() {
   const [points, setPoints] = useState<any[]>([]);
   const [warehouseOrigin, setWarehouseOrigin] = useState<any>(null);
   const [routes, setRoutes] = useState<any[]>([]);
+  const [vehicles, setVehicles] = useState<any[]>([]);
+  const [deliveryHistory, setDeliveryHistory] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [activeRouteId, setActiveRouteId] = useState<number | null>(null);
   const [selectedShipment, setSelectedShipment] = useState<any>(null);
   const [selectedLines, setSelectedLines] = useState<any[]>([]);
@@ -387,6 +404,9 @@ export default function RepartoPage() {
   const [orderStorageReady, setOrderStorageReady] = useState(false);
   const [draggingStopId, setDraggingStopId] = useState<string | number | null>(null);
   const [dragOverStopId, setDragOverStopId] = useState<string | number | null>(null);
+  const [routeDraft, setRouteDraft] = useState({ route_name: "", driver: "", vehicle_id: "" });
+  const [routeSaving, setRouteSaving] = useState(false);
+  const [routeMessage, setRouteMessage] = useState("");
   const gpsWatchRef = useRef<number | null>(null);
   const selectedShipmentRef = useRef<any>(null);
   const returnsOpenRef = useRef(false);
@@ -452,12 +472,14 @@ export default function RepartoPage() {
   }, []);
 
   async function load() {
-    setLoading(true);
+    setLoading(true); setHistoryLoading(true);
     try {
-      const [shipmentResponse, routeResponse, warehouseResponse] = await Promise.all([
+      const [shipmentResponse, routeResponse, warehouseResponse, vehicleResponse, historyResponse] = await Promise.all([
         fetch(`/api/shipments?date=${encodeURIComponent(date)}`),
         fetch(`/api/routes?date=${encodeURIComponent(date)}`),
         fetch("/api/warehouses?limit=50"),
+        fetch("/api/vehicles?active=1"),
+        fetch("/api/delivery_history?limit=100"),
       ]);
       const rawShipments = shipmentResponse.ok ? await shipmentResponse.json() : [];
       const shipmentRows = Array.isArray(rawShipments) ? rawShipments : [];
@@ -474,14 +496,19 @@ export default function RepartoPage() {
       setShipments(nextShipments);
       const nextRoutes = routeResponse.ok ? await routeResponse.json() : [];
       const nextWarehouses = warehouseResponse.ok ? await warehouseResponse.json() : [];
+      const nextVehicles = vehicleResponse.ok ? await vehicleResponse.json() : [];
+      const nextHistory = historyResponse.ok ? await historyResponse.json() : [];
       setWarehouseOrigin(warehouseOriginFromRows(nextWarehouses));
       setRoutes(Array.isArray(nextRoutes) ? nextRoutes : []);
+      setVehicles(Array.isArray(nextVehicles) ? nextVehicles : []);
+      setDeliveryHistory(Array.isArray(nextHistory) ? nextHistory : []);
+      setHistoryLoading(false);
       const firstRoute = Array.isArray(nextRoutes) && nextRoutes.length ? nextRoutes[0] : null;
       setActiveRouteId((current) => current && nextRoutes.some((route: any) => Number(route.id) === current) ? current : firstRoute?.id || null);
     } catch {
       setMessage("No se han podido cargar los datos del reparto.");
     } finally {
-      setLoading(false);
+      setLoading(false); setHistoryLoading(false);
     }
   }
 
@@ -516,6 +543,28 @@ export default function RepartoPage() {
     .filter((item) => String(item.shipping_date || item.expected_delivery_at || "").slice(0, 10) === date)
     .sort((a, b) => String(a.opening_time || "99:99").localeCompare(String(b.opening_time || "99:99")) || String(a.client_name).localeCompare(String(b.client_name), "es")), [shipments, date]);
   const activeRoute = routes.find((route) => Number(route.id) === Number(activeRouteId)) || null;
+  useEffect(() => {
+    if (!activeRoute) { setRouteDraft({ route_name: "", driver: "", vehicle_id: "" }); return; }
+    const matchingVehicle = vehicles.find((vehicle) => Number(vehicle.id) === Number(activeRoute.vehicle_id))
+      || vehicles.find((vehicle) => [vehicle.name, vehicle.plate].some((value) => String(value || "").trim() === routeVehicleLabel(activeRoute)));
+    setRouteDraft({ route_name: String(activeRoute.route_name || activeRoute.code || ""), driver: String(activeRoute.driver || actor), vehicle_id: matchingVehicle ? String(matchingVehicle.id) : String(activeRoute.vehicle_id || "") });
+    setRouteMessage("");
+  }, [activeRoute?.id, activeRoute?.route_name, activeRoute?.driver, activeRoute?.vehicle_id, activeRoute?.vehicle, vehicles, actor]);
+
+  async function saveRouteDetails(event: FormEvent) {
+    event.preventDefault();
+    if (!activeRoute?.id) return;
+    setRouteSaving(true); setRouteMessage("");
+    try {
+      const selectedVehicle = vehicles.find((vehicle) => String(vehicle.id) === String(routeDraft.vehicle_id));
+      const response = await fetch(`/api/routes/${activeRoute.id}`, { method: "PUT", headers: { "Content-Type": "application/json", "X-Actor": actor }, body: JSON.stringify({ route_name: routeDraft.route_name.trim() || activeRoute.code, driver: routeDraft.driver.trim() || actor, vehicle_id: selectedVehicle?.id || null, vehicle: selectedVehicle?.plate || selectedVehicle?.name || "" }) });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "No se han podido guardar los datos del reparto.");
+      setRoutes((current) => current.map((route) => Number(route.id) === Number(body.id) ? body : route));
+      setRouteMessage("Datos del conductor, camión y reparto guardados.");
+    } catch (error: any) { setRouteMessage(error?.message || "No se han podido guardar los datos del reparto."); }
+    finally { setRouteSaving(false); }
+  }
   const orderedSuggestedShipments = useMemo(() => {
     const savedIds = suggestedOrderByDate[date] || [];
     if (!savedIds.length) return dayShipments;
@@ -705,7 +754,8 @@ const response = await fetch("/api/returns", { method: "POST", headers: { "Conte
       <section className="reparto-head"><div><p className="eyebrow">OPERATIVA DE REPARTO</p><h1>Reparto de hoy</h1><p>Consulta tu ruta, abre cada entrega y registra la recepción desde el móvil.</p></div><div className="reparto-head-actions"><BarcodeScanner label="Escanear pedido" description="Apunta al QR o código de barras del pedido o de la etiqueta de envío." onDetected={(value) => void openScannedShipment(value)} disabled={loading} /><button type="button" className="reparto-refresh" onClick={() => void load()} disabled={loading}>↻ Actualizar</button></div></section>
       <section className="reparto-datebar"><button type="button" onClick={() => setDate(todayInput())} className={date === todayInput() ? "active" : ""}>Hoy <small>{dateLabel(todayInput())}</small></button><button type="button" onClick={() => setDate(offsetDate(1))} className={date === offsetDate(1) ? "active" : ""}>Mañana <small>{dateLabel(offsetDate(1))}</small></button><label>Otra fecha<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label></section>
       <section className="reparto-kpis"><article><strong>{dayShipments.length}</strong><span>entregas del día</span></article><article><strong>{pending}</strong><span>pendientes</span></article><article><strong>{completed}</strong><span>paradas completadas</span></article><article className={incidents ? "attention" : ""}><strong>{incidents}</strong><span>con incidencias</span></article></section>
-      {routes.length > 0 && <section className="reparto-truck-selector panel" aria-label="Seleccionar camión"><header><div><p className="eyebrow">RUTAS DE HOY</p><h2>Elige el camión</h2><span>Cada camión tiene su propia ruta y sus propios pedidos.</span></div><strong>{routes.length} {routes.length === 1 ? "ruta" : "rutas"}</strong></header><div className="reparto-truck-options">{routes.map((route) => <button type="button" key={route.id} className={`reparto-truck-option${Number(route.id) === Number(activeRouteId) ? " active" : ""}`} aria-pressed={Number(route.id) === Number(activeRouteId)} onClick={() => setActiveRouteId(Number(route.id))}><span className="reparto-truck-icon" aria-hidden="true">▰</span><span><b>{routeVehicleLabel(route)}</b><small>{route.code} · {route.driver || "Sin repartidor"}</small></span><strong>{route.stops?.length || 0}<small>pedidos</small></strong></button>)}</div></section>}
+      {routes.length > 0 && <section className="reparto-truck-selector panel" aria-label="Seleccionar camión"><header><div><p className="eyebrow">RUTAS DE HOY</p><h2>Elige el camión</h2><span>Cada camión tiene su propia ruta y sus propios pedidos.</span></div><strong>{routes.length} {routes.length === 1 ? "ruta" : "rutas"}</strong></header><div className="reparto-truck-options">{routes.map((route) => <button type="button" key={route.id} className={`reparto-truck-option${Number(route.id) === Number(activeRouteId) ? " active" : ""}`} aria-pressed={Number(route.id) === Number(activeRouteId)} onClick={() => setActiveRouteId(Number(route.id))}><span className="reparto-truck-icon" aria-hidden="true">▰</span><span><b>{routeVehicleLabel(route)}</b><small>{routeDisplayName(route)} · {route.driver || "Sin repartidor"}</small></span><strong>{route.stops?.length || 0}<small>pedidos</small></strong></button>)}</div></section>}
+      {activeRoute && <section className="reparto-route-settings panel" aria-label="Datos editables del reparto"><header><div><p className="eyebrow">DATOS DEL REPARTO</p><h2>Conductor, camión y nombre de ruta</h2><span>El conductor puede dejar actualizados los datos del reparto antes de empezar.</span></div><strong>{routeDisplayName(activeRoute)}</strong></header><form onSubmit={(event) => void saveRouteDetails(event)}><label>Nombre del conductor<input value={routeDraft.driver} onChange={(event) => setRouteDraft((current) => ({ ...current, driver: event.target.value }))} placeholder="Nombre y apellidos" disabled={routeSaving} /></label><label>Nombre del reparto<input value={routeDraft.route_name} onChange={(event) => setRouteDraft((current) => ({ ...current, route_name: event.target.value }))} placeholder="Ej. Reparto Palencia norte" disabled={routeSaving} /></label><label>Camión<select value={routeDraft.vehicle_id} onChange={(event) => setRouteDraft((current) => ({ ...current, vehicle_id: event.target.value }))} disabled={routeSaving}><option value="">Sin camión seleccionado</option>{vehicles.map((vehicle) => <option value={vehicle.id} key={vehicle.id}>{vehicle.name}{vehicle.plate ? ` · ${vehicle.plate}` : ""}</option>)}</select></label><button type="submit" className="button primary" disabled={routeSaving}>{routeSaving ? "Guardando…" : "Guardar datos del reparto"}</button></form>{routeMessage && <p className="reparto-route-settings-message" role="status">{routeMessage}</p>}</section>}
       <section className={`reparto-driver-brief${activeRoute ? "" : " is-pending"}`} aria-label="Resumen de la jornada"><header><div><p className="eyebrow">MI JORNADA</p><h2>{activeRoute ? `Ruta ${activeRoute.code}` : "Jornada pendiente de asignación"}</h2><span>{activeRoute ? `${activeRoute.driver || actor} · ${routeVehicleLabel(activeRoute)}` : "El almacén aún no ha guardado un camión para esta fecha."}</span></div><strong>{activeRoute ? "LISTO PARA REPARTIR" : "ESPERANDO CARGA"}</strong></header><div className="reparto-driver-brief-grid"><span><b>Pedidos</b>{activeRoute ? activeRouteShipments.length : dayShipments.length} · {routePackages} bultos</span><span><b>Ruta</b>{activeRoute ? `${routeStops.length} paradas` : "Orden sugerido"}</span><span><b>Distancia</b>{routeDistance > 0 ? `${routeDistance.toFixed(1)} km estimados` : "Se calcula al guardar la ruta"}</span><span><b>Seguimiento</b>{completed}/{routeStops.length || dayShipments.length} entregas</span></div>{activeRoute?.maps_url ? <a className="reparto-driver-brief-link" href={activeRoute.maps_url} target="_blank" rel="noreferrer">↗ Abrir navegación de toda la ruta</a> : <small className="reparto-driver-brief-note">Cuando almacén asigne y guarde el camión aparecerán aquí la ruta y sus kilómetros.</small>}</section>
       {routeStops.length > 0 && <section className="reparto-route-summary panel" aria-label="Resumen de pedidos y direcciones"><header><div><p className="eyebrow">RESUMEN RÁPIDO</p><h2>{activeRoute ? `Pedidos de ${routeVehicleLabel(activeRoute)}` : "Pedidos de hoy"}</h2><span>Orden de visita y dirección de cada entrega.</span></div><strong>{routeStops.length} {routeStops.length === 1 ? "pedido" : "pedidos"}</strong></header><ol>{routeStops.map((stop: any, index: number) => { const shipment = shipments.find((item) => Number(item.id) === Number(stop.shipment_id)) || stop; return <li key={`summary-${stop.id}`}><b>{stop.position || index + 1}</b><span><strong>{stop.client_name || shipment.client_name || "Cliente sin nombre"}</strong><small>{stopAddress(stop, shipment)}</small></span><em>{shipment.code || stop.shipment_code || "Pedido"}</em></li>; })}</ol></section>}
       {routeStops.length > 0 && <RepartoRouteMapPanel stops={routeStops} route={activeRoute} origin={warehouseOrigin} currentPosition={gpsPosition} gpsActive={gpsActive} gpsError={gpsError} onStartGps={startGps} onStopGps={stopGps} />}
@@ -714,7 +764,8 @@ const response = await fetch("/api/returns", { method: "POST", headers: { "Conte
       <div className="reparto-layout"><section className="reparto-stops panel"><div className="reparto-panel-head"><div><p className="eyebrow">{activeRoute ? activeRoute.code : "ORDEN SUGERIDO"}</p><h2>{activeRoute ? `Ruta de ${activeRoute.driver || "reparto"}` : "Entregas para hoy"}</h2><span>{activeRoute ? `${activeRoute.stops?.length || 0} paradas · ${activeRoute.vehicle || "Vehículo sin indicar"} · Arrastra para reordenar` : "Ordenadas por horario de apertura · Arrastra para reordenar"}</span></div>{activeRoute?.maps_url && <a className="button primary" href={activeRoute.maps_url} target="_blank" rel="noreferrer">Navegar toda la ruta</a>}</div>{loading ? <div className="reparto-loading" role="status">Cargando entregas…</div> : !routeStops.length ? <div className="reparto-empty"><b>No hay entregas para esta fecha.</b><span>Prueba otra fecha o vuelve al CRM para planificar la ruta.</span></div> : <ol className="reparto-stop-list">{routeStops.map((stop: any, index: number) => { const shipment = shipments.find((item) => Number(item.id) === Number(stop.shipment_id)) || stop; const delivery = deliveryState(stop, shipment); const done = delivery.key === "delivered"; const signatureDone = String(shipment.delivery_signature_status || "").toLocaleLowerCase() === "firmado"; const paymentDone = String(shipment.payment_received_status || "").toLocaleLowerCase() === "recibido"; const destination = mapsUrl({ ...shipment, ...stop }); return <li draggable className={`reparto-stop ${delivery.key}${done ? " done" : ""}${String(draggingStopId) === String(stop.id) ? " dragging" : ""}${String(dragOverStopId) === String(stop.id) ? " drag-over" : ""}`} key={stop.id} onDragStart={(event) => startStopDrag(event, stop)} onDragOver={(event) => { event.preventDefault(); setDragOverStopId(stop.id); }} onDragLeave={() => setDragOverStopId((current) => String(current) === String(stop.id) ? null : current)} onDrop={(event) => dropStop(event, stop)} onDragEnd={() => { setDraggingStopId(null); setDragOverStopId(null); }}><div className="reparto-stop-number">{done ? "✓" : stop.position || index + 1}</div><div className="reparto-stop-main"><div className="reparto-stop-title"><div><b>{stop.client_name || shipment.client_name}</b><small>{shipment.code || stop.shipment_code || "Envío"}</small></div><span className={`reparto-stop-status ${delivery.key}`}>{delivery.label}</span></div><p>{[stop.address || shipment.address, stop.city || shipment.city].filter(Boolean).join(" · ") || "Dirección no indicada"}</p><small className="reparto-stop-window">{stop.opening_time && stop.closing_time ? `Horario ${stop.opening_time}–${stop.closing_time}` : "Horario pendiente de indicar"}{stop.distance_km ? ` · ${Number(stop.distance_km).toFixed(1)} km desde la anterior` : ""}</small><small className="reparto-stop-proof">{Math.max(1, Number(shipment.packages || 1))} bultos · {signatureDone ? "✓ Firmado" : "Firma pendiente"} · {paymentDone ? "✓ Cobrado" : "Cobro pendiente"}</small><div className="reparto-stop-actions">{destination ? <a className="reparto-map-button" href={destination} target="_blank" rel="noreferrer">↗ Cómo llegar</a> : <span className="reparto-no-map">Ubicación sin dirección</span>}<button type="button" className="reparto-open-button" onClick={() => void openShipment(shipment)}>Abrir entrega</button><button type="button" className={`reparto-check-button${done ? " checked" : ""}`} onClick={() => void updateStop(stop, done ? "Pendiente" : "Completada")}>{done ? "Deshacer entrega" : "Marcar entregado"}</button><span className="reparto-reorder"><button type="button" aria-label="Subir parada" onClick={() => reorderStopsAround(index, -1)} disabled={index === 0}>↑</button><button type="button" aria-label="Bajar parada" onClick={() => reorderStopsAround(index, 1)} disabled={index === routeStops.length - 1}>↓</button></span></div></div></li>; })}</ol>}</section>
         <aside className="reparto-side"><section className="reparto-route-picker panel"><div className="reparto-panel-head compact"><div><p className="eyebrow">PLANIFICACIÓN</p><h2>Mis rutas</h2><span>Selecciona la ruta asignada</span></div></div>{routes.length ? routes.map((route) => <button type="button" key={route.id} className={`reparto-route-option${Number(route.id) === Number(activeRouteId) ? " active" : ""}`} onClick={() => setActiveRouteId(Number(route.id))}><span><b>{route.code}</b><small>{dateLabel(route.route_date)} · {route.driver || "Sin repartidor"}</small></span><strong>{route.stops?.length || 0}</strong></button>) : <p className="reparto-empty small">No hay una ruta planificada para esta fecha.</p>}<p className="reparto-plan-link reparto-driver-note">La planificación y los cambios de ruta los gestiona el equipo desde el CRM.</p></section><section className="reparto-help panel"><p className="eyebrow">SECUENCIA RECOMENDADA</p><h2>Una entrega cada vez</h2><p>Abre Maps para llegar, entra en la entrega para enseñar el pedido al cliente y registra firma, fotos o incidencias antes de continuar.</p></section></aside></div>
       {activeRoute && <DriverDailyClosingPanel route={activeRoute} stops={routeStops} shipments={shipments} actor={actor} />}
-      <DeliveryExpensePanel actor={actor} />
+      <DeliveryHistoryPanel rows={deliveryHistory} loading={historyLoading} onOpen={(row) => { setDate(String(row.route_date).slice(0, 10)); setActiveRouteId(Number(row.id)); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
+      <DeliveryExpensePanel actor={actor} route={activeRoute} />
     </div>
     {selectedShipment && <div className="reparto-detail-overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setSelectedShipment(null)}><section className="reparto-detail-modal" role="dialog" aria-modal="true" aria-label={`Detalle del envío ${selectedShipment.code || ""}`}><header className="reparto-detail-head"><div><p className="eyebrow">ENTREGA · {selectedShipment.shipping_date ? dateLabel(selectedShipment.shipping_date) : ""}</p><h2>{selectedShipment.client_name}</h2><span>{selectedShipment.code} · {[selectedShipment.address, selectedShipment.city].filter(Boolean).join(" · ")}</span><div className="reparto-contact-line"><span>{clients.find((client) => Number(client.id) === Number(selectedShipment.client_id))?.phone || "Teléfono no indicado"}</span>{phoneUrl(clients.find((client) => Number(client.id) === Number(selectedShipment.client_id))?.phone) && <a href={phoneUrl(clients.find((client) => Number(client.id) === Number(selectedShipment.client_id))?.phone)}>Llamar</a>}{whatsappUrl(clients.find((client) => Number(client.id) === Number(selectedShipment.client_id))?.phone, selectedShipment) && <a href={whatsappUrl(clients.find((client) => Number(client.id) === Number(selectedShipment.client_id))?.phone, selectedShipment)} target="_blank" rel="noreferrer">WhatsApp</a>}</div></div><button type="button" className="reparto-close" onClick={() => setSelectedShipment(null)} aria-label="Cerrar detalle">×</button></header>{detailLoading ? <div className="reparto-loading">Cargando contenido del pedido…</div> : <><div className="reparto-detail-facts"><span><b>HORARIO</b>{selectedShipment.opening_time && selectedShipment.closing_time ? `${selectedShipment.opening_time}–${selectedShipment.closing_time}` : "Pendiente"}</span><span><b>BULTOS</b>{selectedShipment.packages || "—"}</span><span><b>ESTADO</b>{selectedShipment.status || "Pendiente"}</span></div><div className="reparto-detail-actions">{mapsUrl(selectedShipment) ? <a className="button primary" href={mapsUrl(selectedShipment)} target="_blank" rel="noreferrer">Cómo llegar con Maps</a> : <span className="reparto-no-map">Ubicación sin dirección</span>}<button type="button" className="button secondary" onClick={async () => { const address = [selectedShipment.address, selectedShipment.city].filter(Boolean).join(", "); if (!address) return setMessage("Este pedido no tiene una dirección indicada."); try { await navigator.clipboard.writeText(address); setMessage("Dirección copiada para usarla en el navegador o Maps."); } catch { setMessage("No se ha podido copiar la dirección."); } }}>Copiar dirección</button><button type="button" className="button secondary" onClick={() => { setReturnLine(selectedLines[0] || null); setReturnsOpen(true); }}>Tramitar devolución</button></div>{selectedShipment.incidents && <div className="reparto-incident"><b>Incidencias / indicaciones</b><p>{selectedShipment.incidents}</p></div>}<div className="reparto-lines"><h3>Contenido del pedido</h3>{selectedLines.length ? selectedLines.map((line) => <div key={line.id} className="reparto-line"><span>{line.quantity_requested || line.quantity} {line.quantity_unit || "uds."}</span><b>{line.product_name}</b><button type="button" onClick={() => { setReturnLine(line); setReturnsOpen(true); }}>Devolver</button></div>) : <p>No hay líneas cargadas para este pedido.</p>}</div><DeliverySignaturePanel shipment={selectedShipment} actor={actor} client={clients.find((client) => Number(client.id) === Number(selectedShipment.client_id))} lines={selectedLines} products={products} onSaved={(updated) => { setSelectedShipment((current: any) => ({ ...current, ...updated, status: updated.status || "Entregado" })); setShipments((current) => current.map((item) => Number(item.id) === Number(updated.id) ? { ...item, ...updated } : item)); const matchingStop = activeRoute && routeStops.find((stop: any) => Number(stop.shipment_id) === Number(updated.id)); if (matchingStop) void updateStop(matchingStop, "Completada"); }} /><DeliveryPaymentPanel shipment={selectedShipment} actor={actor} onSaved={(updated) => { setSelectedShipment((current: any) => ({ ...current, ...updated })); setShipments((current) => current.map((item) => Number(item.id) === Number(updated.id) ? { ...item, ...updated } : item)); }} /></>}</section></div>}
     {returnsOpen && selectedShipment && <div className="reparto-return-overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setReturnsOpen(false)}><form className="reparto-return-modal" onSubmit={(event) => void saveReturn(event)}><header><div><p className="eyebrow">DEVOLUCIÓN</p><h2>Registrar devolución</h2><span>{selectedShipment.client_name} · {selectedShipment.code}</span></div><button type="button" className="reparto-close" onClick={() => setReturnsOpen(false)} aria-label="Cerrar devolución">×</button></header><label>Producto<select value={returnLine?.id || ""} onChange={(event) => setReturnLine(selectedLines.find((line) => String(line.id) === event.target.value) || null)}>{selectedLines.map((line) => <option key={line.id} value={line.id}>{line.product_name}</option>)}</select></label><label>Cantidad<input type="number" min="1" step="1" value={returnQuantity} onChange={(event) => setReturnQuantity(event.target.value)} /></label><label>Motivo<textarea required rows={4} value={returnReason} onChange={(event) => setReturnReason(event.target.value)} placeholder="Ej.: dos cajas dañadas al descargar…" /></label><p className="reparto-return-note">La devolución queda pendiente de revisión y se vincula al cliente y al envío.</p><footer><button type="button" className="button secondary" onClick={() => setReturnsOpen(false)}>Cancelar</button><button type="submit" className="button primary" disabled={saving}>{saving ? "Guardando…" : "Registrar devolución"}</button></footer></form></div>}

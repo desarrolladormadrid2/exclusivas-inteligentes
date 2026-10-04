@@ -597,22 +597,22 @@ try { db.exec("ALTER TABLE collection_points ADD COLUMN geocoding_status TEXT DE
 db.exec(`CREATE TABLE IF NOT EXISTS audit_logs(id INTEGER PRIMARY KEY AUTOINCREMENT,actor TEXT DEFAULT 'Usuario local',method TEXT NOT NULL,resource TEXT NOT NULL,action TEXT NOT NULL,details TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS product_location_history(id INTEGER PRIMARY KEY AUTOINCREMENT,product_id INTEGER NOT NULL,previous_location TEXT,current_location TEXT,changed_by TEXT DEFAULT 'Usuario local',changed_at TEXT DEFAULT CURRENT_TIMESTAMP,source TEXT DEFAULT 'CRM');`);
 db.exec(`CREATE TABLE IF NOT EXISTS scheduled_tasks(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,action_text TEXT NOT NULL,schedule_type TEXT DEFAULT 'Unica',recurrence TEXT,next_run TEXT,status TEXT DEFAULT 'Activa',last_run TEXT,last_result TEXT,created_by TEXT DEFAULT 'Usuario local',created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS backup_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,created_at TEXT NOT NULL,created_by TEXT,source TEXT DEFAULT 'Turso',tables_json TEXT NOT NULL,data_base64 TEXT NOT NULL,checksum TEXT NOT NULL,status TEXT DEFAULT 'Disponible',restored_at TEXT,restored_by TEXT,size_bytes INTEGER DEFAULT 0);`);
-db.exec(`CREATE TABLE IF NOT EXISTS delivery_routes(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,route_date TEXT NOT NULL,driver TEXT,vehicle TEXT,status TEXT DEFAULT 'Planificada',radius_meters REAL DEFAULT 150,origin_address TEXT,origin_latitude REAL,origin_longitude REAL,notes TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
+db.exec(`CREATE TABLE IF NOT EXISTS delivery_routes(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,route_name TEXT,route_date TEXT NOT NULL,driver TEXT,vehicle TEXT,status TEXT DEFAULT 'Planificada',radius_meters REAL DEFAULT 150,origin_address TEXT,origin_latitude REAL,origin_longitude REAL,notes TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS delivery_route_positions(id INTEGER PRIMARY KEY AUTOINCREMENT,route_id INTEGER NOT NULL,latitude REAL NOT NULL,longitude REAL NOT NULL,accuracy_m REAL,speed_mps REAL,heading REAL,recorded_at TEXT NOT NULL,created_by TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS driver_daily_closures(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,closure_date TEXT NOT NULL,driver TEXT,vehicle_id INTEGER,route_id INTEGER,route_code TEXT,status TEXT DEFAULT 'Pendiente de revisar',deliveries_total INTEGER DEFAULT 0,delivered_total INTEGER DEFAULT 0,incident_total INTEGER DEFAULT 0,pending_total INTEGER DEFAULT 0,cash_total REAL DEFAULT 0,card_total REAL DEFAULT 0,transfer_total REAL DEFAULT 0,other_total REAL DEFAULT 0,total_collected REAL DEFAULT 0,cash_handover_amount REAL,cash_difference REAL,km_start REAL,km_end REAL,distance_km REAL,fuel_liters REAL DEFAULT 0,fuel_amount REAL DEFAULT 0,fuel_station TEXT,fuel_reference TEXT,notes TEXT,reviewed_by TEXT,reviewed_at TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS vehicles(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,name TEXT NOT NULL,plate TEXT UNIQUE,brand TEXT,model TEXT,active INTEGER DEFAULT 1,odometer_km REAL DEFAULT 0,maintenance_interval_km REAL DEFAULT 30000,maintenance_interval_days INTEGER DEFAULT 180,next_maintenance_km REAL,next_maintenance_date TEXT,notes TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS vehicle_trips(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,vehicle_id INTEGER NOT NULL,route_id INTEGER,route_date TEXT NOT NULL,route_code TEXT,driver TEXT,planned_distance_km REAL DEFAULT 0,start_km REAL,end_km REAL,distance_km REAL,status TEXT DEFAULT 'Planificada',notes TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS vehicle_refuels(id INTEGER PRIMARY KEY AUTOINCREMENT,vehicle_id INTEGER NOT NULL,trip_id INTEGER,fuel_date TEXT NOT NULL,station TEXT,liters REAL DEFAULT 0,amount REAL DEFAULT 0,ticket_reference TEXT,odometer_km REAL,notes TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS vehicle_maintenance(id INTEGER PRIMARY KEY AUTOINCREMENT,vehicle_id INTEGER NOT NULL,maintenance_date TEXT NOT NULL,maintenance_km REAL DEFAULT 0,maintenance_type TEXT NOT NULL,amount REAL DEFAULT 0,next_due_km REAL,next_due_date TEXT,notes TEXT,status TEXT DEFAULT 'Realizado',created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
-try { db.exec("ALTER TABLE delivery_routes ADD COLUMN vehicle_id INTEGER"); } catch {}
+for (const column of ["route_name TEXT", "vehicle_id INTEGER"]) { try { db.exec(`ALTER TABLE delivery_routes ADD COLUMN ${column}`); } catch {} }
 db.exec(`CREATE TABLE IF NOT EXISTS delivery_route_stops(id INTEGER PRIMARY KEY AUTOINCREMENT,route_id INTEGER NOT NULL,position INTEGER NOT NULL,shipment_id INTEGER,client_id INTEGER,collection_point_id INTEGER,client_name TEXT,address TEXT,city TEXT,opening_time TEXT,closing_time TEXT,latitude REAL,longitude REAL,distance_km REAL DEFAULT 0,status TEXT DEFAULT 'Pendiente',load_confirmed INTEGER DEFAULT 0,notes TEXT,driver_notes TEXT,invoice_delivery_method TEXT,created_at TEXT,updated_at TEXT);`);
 for (const column of ["opening_time TEXT", "closing_time TEXT", "load_confirmed INTEGER DEFAULT 0", "driver_notes TEXT", "invoice_delivery_method TEXT"]) { try { db.exec(`ALTER TABLE delivery_route_stops ADD COLUMN ${column}`); } catch {} }
 try {
   const duplicateTasks = db.prepare(`SELECT id FROM scheduled_tasks WHERE status='Activa' AND id NOT IN (SELECT MIN(id) FROM scheduled_tasks WHERE status='Activa' GROUP BY LOWER(TRIM(title)),LOWER(TRIM(action_text)),schedule_type,COALESCE(recurrence,''))`).all();
   for (const task of duplicateTasks) db.prepare("UPDATE scheduled_tasks SET status='Pausada',last_result='Pausada automáticamente: tarea duplicada',updated_at=? WHERE id=?").run(new Date().toISOString(), task.id);
 } catch {}
-db.exec(`CREATE TABLE IF NOT EXISTS expenses(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,client_id INTEGER,expense_date TEXT NOT NULL,category TEXT DEFAULT 'Otros',vendor TEXT,amount REAL DEFAULT 0,vat REAL DEFAULT 21,payment_method TEXT DEFAULT 'Tarjeta',notes TEXT,attachment_name TEXT,attachment_mime TEXT,attachment_data TEXT,status TEXT DEFAULT 'Pendiente',created_by TEXT,created_at TEXT,updated_at TEXT);`);
-for (const column of ["status TEXT DEFAULT 'Pendiente'", "created_by TEXT"]) { try { db.exec(`ALTER TABLE expenses ADD COLUMN ${column}`); } catch {} }
+db.exec(`CREATE TABLE IF NOT EXISTS expenses(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,client_id INTEGER,expense_date TEXT NOT NULL,category TEXT DEFAULT 'Otros',vendor TEXT,amount REAL DEFAULT 0,vat REAL DEFAULT 21,payment_method TEXT DEFAULT 'Tarjeta',notes TEXT,attachment_name TEXT,attachment_mime TEXT,attachment_data TEXT,status TEXT DEFAULT 'Pendiente',created_by TEXT,route_id INTEGER,route_code TEXT,vehicle_id INTEGER,driver TEXT,created_at TEXT,updated_at TEXT);`);
+for (const column of ["status TEXT DEFAULT 'Pendiente'", "created_by TEXT", "route_id INTEGER", "route_code TEXT", "vehicle_id INTEGER", "driver TEXT"]) { try { db.exec(`ALTER TABLE expenses ADD COLUMN ${column}`); } catch {} }
 db.exec(`CREATE TABLE IF NOT EXISTS ocr_documents(id INTEGER PRIMARY KEY AUTOINCREMENT,file_name TEXT NOT NULL,mime_type TEXT,file_size INTEGER DEFAULT 0,document_type TEXT DEFAULT 'Otro',detected_email TEXT,detected_total TEXT,extracted_text TEXT,status TEXT DEFAULT 'Pendiente',created_by TEXT DEFAULT 'Usuario local',created_at TEXT,updated_at TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS web_registrations(id INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL DEFAULT 'cliente',company_name TEXT NOT NULL,tax_id TEXT,contact_name TEXT NOT NULL,email TEXT NOT NULL,phone TEXT,address TEXT,city TEXT,message TEXT,status TEXT NOT NULL DEFAULT 'Pendiente de validar',created_at TEXT,updated_at TEXT,reviewed_by TEXT,reviewed_at TEXT);`);
 for (const column of ["commercial_name TEXT", "delivery_address TEXT", "delivery_city TEXT", "crm_record_id INTEGER", "crm_record_type TEXT", "rejection_reason TEXT"]) {
@@ -1548,7 +1548,7 @@ const lookupFields = {
   payments: ["id", "invoice_id", "amount", "payment_date", "method"],
   inventory_movements: ["id", "product_id", "warehouse_id", "movement_type", "quantity", "stock_effect", "reference", "movement_date", "notes"],
   product_lots: ["id", "product_id", "lot_code", "quantity", "quarantine_quantity", "waste_quantity", "expiry_date", "received_date", "warehouse_id", "barcode"],
-  expenses: ["id", "code", "client_id", "expense_date", "category", "vendor", "amount", "vat", "payment_method", "notes", "attachment_name", "status", "created_by", "created_at"],
+  expenses: ["id", "code", "client_id", "expense_date", "category", "vendor", "amount", "vat", "payment_method", "notes", "attachment_name", "status", "created_by", "route_id", "route_code", "vehicle_id", "driver", "created_at"],
 };
 const lookupProfiles = {
   products: {
@@ -2580,11 +2580,27 @@ export async function crmApiHandler(req, res) {
           body.vehicle_id = selectedVehicle;
           if (vehicle && body.vehicle === undefined) body.vehicle = vehicle.plate || vehicle.name;
         }
-        const allowed = ["driver", "vehicle", "vehicle_id", "status", "radius_meters", "notes", "origin_address", "origin_latitude", "origin_longitude"];
+        const allowed = ["route_name", "driver", "vehicle", "vehicle_id", "status", "radius_meters", "notes", "origin_address", "origin_latitude", "origin_longitude"];
         const changes = allowed.filter((key) => body[key] !== undefined);
         if (!changes.length) return send(res, 400, { error: "No hay cambios para guardar" });
         db.prepare(`UPDATE delivery_routes SET ${changes.map((key) => `${key}=?`).join(",")},updated_at=? WHERE id=?`).run(...changes.map((key) => body[key]), new Date().toISOString(), Number(p[2]));
         return send(res, 200, getRouteWithStops(p[2]));
+      }
+      if (p[1] === "delivery_history" && req.method === "GET") {
+        const params = new URL(req.url, "http://local").searchParams;
+        const conditions = ["CAST(COALESCE(dr.deleted,0) AS INTEGER)=0"];
+        const args = [];
+        if (params.get("date")) { conditions.push("dr.route_date=?"); args.push(String(params.get("date")).slice(0, 10)); }
+        if (params.get("vehicle_id")) { conditions.push("dr.vehicle_id=?"); args.push(Number(params.get("vehicle_id"))); }
+        const limit = Math.min(200, Math.max(1, Number(params.get("limit") || 100)));
+        const rows = db.prepare(`SELECT dr.*,v.name vehicle_name,v.plate vehicle_plate,
+          (SELECT COUNT(*) FROM delivery_route_stops drs WHERE drs.route_id=dr.id AND CAST(COALESCE(drs.deleted,0) AS INTEGER)=0) delivery_count,
+          (SELECT COUNT(*) FROM delivery_route_stops drs WHERE drs.route_id=dr.id AND CAST(COALESCE(drs.deleted,0) AS INTEGER)=0 AND drs.status IN ('Entregado','Completada')) delivered_count,
+          (SELECT COUNT(*) FROM delivery_route_stops drs WHERE drs.route_id=dr.id AND CAST(COALESCE(drs.deleted,0) AS INTEGER)=0 AND drs.status='Incidencia') incident_count,
+          (SELECT ddc.status FROM driver_daily_closures ddc WHERE ddc.route_id=dr.id AND CAST(COALESCE(ddc.deleted,0) AS INTEGER)=0 ORDER BY ddc.id DESC LIMIT 1) closure_status
+          FROM delivery_routes dr LEFT JOIN vehicles v ON v.id=dr.vehicle_id
+          WHERE ${conditions.join(" AND ")} ORDER BY dr.route_date DESC,dr.id DESC LIMIT ${limit}`).all(...args);
+        return send(res, 200, rows);
       }
       if (p[1] === "routes" && req.method === "DELETE" && p[2]) {
         const now = new Date().toISOString();

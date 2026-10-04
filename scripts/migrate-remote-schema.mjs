@@ -12,9 +12,13 @@ if (!env.TURSO_DATABASE_URL || !env.TURSO_AUTH_TOKEN) throw new Error("Faltan la
 const client = createClient({ url: env.TURSO_DATABASE_URL, authToken: env.TURSO_AUTH_TOKEN });
 const migrationsByTable = {
   expenses: [
-    ["table", "CREATE TABLE IF NOT EXISTS expenses(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,client_id INTEGER,expense_date TEXT NOT NULL,category TEXT DEFAULT 'Otros',vendor TEXT,amount REAL DEFAULT 0,vat REAL DEFAULT 21,payment_method TEXT DEFAULT 'Tarjeta',notes TEXT,attachment_name TEXT,attachment_mime TEXT,attachment_data TEXT,status TEXT DEFAULT 'Pendiente',created_by TEXT,created_at TEXT,updated_at TEXT)"],
+    ["table", "CREATE TABLE IF NOT EXISTS expenses(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,client_id INTEGER,expense_date TEXT NOT NULL,category TEXT DEFAULT 'Otros',vendor TEXT,amount REAL DEFAULT 0,vat REAL DEFAULT 21,payment_method TEXT DEFAULT 'Tarjeta',notes TEXT,attachment_name TEXT,attachment_mime TEXT,attachment_data TEXT,status TEXT DEFAULT 'Pendiente',created_by TEXT,route_id INTEGER,route_code TEXT,vehicle_id INTEGER,driver TEXT,created_at TEXT,updated_at TEXT)"],
     ["status", "ALTER TABLE expenses ADD COLUMN status TEXT DEFAULT 'Pendiente'"],
     ["created_by", "ALTER TABLE expenses ADD COLUMN created_by TEXT"],
+    ["route_id", "ALTER TABLE expenses ADD COLUMN route_id INTEGER"],
+    ["route_code", "ALTER TABLE expenses ADD COLUMN route_code TEXT"],
+    ["vehicle_id", "ALTER TABLE expenses ADD COLUMN vehicle_id INTEGER"],
+    ["driver", "ALTER TABLE expenses ADD COLUMN driver TEXT"],
   ],
   goods_receipts: [
     ["table", "CREATE TABLE IF NOT EXISTS goods_receipts(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,supplier_id INTEGER NOT NULL,purchase_order_id INTEGER,warehouse_id INTEGER,receipt_date TEXT NOT NULL,status TEXT DEFAULT 'Borrador',notes TEXT,created_by TEXT,received_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT)"],
@@ -94,7 +98,8 @@ const migrationsByTable = {
     ["table", "CREATE TABLE IF NOT EXISTS backup_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,created_at TEXT NOT NULL,created_by TEXT,source TEXT DEFAULT 'Turso',tables_json TEXT NOT NULL,data_base64 TEXT NOT NULL,checksum TEXT NOT NULL,status TEXT DEFAULT 'Disponible',restored_at TEXT,restored_by TEXT,size_bytes INTEGER DEFAULT 0)"],
   ],
   delivery_routes: [
-    ["table", "CREATE TABLE IF NOT EXISTS delivery_routes(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,route_date TEXT NOT NULL,driver TEXT,vehicle TEXT,status TEXT DEFAULT 'Planificada',radius_meters REAL DEFAULT 150,origin_address TEXT,origin_latitude REAL,origin_longitude REAL,notes TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT)"],
+    ["table", "CREATE TABLE IF NOT EXISTS delivery_routes(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,route_name TEXT,route_date TEXT NOT NULL,driver TEXT,vehicle TEXT,status TEXT DEFAULT 'Planificada',radius_meters REAL DEFAULT 150,origin_address TEXT,origin_latitude REAL,origin_longitude REAL,notes TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT)"],
+    ["route_name", "ALTER TABLE delivery_routes ADD COLUMN route_name TEXT"],
     ["vehicle_id", "ALTER TABLE delivery_routes ADD COLUMN vehicle_id INTEGER"],
   ],
   vehicles: [
@@ -111,6 +116,12 @@ const migrationsByTable = {
   ],
   driver_daily_closures: [
     ["table", "CREATE TABLE IF NOT EXISTS driver_daily_closures(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,closure_date TEXT NOT NULL,driver TEXT,vehicle_id INTEGER,route_id INTEGER,route_code TEXT,status TEXT DEFAULT 'Pendiente de revisar',deliveries_total INTEGER DEFAULT 0,delivered_total INTEGER DEFAULT 0,incident_total INTEGER DEFAULT 0,pending_total INTEGER DEFAULT 0,cash_total REAL DEFAULT 0,card_total REAL DEFAULT 0,transfer_total REAL DEFAULT 0,other_total REAL DEFAULT 0,total_collected REAL DEFAULT 0,cash_handover_amount REAL,cash_difference REAL,km_start REAL,km_end REAL,distance_km REAL,fuel_liters REAL DEFAULT 0,fuel_amount REAL DEFAULT 0,fuel_station TEXT,fuel_reference TEXT,notes TEXT,reviewed_by TEXT,reviewed_at TEXT,created_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT)"],
+  ],
+  expenses: [
+    ["route_id", "ALTER TABLE expenses ADD COLUMN route_id INTEGER"],
+    ["route_code", "ALTER TABLE expenses ADD COLUMN route_code TEXT"],
+    ["vehicle_id", "ALTER TABLE expenses ADD COLUMN vehicle_id INTEGER"],
+    ["driver", "ALTER TABLE expenses ADD COLUMN driver TEXT"],
   ],
   delivery_route_stops: [
     ["table", "CREATE TABLE IF NOT EXISTS delivery_route_stops(id INTEGER PRIMARY KEY AUTOINCREMENT,route_id INTEGER NOT NULL,position INTEGER NOT NULL,shipment_id INTEGER,client_id INTEGER,collection_point_id INTEGER,client_name TEXT,address TEXT,city TEXT,latitude REAL,longitude REAL,distance_km REAL DEFAULT 0,status TEXT DEFAULT 'Pendiente',load_confirmed INTEGER DEFAULT 0,notes TEXT,driver_notes TEXT,invoice_delivery_method TEXT,created_at TEXT,updated_at TEXT)"],
