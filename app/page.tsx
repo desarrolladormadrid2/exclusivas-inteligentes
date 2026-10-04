@@ -12164,7 +12164,7 @@ function WebRegistrationsManager({ user }: { user: any }) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "No se ha podido actualizar la solicitud.");
       setRows((current) => current.map((item) => item.id === row.id ? { ...item, ...data, status, rejection_reason: rejectionReason || null } : item));
-      setMessage(status === "Validada" ? `Solicitud de ${row.company_name} validada y vinculada al CRM en ${data.crm_record_type === "proveedor" ? "Proveedores" : "Clientes"}.` : `Solicitud de ${row.company_name} marcada como ${status.toLowerCase()}.`);
+      setMessage(status === "Validada" ? `Solicitud de ${row.company_name} validada y vinculada al CRM en ${data.crm_record_type === "proveedor" ? "Proveedores" : "Clientes"}${data.delivery_geocoding_status ? ` · Entrega: ${data.delivery_geocoding_status.toLowerCase()}` : ""}.` : `Solicitud de ${row.company_name} marcada como ${status.toLowerCase()}.`);
     } catch (error) { setMessage(error instanceof Error ? error.message : "No se ha podido actualizar la solicitud."); }
     finally { setSavingId(null); }
   }

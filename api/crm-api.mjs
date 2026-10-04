@@ -1039,6 +1039,27 @@ function haversineKm(aLat, aLon, bLat, bLon) {
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(aLat)) * Math.cos(rad(bLat)) * Math.sin(dLon / 2) ** 2;
   return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
+async function geocodeAddress(address, city) {
+  const normalizedAddress = String(address || "").trim();
+  const normalizedCity = String(city || "").trim();
+  if (!normalizedAddress && !normalizedCity) return { latitude: null, longitude: null, geocoded_at: null, geocoding_status: "Pendiente" };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 6000);
+  try {
+    const query = encodeURIComponent([normalizedAddress, normalizedCity, "España"].filter(Boolean).join(", "));
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${query}`, {
+      signal: controller.signal,
+      headers: { Accept: "application/json", "User-Agent": "ExclusivasInteligentesCRM/2.0 (+https://crm.desarrolladormadrid.com)" },
+    });
+    if (!response.ok) throw new Error(`Servicio de geocodificación no disponible (${response.status})`);
+    const result = await response.json();
+    const latitude = Number(result?.[0]?.lat);
+    const longitude = Number(result?.[0]?.lon);
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) return { latitude, longitude, geocoded_at: new Date().toISOString(), geocoding_status: "Geolocalizada" };
+  } catch {}
+  finally { clearTimeout(timeout); }
+  return { latitude: null, longitude: null, geocoded_at: null, geocoding_status: "Pendiente" };
+}
 function resolveShipmentStop(shipment) {
   const point = shipment.collection_point_id ? db.prepare("SELECT * FROM collection_points WHERE id=?").get(Number(shipment.collection_point_id)) : null;
   const client = shipment.client_id ? db.prepare("SELECT * FROM clients WHERE id=?").get(Number(shipment.client_id)) : null;
@@ -3010,10 +3031,16 @@ export async function crmApiHandler(req, res) {
               const deliveryAddress = String(registration.delivery_address || registration.address || "").trim();
               const deliveryCity = String(registration.delivery_city || registration.city || "").trim();
               if (deliveryAddress && deliveryCity) {
-                const existingPoint = db.prepare("SELECT id FROM collection_points WHERE client_id=? AND LOWER(TRIM(COALESCE(address,'')))=LOWER(TRIM(?)) AND LOWER(TRIM(COALESCE(city,'')))=LOWER(TRIM(?)) LIMIT 1").get(crmRecordId, deliveryAddress, deliveryCity);
-                if (!existingPoint) {
+                const deliveryGeo = await geocodeAddress(deliveryAddress, deliveryCity);
+                const existingPoint = db.prepare("SELECT id,latitude,longitude FROM collection_points WHERE client_id=? AND LOWER(TRIM(COALESCE(address,'')))=LOWER(TRIM(?)) AND LOWER(TRIM(COALESCE(city,'')))=LOWER(TRIM(?)) LIMIT 1").get(crmRecordId, deliveryAddress, deliveryCity);
+                if (existingPoint) {
+                  const hasCoordinates = Number.isFinite(Number(existingPoint.latitude)) && Number.isFinite(Number(existingPoint.longitude));
+                  if (!hasCoordinates && Number.isFinite(Number(deliveryGeo.latitude)) && Number.isFinite(Number(deliveryGeo.longitude))) {
+                    db.prepare("UPDATE collection_points SET latitude=?,longitude=?,geocoded_at=?,geocoding_status=? WHERE id=?").run(deliveryGeo.latitude, deliveryGeo.longitude, deliveryGeo.geocoded_at, deliveryGeo.geocoding_status, Number(existingPoint.id));
+                  }
+                } else {
                   const code = `LOC-WEB-${id}`;
-                  db.prepare("INSERT OR IGNORE INTO collection_points(code,name,client_id,address,city,contact,phone,email,notes) VALUES(?,?,?,?,?,?,?,?,?)").run(code, commercialName || "Dirección principal", crmRecordId, deliveryAddress, deliveryCity, String(registration.contact_name || "").trim(), String(registration.phone || "").trim(), String(registration.email || "").trim(), "Ubicación principal indicada en el alta del portal cliente.");
+                  db.prepare("INSERT OR IGNORE INTO collection_points(code,name,client_id,address,city,contact,phone,email,latitude,longitude,geocoded_at,geocoding_status,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)").run(code, commercialName || "Dirección principal", crmRecordId, deliveryAddress, deliveryCity, String(registration.contact_name || "").trim(), String(registration.phone || "").trim(), String(registration.email || "").trim(), deliveryGeo.latitude, deliveryGeo.longitude, deliveryGeo.geocoded_at, deliveryGeo.geocoding_status, "Ubicación principal indicada en el alta del portal cliente.");
                 }
               }
             }
@@ -3023,7 +3050,8 @@ export async function crmApiHandler(req, res) {
           if (!result.changes) return send(res, 404, { error: "Solicitud no encontrada" });
           recordAudit(actor, "PUT", `web_registrations/${id}`, "Revisión alta web", JSON.stringify({ id, status, crm_record_id: crmRecordId, crm_record_type: crmRecordType, created_in_crm: createdInCrm }));
           invalidateRelatedReadCaches("web_registrations");
-          return send(res, 200, { id, status, crm_record_id: crmRecordId, crm_record_type: crmRecordType, created_in_crm: createdInCrm, reviewed_by: actor, reviewed_at: now });
+          const primaryDeliveryPoint = crmRecordType === "cliente" && crmRecordId ? db.prepare("SELECT geocoding_status,latitude,longitude FROM collection_points WHERE client_id=? ORDER BY id DESC LIMIT 1").get(crmRecordId) : null;
+          return send(res, 200, { id, status, crm_record_id: crmRecordId, crm_record_type: crmRecordType, created_in_crm: createdInCrm, delivery_geocoding_status: primaryDeliveryPoint?.geocoding_status || null, delivery_geocoded: Number.isFinite(Number(primaryDeliveryPoint?.latitude)) && Number.isFinite(Number(primaryDeliveryPoint?.longitude)), reviewed_by: actor, reviewed_at: now });
         }
       }
       if (t === "assistant" && req.method === "POST" && p[2] === "adjust-order-line") {
