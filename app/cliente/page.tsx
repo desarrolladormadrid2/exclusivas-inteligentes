@@ -194,7 +194,7 @@ export default function CustomerPwaPage() {
           <span className="customer-pwa-version">v{APP_VERSION}</span>
         </header>
         <div className="customer-pwa-card">
-          <div className="customer-pwa-intro"><span className="pwa-entry-kicker">PEDIDOS Y ENTREGAS</span><h1 id="customer-pwa-title">Todo tu negocio, a mano.</h1><p>Consulta tus pedidos, fechas de entrega, facturas y seguimiento desde un único sitio.</p></div>
+          <div className="customer-pwa-intro"><span className="pwa-entry-kicker">PEDIDOS Y ENTREGAS</span><h1 id="customer-pwa-title">Todos tus pedidos online</h1><p>Consulta tus pedidos, fechas de entrega, facturas y seguimiento desde un único sitio.</p></div>
           <div className="customer-pwa-tabs" role="tablist" aria-label="Acceso de cliente">
             <button type="button" className={mode === "login" ? "active" : ""} onClick={() => switchMode("login")}>Iniciar sesión</button>
             <button type="button" className={mode === "register" ? "active" : ""} onClick={() => switchMode("register")}>Registrarme</button>
