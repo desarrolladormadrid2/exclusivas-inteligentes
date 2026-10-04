@@ -2,17 +2,17 @@ import { workerData } from "node:worker_threads";
 import https from "node:https";
 
 const { url, authToken, ctrl, reqData, resData, CHUNK_SIZE, initialSeq } = workerData;
-const agent = new https.Agent({ keepAlive: true, maxSockets: 4, timeout: 25000 });
+let agent = new https.Agent({ keepAlive: true, maxSockets: 4, timeout: 25000 });
 const endpoint = String(url).replace(/^libsql:/, "https:") + "/v2/pipeline";
 let lastReq = initialSeq;
 Atomics.store(ctrl, 4, 1);
 Atomics.notify(ctrl, 4);
 
-function post(payloadJson) {
+function post(payloadJson, requestAgent = agent) {
   return new Promise((resolve) => {
     const req = https.request(endpoint, {
       method: "POST",
-      agent,
+      agent: requestAgent,
       headers: { Authorization: "Bearer " + authToken, "Content-Type": "application/json" },
       timeout: 25000,
     }, (res) => {
@@ -32,6 +32,25 @@ function post(payloadJson) {
   });
 }
 
+function isTransientNetworkError(result) {
+  const message = String(result?.error || "").toLowerCase();
+  return ["socket hang up", "econnreset", "etimedout", "timeout", "epipe", "eai_again", "turso http 408", "turso http 429", "turso http 500", "turso http 502", "turso http 503", "turso http 504"].some((value) => message.includes(value));
+}
+
+async function postWithRetry(payloadJson) {
+  let result = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (attempt > 0) {
+      try { agent.destroy(); } catch {}
+      agent = new https.Agent({ keepAlive: true, maxSockets: 4, timeout: 25000 });
+      await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+    }
+    result = await post(payloadJson, agent);
+    if (result.ok || !isTransientNetworkError(result)) return result;
+  }
+  return result;
+}
+
 while (true) {
   Atomics.store(ctrl, 5, (Atomics.load(ctrl, 5) + 1) % 1000000000);
   Atomics.wait(ctrl, 0, lastReq, 10000);
@@ -40,7 +59,7 @@ while (true) {
   const len = Atomics.load(ctrl, 1);
   if (len <= 0 || len > CHUNK_SIZE) continue;
   const reqJson = Buffer.from(reqData.buffer, reqData.byteOffset, len).toString("utf8");
-  const out = await post(reqJson);
+  const out = await postWithRetry(reqJson);
   const payloadOut = JSON.stringify(out);
   const outBytes = Buffer.from(payloadOut, "utf8");
   if (outBytes.length > CHUNK_SIZE) {

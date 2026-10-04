@@ -182,19 +182,25 @@ function TopHorizontalScroll({ className, children }: { className: string; child
     <div ref={contentRef} className={className}>{children}</div>
   </>;
 }
-async function fetchWithRetry(url: string, init?: RequestInit, attempts = 5) {
+async function fetchWithRetry(url: string, init?: RequestInit, attempts = 3, timeoutMs = 15000) {
   let lastError: unknown;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetch(url, init);
+      const response = await fetch(url, { ...init, signal: controller.signal });
       if (response.ok) return response;
       if (response.status >= 400 && response.status < 500) return response;
       throw new Error(`Respuesta temporal del servidor (${response.status})`);
     } catch (error) {
-      lastError = error;
+      lastError = error instanceof DOMException && error.name === "AbortError"
+        ? new Error("La conexión con el servidor ha tardado demasiado.")
+        : error;
       if (attempt < attempts - 1) {
         await new Promise((resolve) => window.setTimeout(resolve, 500 * (attempt + 1)));
       }
+    } finally {
+      window.clearTimeout(timeout);
     }
   }
   throw lastError instanceof Error ? lastError : new Error("No se pudo conectar con el CRM");
@@ -206,7 +212,7 @@ async function fetchCompactLookup(resource: string, actor: string, force = false
   const cached = lookupMemoryCache.get(cacheKey);
   if (!force && cached && (cached.rows.length > 0 || cached.expiresAt > Date.now())) return cached.rows;
   if (cached?.pending) return cached.pending;
-  const pending = fetchWithRetry(`/api/${resource}?${query.toString()}`, { headers: { "X-Actor": actor } }, 5)
+  const pending = fetchWithRetry(`/api/${resource}?${query.toString()}`, { headers: { "X-Actor": actor } }, 3, 15000)
     .then((response) => response.ok ? response.json() : [])
     .then((value) => {
       const rows = Array.isArray(value) ? value : [];
