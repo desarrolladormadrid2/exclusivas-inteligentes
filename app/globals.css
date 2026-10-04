@@ -6670,6 +6670,8 @@ body.reparto-modal-open {
 .pwa-selected-view-icon,
 .pwa-view-icon { display: grid; place-items: center; background: #b91c1c; color: #fff; font-weight: 800; }
 .pwa-entry-mark { width: 36px; height: 36px; font-size: 21px; }
+.pwa-entry-brand > .pwa-entry-mark,
+.customer-pwa-brand > .pwa-entry-mark { width: 46px; height: 46px; flex: 0 0 46px; color: #fff; font-size: 28px; line-height: 1; }
 .pwa-entry-version { color: #839096; font-size: 10px; white-space: nowrap; }
 .pwa-entry-card { background: #fff; border: 1px solid #d9e0e2; padding: 24px; }
 .pwa-entry-intro { display: grid; gap: 8px; margin-bottom: 22px; }
