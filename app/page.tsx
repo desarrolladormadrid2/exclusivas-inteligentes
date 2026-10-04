@@ -4734,6 +4734,10 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         try { localStorage.setItem(cacheKey, JSON.stringify(list)); } catch { /* La caché es opcional. */ }
       })
       .catch(() => {
+        // Aunque la API falle, la consulta ya ha terminado. Marcamos el
+        // listado como resuelto para no dejar la pantalla bloqueada en
+        // "Cargando datos" y permitir al usuario reintentar.
+        setLoadedListKey(listKey);
         setDbError(
           "No se ha podido actualizar el listado. Se mantienen los datos anteriores; inténtalo de nuevo en unos segundos.",
         );
@@ -4769,7 +4773,10 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       Presupuestos: ["clients"],
       Albaranes: ["clients", "orders"],
       Facturas: ["clients"],
-      Cobros: ["clients", "invoices", "payments"],
+      // Cobros ya es el listado de payments. Solo necesitamos las facturas
+      // para mostrar el código y el cliente relacionado; volver a descargar
+      // payments como lookup duplica la consulta y sobrecarga Turso.
+      Cobros: ["invoices"],
       "Gastos y tickets": ["clients", "suppliers", "payments"],
       Balance: ["invoices", "purchase_orders", "payments", "expenses"],
       Informes: ["orders", "clients", "products", "invoices", "payments", "inventory_movements", "shipments", "purchase_orders", "expenses"],
@@ -4777,6 +4784,11 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     };
     const lookupResources = lookupResourcesByActive[active] || [];
     if (!lookupResources.length) return;
+    // Primero debe terminar el listado principal. Lanzar el listado y todos
+    // sus lookups a la vez provoca sockets cerrados en Turso y deja Cobros
+    // aparentemente cargando durante mucho tiempo.
+    const expectedListKey = `${active}|${active === "Preparación de pedidos" ? preparationDateFilter || "all-dates" : "all-dates"}|${showDeleted ? "deleted" : "active"}|${showInactive ? "all-statuses" : "active-only"}`;
+    if (loadedListKey !== expectedListKey) return;
     const preparationClientIds = active === "Preparación de pedidos"
       ? [...new Set(rows.map((row: any) => Number(row.client_id)).filter((id) => Number.isInteger(id) && id > 0))].join(",")
       : "";
@@ -4797,7 +4809,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       results.forEach((result) => { if (result.status === "fulfilled") next[result.value[0]] = result.value[1]; });
       return next;
     }));
-  }, [active, preparationDateFilter, rows, user?.username, lookupRefreshKey]);
+  }, [active, preparationDateFilter, rows, user?.username, lookupRefreshKey, loadedListKey, showDeleted, showInactive]);
   useEffect(() => {
     if (active !== "Preparación de pedidos") return;
     const orderIds = [...new Set([
