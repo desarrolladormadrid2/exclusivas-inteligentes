@@ -3092,6 +3092,22 @@ export async function crmApiHandler(req, res) {
         if (!shipment) return send(res, 404, { error: "Envío no encontrado" });
         return send(res, 200, shipment);
       }
+      if (t === "shipments" && req.method === "POST" && p[2] && p[3] === "delivery-status") {
+        const shipmentId = Number(p[2]);
+        const body = await read(req);
+        const shipment = db.prepare("SELECT * FROM shipments WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(shipmentId);
+        if (!shipment) return send(res, 404, { error: "Envío no encontrado" });
+        const delivered = String(body.status || "").trim() === "Entregado";
+        const nextStatus = delivered ? "Entregado" : "Enviado";
+        const now = new Date().toISOString();
+        db.prepare("UPDATE shipments SET status=?,delivered_at=?,delivered_by=?,updated_at=? WHERE id=?").run(nextStatus, delivered ? (shipment.delivered_at || now) : null, delivered ? actor : null, now, shipmentId);
+        if (shipment.order_id) db.prepare("UPDATE orders SET status=?,updated_at=? WHERE id=?").run(nextStatus, now, Number(shipment.order_id));
+        db.prepare("UPDATE delivery_route_stops SET status=?,updated_at=? WHERE shipment_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").run(delivered ? "Entregado" : "Pendiente", now, shipmentId);
+        recordAudit(actor, "POST", `shipments/${shipmentId}/delivery-status`, delivered ? "Marcar entrega" : "Deshacer entrega", JSON.stringify({ shipment_id: shipmentId, status: nextStatus, order_id: shipment.order_id || null }));
+        invalidateRelatedReadCaches("shipments");
+        invalidateRelatedReadCaches("orders");
+        return send(res, 200, db.prepare("SELECT * FROM shipments WHERE id=?").get(shipmentId));
+      }
       if (t === "shipments" && req.method === "POST" && p[2] && p[3] === "delivery-confirmation") {
         const shipmentId = Number(p[2]);
         const body = await read(req);
