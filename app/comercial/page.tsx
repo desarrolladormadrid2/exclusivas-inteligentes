@@ -255,7 +255,7 @@ export default function ComercialPage() {
 
   return <main className="commercial-tablet-shell">
     <header className="commercial-tablet-topbar">
-      <a className="commercial-tablet-brand" href="/crm" aria-label="Volver al CRM"><span>E</span><div><b>Exclusivas</b><small>Ruta comercial</small></div></a>
+      <a className="commercial-tablet-brand" href="/pwa" aria-label="Cambiar de acceso operativo"><span>E</span><div><b>Exclusivas</b><small>Ruta comercial</small></div></a>
       <span className="commercial-tablet-status"><i /> CRM conectado</span>
       <button type="button" className={`commercial-menu-button${menuOpen ? " open" : ""}`} onClick={() => setMenuOpen((open) => !open)} aria-expanded={menuOpen} aria-label={menuOpen ? "Cerrar menú" : "Abrir menú"}><span /><span /><span /></button>
     </header>
@@ -265,7 +265,7 @@ export default function ComercialPage() {
       <nav className="commercial-menu-links" aria-label="Secciones comerciales">
         {([["inicio", "Inicio", "Resumen de la ruta"], ["pedido", "Nuevo pedido", "Registrar una visita"], ["pedidos", "Mis pedidos", "Seguimiento y facturación"], ["clientes", "Clientes", "Ficha y contacto"], ["visitas", "Visitas", "Direcciones y actividad"]] as Array<[View, string, string]>).map(([key, label, hint]) => <button type="button" key={key} className={view === key ? "active" : ""} onClick={() => openView(key)}><b>{label}</b><small>{hint}</small><span>›</span></button>)}
       </nav>
-      {user.role === "admin" && <button type="button" className="commercial-crm-link" onClick={() => { window.location.href = "/crm"; }}>Abrir CRM completo <span>↗</span></button>}
+      {user.role === "admin" && <a className="commercial-crm-link" href="/crm" target="_blank" rel="noreferrer">Abrir CRM completo <span>↗</span></a>}
       <div className="commercial-menu-footer"><button type="button" onClick={logout}>Cerrar sesión</button><small>v2.0.25 · Producción</small></div>
     </div>}
 
