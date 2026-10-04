@@ -1,5 +1,5 @@
-const CACHE_NAME = "exclusivas-cliente-pwa-shell-v1";
-const SHELL = ["/cliente", "/cliente/manifest.webmanifest", "/pwa-icon.svg"];
+const CACHE_NAME = "exclusivas-cliente-pwa-shell-v2";
+const SHELL = ["/cliente", "/cliente/manifest.webmanifest", "/cliente-icon.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));
