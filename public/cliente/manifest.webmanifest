@@ -4,6 +4,7 @@
   "description": "Pedidos, entregas, facturas y seguimiento para clientes de Exclusivas Inteligentes.",
   "lang": "es",
   "start_url": "/cliente",
+  "id": "/cliente",
   "scope": "/cliente/",
   "display": "standalone",
   "orientation": "any",

@@ -4,6 +4,7 @@
   "description": "Vista móvil de almacén y reparto conectada al CRM de Exclusivas Inteligentes.",
   "lang": "es",
   "start_url": "/pwa",
+  "id": "/pwa",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",

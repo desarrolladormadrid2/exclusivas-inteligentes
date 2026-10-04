@@ -1,4 +1,4 @@
-const CACHE_NAME = "exclusivas-pwa-shell-v2";
+const CACHE_NAME = "exclusivas-pwa-shell-v3";
 const SHELL = ["/pwa", "/manifest.webmanifest", "/pwa-icon.svg"];
 
 self.addEventListener("install", (event) => {
