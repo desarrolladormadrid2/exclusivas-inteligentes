@@ -100,17 +100,26 @@ export default function ComercialPage() {
   async function loadData() {
     setLoading(true);
     setError("");
-    try {
-      const [clientRows, productRows, pointRows, orderRows] = await Promise.all([readList("clients"), readList("products"), readList("collection_points"), readList("orders")]);
-      setClients(clientRows);
-      setProducts(productRows);
-      setPoints(pointRows);
-      setOrders(orderRows);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "No se han podido cargar los datos.");
-    } finally {
-      setLoading(false);
+    const [clientResult, productResult, pointResult, orderResult] = await Promise.allSettled([
+      readList("clients"),
+      readList("products"),
+      readList("collection_points"),
+      readList("orders"),
+    ]);
+    if (clientResult.status === "fulfilled") setClients(clientResult.value);
+    if (productResult.status === "fulfilled") setProducts(productResult.value);
+    if (pointResult.status === "fulfilled") setPoints(pointResult.value);
+    if (orderResult.status === "fulfilled") setOrders(orderResult.value);
+    const failedResources = [
+      clientResult.status === "rejected" ? "clientes" : "",
+      productResult.status === "rejected" ? "productos" : "",
+      pointResult.status === "rejected" ? "ubicaciones" : "",
+      orderResult.status === "rejected" ? "pedidos" : "",
+    ].filter(Boolean);
+    if (failedResources.length) {
+      setError(`No se han podido cargar ${failedResources.join(", ")}. Puedes reintentar.`);
     }
+    setLoading(false);
   }
 
   async function openOrderDetail(order: any) {
