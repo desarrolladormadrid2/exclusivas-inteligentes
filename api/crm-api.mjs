@@ -2530,7 +2530,7 @@ export async function crmApiHandler(req, res) {
           const registrationPasswordMatches = registration?.portal_password_hash && registration.portal_password_hash === passwordHash;
           recordPortalLoginFailure(loginKey);
           if (registrationPasswordMatches && registration.status === "Pendiente de validar") {
-            return send(res, 403, { error: "Tu cuenta está pendiente de validación por nuestro equipo. Te avisaremos cuando esté activa.", code: "ACCOUNT_PENDING", status: registration.status, registration_id: Number(registration.id) });
+            return send(res, 403, { error: "Tu cuenta está pendiente de validación por nuestro equipo. Podrás volver a entrar cuando esté activa.", code: "ACCOUNT_PENDING", status: registration.status, registration_id: Number(registration.id) });
           }
           if (registrationPasswordMatches && registration.status === "Rechazada") {
             return send(res, 403, { error: registration.rejection_reason ? `La solicitud no ha sido aprobada: ${registration.rejection_reason}` : "La solicitud de tu cuenta no ha sido aprobada. Contacta con nuestro equipo comercial.", code: "ACCOUNT_REJECTED", status: registration.status, registration_id: Number(registration.id) });
