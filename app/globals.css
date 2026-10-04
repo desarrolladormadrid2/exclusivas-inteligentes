@@ -6716,3 +6716,50 @@ body.reparto-modal-open {
   .pwa-entry-card { padding: 18px 14px; }
   .pwa-entry-footer { align-items: flex-start; flex-direction: column; gap: 5px; }
 }
+
+/* PWA independiente para clientes. El área autenticada reutiliza el portal de pedidos existente. */
+.customer-pwa-loading { min-height: 100dvh; display: grid; place-content: center; justify-items: center; gap: 10px; background: #eef2f3; color: #64747a; font-size: 12px; }
+.customer-pwa-page { min-height: 100dvh; background: #eef2f3; color: #18252a; display: flex; justify-content: center; padding: 24px 16px; }
+.customer-pwa-shell { width: min(100%, 640px); display: flex; flex-direction: column; gap: 16px; }
+.customer-pwa-header,
+.customer-pwa-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.customer-pwa-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.customer-pwa-brand > div { display: grid; gap: 1px; }
+.customer-pwa-brand strong { font-size: 16px; letter-spacing: -.02em; }
+.customer-pwa-brand span { color: #6d7c82; font-size: 11px; }
+.customer-pwa-version { color: #839096; font-size: 10px; }
+.customer-pwa-card { background: #fff; border: 1px solid #d9e0e2; padding: 24px; }
+.customer-pwa-intro { display: grid; gap: 8px; margin-bottom: 22px; }
+.customer-pwa-intro h1 { margin: 0; color: #1e2b30; font-size: clamp(25px, 5vw, 34px); letter-spacing: -.04em; line-height: 1.05; }
+.customer-pwa-intro p { max-width: 490px; margin: 0; color: #6d7c82; font-size: 13px; line-height: 1.45; }
+.customer-pwa-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-bottom: 1px solid #d8e0e2; margin-bottom: 18px; }
+.customer-pwa-tabs button { min-height: 42px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #6d7c82; font-size: 12px; font-weight: 800; cursor: pointer; }
+.customer-pwa-tabs button.active { border-bottom-color: #b91c1c; color: #9f1717; }
+.customer-pwa-form { display: grid; gap: 13px; }
+.customer-pwa-form label { display: grid; gap: 6px; color: #4e5e64; font-size: 11px; font-weight: 700; }
+.customer-pwa-form input,
+.customer-pwa-form textarea { width: 100%; box-sizing: border-box; border: 1px solid #cbd5d8; background: #fff; color: #1e2b30; padding: 11px; font: inherit; font-size: 14px; }
+.customer-pwa-form input { min-height: 44px; }
+.customer-pwa-form textarea { resize: vertical; min-height: 76px; }
+.customer-pwa-form input:focus,
+.customer-pwa-form textarea:focus { border-color: #b91c1c; outline: 2px solid rgba(185, 28, 28, .12); }
+.customer-pwa-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.customer-pwa-form-grid .wide { grid-column: 1 / -1; }
+.customer-pwa-primary { min-height: 46px; border: 1px solid #b91c1c; background: #b91c1c; color: #fff; font-size: 13px; font-weight: 800; cursor: pointer; }
+.customer-pwa-primary:hover { background: #981717; }
+.customer-pwa-primary:disabled { cursor: wait; opacity: .65; }
+.customer-pwa-help { margin: 0; color: #77868b; font-size: 11px; line-height: 1.4; }
+.customer-pwa-error,
+.customer-pwa-success { font-size: 11px; line-height: 1.4; }
+.customer-pwa-error { color: #b42318; }
+.customer-pwa-success { color: #138a47; }
+.customer-pwa-footer { color: #849197; font-size: 10px; }
+.customer-pwa-footer a { color: #8e1717; text-decoration: none; }
+.customer-pwa-install { border: 0; background: transparent; color: #a11919; font-size: 11px; font-weight: 800; cursor: pointer; padding: 0; }
+@media (max-width: 520px) {
+  .customer-pwa-page { padding: 14px 10px; }
+  .customer-pwa-card { padding: 18px 14px; }
+  .customer-pwa-form-grid { grid-template-columns: 1fr; }
+  .customer-pwa-form-grid .wide { grid-column: auto; }
+  .customer-pwa-footer { align-items: flex-start; flex-direction: column; gap: 5px; }
+}

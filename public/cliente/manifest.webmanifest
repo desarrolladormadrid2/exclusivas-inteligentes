@@ -1,0 +1,21 @@
+{
+  "name": "Exclusivas Inteligentes · Área de cliente",
+  "short_name": "Exclusivas clientes",
+  "description": "Pedidos, entregas, facturas y seguimiento para clientes de Exclusivas Inteligentes.",
+  "lang": "es",
+  "start_url": "/cliente",
+  "scope": "/cliente/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#eef2f3",
+  "theme_color": "#b91c1c",
+  "categories": ["business", "shopping", "productivity"],
+  "icons": [
+    {
+      "src": "/pwa-icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

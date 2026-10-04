@@ -32,7 +32,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     setSessionReady(true);
   }, []);
   useEffect(() => {
-    if (!sessionReady || user?.role !== "repartidor" || currentPath === "/reparto" || currentPath === "/pwa") return;
+    if (!sessionReady || user?.role !== "repartidor" || currentPath === "/reparto" || currentPath === "/pwa" || currentPath === "/cliente") return;
     window.location.replace("/reparto");
   }, [currentPath, sessionReady, user]);
   useEffect(() => {
@@ -105,7 +105,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     return <main className="auth-loading"><div className="auth-loading-mark">E</div><span>Comprobando sesión…</span></main>;
   if (user?.role === "repartidor" && currentPath !== "/reparto" && currentPath !== "/pwa")
     return <main className="auth-loading"><div className="auth-loading-mark">E</div><span>Abriendo vista de reparto…</span></main>;
-  if (currentPath === "/pwa") {
+  if (["/pwa", "/cliente"].includes(currentPath)) {
     const childItems = Children.toArray(children);
     return <div className="pwa-auth-shell">{childItems[0] ?? children}</div>;
   }

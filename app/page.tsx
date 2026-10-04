@@ -10444,10 +10444,12 @@ export function ClientOrderPortal({
   onClose,
   onCreated,
   standalone = false,
+  portalLoginHref = "/web#login",
 }: {
   onClose: () => void;
   onCreated: (order: any) => void;
   standalone?: boolean;
+  portalLoginHref?: string;
 }) {
   const [clients, setClients] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
@@ -10631,7 +10633,7 @@ export function ClientOrderPortal({
   }
   function logoutPortal() {
     try { localStorage.removeItem("excluvas.portal.session"); } catch {}
-    window.location.href = "/web#login";
+    window.location.href = portalLoginHref;
   }
   async function changePortalPassword(form: { current_password: string; new_password: string }) {
     if (!portalSession?.token) throw new Error("La sesión ha caducado. Vuelve a iniciar sesión.");
@@ -10659,11 +10661,11 @@ export function ClientOrderPortal({
           <div className="web-order-nav-status"><i /> Conectado al CRM</div>
           <button type="button" className="web-order-close" onClick={onClose} aria-label="Cerrar portal">×</button>
         </header>
-        {standalone && portalSession === undefined ? <div className="web-order-access-required"><div className="web-order-access-icon">E</div><p className="eyebrow">ACCESO PROFESIONAL</p><h2>Comprueba tu cuenta para continuar.</h2><p>Inicia sesión desde la web para consultar tus pedidos y preparar uno nuevo.</p><a className="button primary" href="/web#login">Iniciar sesión</a></div> : standalone && portalSession?.kind !== "cliente" ? <div className="web-order-access-required"><div className="web-order-access-icon">E</div><p className="eyebrow">PORTAL DE CLIENTES</p><h2>Este portal es para hacer pedidos.</h2><p>La cuenta de proveedor está activa, pero su área profesional todavía está en preparación.</p><a className="button secondary" href="/web">Volver a la web</a></div> : !saved ? (
+        {standalone && portalSession === undefined ? <div className="web-order-access-required"><div className="web-order-access-icon">E</div><p className="eyebrow">ACCESO PROFESIONAL</p><h2>Comprueba tu cuenta para continuar.</h2><p>Inicia sesión desde la web para consultar tus pedidos y preparar uno nuevo.</p><a className="button primary" href={portalLoginHref}>Iniciar sesión</a></div> : standalone && portalSession?.kind !== "cliente" ? <div className="web-order-access-required"><div className="web-order-access-icon">E</div><p className="eyebrow">PORTAL DE CLIENTES</p><h2>Este portal es para hacer pedidos.</h2><p>La cuenta de proveedor está activa, pero su área profesional todavía está en preparación.</p><a className="button secondary" href="/web">Volver a la web</a></div> : !saved ? (
           <>
             {standalone && portalData && <ClientPortalDashboard data={portalData} onNewOrder={() => setPortalTab("pedir")} onRepeat={repeatOrder} onLogout={logoutPortal} onChangePassword={changePortalPassword} onRefresh={refreshPortal} />}
             {standalone && portalLoading && <div className="client-portal-loading" role="status"><span className="loading-spinner" />Cargando tu área de cliente…</div>}
-            {standalone && portalError && <div className="client-portal-error" role="alert">{portalError} <a href="/web#login">Volver a iniciar sesión</a></div>}
+            {standalone && portalError && <div className="client-portal-error" role="alert">{portalError} <a href={portalLoginHref}>Volver a iniciar sesión</a></div>}
             {standalone && portalData && <div className="client-portal-tabs" role="tablist" aria-label="Área de cliente"><button type="button" className={portalTab === "actividad" ? "active" : ""} onClick={() => setPortalTab("actividad")}>Mi actividad</button><button type="button" className={portalTab === "pedir" ? "active" : ""} onClick={() => setPortalTab("pedir")}>Nuevo pedido</button></div>}
             {(!standalone || portalTab === "pedir") && <form onSubmit={submitOrder}>
             <section className="web-order-hero">
