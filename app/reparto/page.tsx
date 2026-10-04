@@ -40,8 +40,10 @@ function haversineKm(aLat: any, aLon: any, bLat: any, bLon: any) {
   return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function suggestedStopsWithDistances(items: any[]) {
-  let previous: any = null;
+function suggestedStopsWithDistances(items: any[], origin: any = null) {
+  let previous: any = origin && Number.isFinite(Number(origin.latitude)) && Number.isFinite(Number(origin.longitude))
+    ? { latitude: Number(origin.latitude), longitude: Number(origin.longitude) }
+    : null;
   return items.map((item, index) => {
     const latitude = Number(item.latitude), longitude = Number(item.longitude);
     const located = Number.isFinite(latitude) && Number.isFinite(longitude) && latitude !== 0 && longitude !== 0;
@@ -51,7 +53,19 @@ function suggestedStopsWithDistances(items: any[]) {
   });
 }
 
-function routeMapsUrl(route: any, stops: any[]) {
+function warehouseOriginFromRows(rows: any[]) {
+  const warehouseRows = Array.isArray(rows) ? rows : [];
+  const warehouse = warehouseRows.find((item: any) => /palencia|inglaterra|34004/i.test(`${item.name || ""} ${item.address || ""}`))
+    || warehouseRows.find((item: any) => /principal/i.test(String(item.name || "")))
+    || warehouseRows.find((item: any) => Number.isFinite(Number(item.latitude)) && Number.isFinite(Number(item.longitude)))
+    || warehouseRows[0];
+  const latitude = Number(warehouse?.latitude);
+  const longitude = Number(warehouse?.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude === 0 || longitude === 0) return null;
+  return { latitude, longitude, label: [warehouse?.name || "Almacén", warehouse?.address || warehouse?.city || ""].filter(Boolean).join(" · ") };
+}
+
+function routeMapsUrl(route: any, stops: any[], origin: any = null) {
   if (route?.maps_url) return String(route.maps_url);
   const located = (Array.isArray(stops) ? stops : []).filter((stop) => Number.isFinite(Number(stop.latitude)) && Number.isFinite(Number(stop.longitude)) || [stop.address, stop.city].some(Boolean));
   if (!located.length) return "";
@@ -59,10 +73,13 @@ function routeMapsUrl(route: any, stops: any[]) {
     ? `${Number(stop.latitude)},${Number(stop.longitude)}`
     : [stop.address, stop.city].filter(Boolean).join(", ");
   const values = located.map(value);
-  const origin = encodeURIComponent(values[0]);
+  const originValue = origin && Number.isFinite(Number(origin.latitude)) && Number.isFinite(Number(origin.longitude))
+    ? `${Number(origin.latitude)},${Number(origin.longitude)}`
+    : values[0];
+  const originQuery = encodeURIComponent(originValue);
   const destination = encodeURIComponent(values.at(-1) || values[0]);
-  const waypoints = values.slice(1, -1).map((item) => encodeURIComponent(item)).join("|");
-  return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}${waypoints ? `&waypoints=${waypoints}` : ""}`;
+  const waypoints = values.slice(originValue === values[0] ? 1 : 0, -1).map((item) => encodeURIComponent(item)).join("|");
+  return `https://www.google.com/maps/dir/?api=1&origin=${originQuery}&destination=${destination}${waypoints ? `&waypoints=${waypoints}` : ""}`;
 }
 
 function loadRepartoLeaflet() {
@@ -88,7 +105,7 @@ function loadRepartoLeaflet() {
   });
 }
 
-function RepartoRouteMap({ stops, route, currentPosition }: { stops: any[]; route: any; currentPosition: any }) {
+function RepartoRouteMap({ stops, route, origin, currentPosition }: { stops: any[]; route: any; origin: any; currentPosition: any }) {
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const mapKey = `${Number(route?.id || 0)}|${stops.map((stop) => `${stop.id}:${stop.latitude}:${stop.longitude}:${stop.position}`).join("|")}|${currentPosition?.latitude || ""}:${currentPosition?.longitude || ""}`;
   useEffect(() => {
@@ -100,14 +117,16 @@ function RepartoRouteMap({ stops, route, currentPosition }: { stops: any[]; rout
         const map = L.map(mapElementRef.current, { zoomControl: true, scrollWheelZoom: true });
         L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© Colaboradores de OpenStreetMap" }).addTo(map);
         const validStops = stops.filter((stop) => Number.isFinite(Number(stop.latitude)) && Number.isFinite(Number(stop.longitude)) && Number(stop.latitude) !== 0 && Number(stop.longitude) !== 0);
-        const origin = Number.isFinite(Number(route?.origin_latitude)) && Number.isFinite(Number(route?.origin_longitude)) && Number(route.origin_latitude) !== 0 && Number(route.origin_longitude) !== 0
+        const routeOrigin = Number.isFinite(Number(route?.origin_latitude)) && Number.isFinite(Number(route?.origin_longitude)) && Number(route.origin_latitude) !== 0 && Number(route.origin_longitude) !== 0
           ? [[Number(route.origin_latitude), Number(route.origin_longitude)] as [number, number]]
-          : [];
-        const routeCoordinates: [number, number][] = [...origin, ...validStops.map((stop) => [Number(stop.latitude), Number(stop.longitude)] as [number, number])];
+          : origin && Number.isFinite(Number(origin.latitude)) && Number.isFinite(Number(origin.longitude))
+            ? [[Number(origin.latitude), Number(origin.longitude)] as [number, number]]
+            : [];
+        const routeCoordinates: [number, number][] = [...routeOrigin, ...validStops.map((stop) => [Number(stop.latitude), Number(stop.longitude)] as [number, number])];
         if (!routeCoordinates.length) return;
         if (routeCoordinates.length > 1) L.polyline(routeCoordinates, { color: "#bd2027", weight: 4, opacity: 0.82 }).addTo(map);
         const icon = (label: string, kind: "stop" | "origin" | "truck", delivered = false) => L.divIcon({ className: "reparto-leaflet-icon", html: `<span class="reparto-leaflet-marker ${kind}${delivered ? " delivered" : ""}">${label}</span>`, iconSize: [28, 28], iconAnchor: [14, 14] });
-        if (origin.length) L.marker(origin[0], { icon: icon("N", "origin"), interactive: false }).addTo(map).bindTooltip("Salida");
+        if (routeOrigin.length) L.marker(routeOrigin[0], { icon: icon("N", "origin"), interactive: false }).addTo(map).bindTooltip(origin?.label || route?.origin_address || "Almacén");
         validStops.forEach((stop, index) => L.marker([Number(stop.latitude), Number(stop.longitude)], { icon: icon(String(stop.position || index + 1), "stop", ["Entregado", "Completada"].includes(String(stop.status || ""))) }).addTo(map).bindTooltip(`${stop.position || index + 1}. ${stop.client_name || "Cliente"}`));
         const truckLatitude = Number(currentPosition?.latitude), truckLongitude = Number(currentPosition?.longitude);
         if (Number.isFinite(truckLatitude) && Number.isFinite(truckLongitude) && truckLatitude !== 0 && truckLongitude !== 0) L.marker([truckLatitude, truckLongitude], { icon: icon("●", "truck"), zIndexOffset: 1000 }).addTo(map).bindTooltip("Posición actual del camión");
@@ -118,14 +137,24 @@ function RepartoRouteMap({ stops, route, currentPosition }: { stops: any[]; rout
     };
     void setup();
     return () => { disposed = true; if (mapElementRef.current) mapElementRef.current.innerHTML = ""; };
-  }, [mapKey]);
+  }, [mapKey, origin?.latitude, origin?.longitude]);
   return <div ref={mapElementRef} className="reparto-route-map-canvas" aria-label="Mapa de la ruta de reparto" />;
 }
 
-function RepartoRouteMapPanel({ stops, route, currentPosition, gpsActive, gpsError, onStartGps, onStopGps }: { stops: any[]; route: any; currentPosition: any; gpsActive: boolean; gpsError: string; onStartGps: () => void; onStopGps: () => void }) {
+function RepartoRouteMapPanel({ stops, route, origin, currentPosition, gpsActive, gpsError, onStartGps, onStopGps }: { stops: any[]; route: any; origin: any; currentPosition: any; gpsActive: boolean; gpsError: string; onStartGps: () => void; onStopGps: () => void }) {
   const located = stops.filter((stop) => Number.isFinite(Number(stop.latitude)) && Number.isFinite(Number(stop.longitude)) && Number(stop.latitude) !== 0 && Number(stop.longitude) !== 0);
-  const routeLink = routeMapsUrl(route, stops);
-  return <section className="reparto-route-map panel" aria-label="Mapa y seguimiento de ruta"><header className="reparto-route-map-head"><div><p className="eyebrow">MAPA Y SEGUIMIENTO</p><h2>{route ? `Ruta ${route.code}` : "Ruta sugerida"}</h2><span>{located.length}/{stops.length} puntos geolocalizados · La línea respeta el orden de las paradas.</span></div><div className="reparto-route-map-actions">{routeLink && <a className="button secondary" href={routeLink} target="_blank" rel="noreferrer">↗ Ruta completa en Google Maps</a>}{route && <button type="button" className={`button ${gpsActive ? "secondary" : "primary"}`} onClick={gpsActive ? onStopGps : onStartGps}>{gpsActive ? "Detener seguimiento" : "Compartir mi ubicación"}</button>}</div></header>{gpsError && <p className="reparto-route-map-error-message" role="alert">{gpsError}</p>}{gpsActive && <p className="reparto-route-map-live" role="status">● GPS activo · la posición se actualiza mientras conduces{currentPosition?.recorded_at ? ` · ${new Date(currentPosition.recorded_at).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}` : ""}</p>}{located.length ? <RepartoRouteMap stops={stops} route={route} currentPosition={currentPosition} /> : <div className="reparto-route-map-empty">No hay puntos geolocalizados para dibujar la ruta. Revisa las direcciones desde el CRM.</div>}<ol className="reparto-route-map-stops">{stops.map((stop, index) => <li key={stop.id}><b>{stop.position || index + 1}</b><span><strong>{stop.client_name || "Cliente"}</strong><small>{[stop.address, stop.city].filter(Boolean).join(" · ") || "Dirección pendiente"}</small></span></li>)}</ol></section>;
+  const routeLink = routeMapsUrl(route, stops, origin);
+  const routeOrigin = route && Number.isFinite(Number(route.origin_latitude)) && Number.isFinite(Number(route.origin_longitude)) ? { latitude: Number(route.origin_latitude), longitude: Number(route.origin_longitude), label: route.origin_address || origin?.label || "Almacén" } : origin;
+  const displayStops = stops.map((stop, index) => {
+    const previous = index > 0 ? stops[index - 1] : routeOrigin;
+    const fallbackDistance = previous && Number.isFinite(Number(previous.latitude)) && Number.isFinite(Number(previous.longitude)) && Number.isFinite(Number(stop.latitude)) && Number.isFinite(Number(stop.longitude))
+      ? Number(haversineKm(previous.latitude, previous.longitude, stop.latitude, stop.longitude).toFixed(2))
+      : null;
+    const storedDistance = Number(stop.distance_km);
+    const legDistance = Number.isFinite(storedDistance) && storedDistance > 0 ? storedDistance : fallbackDistance;
+    return { ...stop, route_leg_km: legDistance };
+  });
+  return <section className="reparto-route-map panel" aria-label="Mapa y seguimiento de ruta"><header className="reparto-route-map-head"><div><p className="eyebrow">MAPA Y SEGUIMIENTO</p><h2>{route ? `Ruta ${route.code}` : "Ruta sugerida"}</h2><span>{located.length}/{stops.length} puntos geolocalizados · La línea respeta el orden de las paradas.</span></div><div className="reparto-route-map-actions">{routeLink && <a className="button secondary" href={routeLink} target="_blank" rel="noreferrer">↗ Ruta completa en Google Maps</a>}{route && <button type="button" className={`button ${gpsActive ? "secondary" : "primary"}`} onClick={gpsActive ? onStopGps : onStartGps}>{gpsActive ? "Detener seguimiento" : "Compartir mi ubicación"}</button>}</div></header>{gpsError && <p className="reparto-route-map-error-message" role="alert">{gpsError}</p>}{gpsActive && <p className="reparto-route-map-live" role="status">● GPS activo · la posición se actualiza mientras conduces{currentPosition?.recorded_at ? ` · ${new Date(currentPosition.recorded_at).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}` : ""}</p>}{located.length ? <RepartoRouteMap stops={stops} route={route} origin={origin} currentPosition={currentPosition} /> : <div className="reparto-route-map-empty">No hay puntos geolocalizados para dibujar la ruta. Revisa las direcciones desde el CRM.</div>}<ol className="reparto-route-map-stops">{displayStops.map((stop, index) => <li key={stop.id}><b>{stop.position || index + 1}</b><span><strong>{stop.client_name || "Cliente"}</strong><small>{[stop.address, stop.city].filter(Boolean).join(" · ") || "Dirección pendiente"}</small><small className="reparto-route-map-distance">{stop.route_leg_km === null ? "Distancia pendiente" : `${index === 0 ? "Desde almacén" : `Desde parada ${index}`} · ${Number(stop.route_leg_km).toLocaleString("es-ES", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} km estimados`}</small></span></li>)}</ol></section>;
 }
 
 function cleanPhone(value: any) {
@@ -323,6 +352,7 @@ export default function RepartoPage() {
   const [shipments, setShipments] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
   const [points, setPoints] = useState<any[]>([]);
+  const [warehouseOrigin, setWarehouseOrigin] = useState<any>(null);
   const [routes, setRoutes] = useState<any[]>([]);
   const [activeRouteId, setActiveRouteId] = useState<number | null>(null);
   const [selectedShipment, setSelectedShipment] = useState<any>(null);
@@ -411,9 +441,10 @@ export default function RepartoPage() {
   async function load() {
     setLoading(true);
     try {
-      const [shipmentResponse, routeResponse] = await Promise.all([
+      const [shipmentResponse, routeResponse, warehouseResponse] = await Promise.all([
         fetch(`/api/shipments?date=${encodeURIComponent(date)}`),
         fetch(`/api/routes?date=${encodeURIComponent(date)}`),
+        fetch("/api/warehouses?limit=50"),
       ]);
       const rawShipments = shipmentResponse.ok ? await shipmentResponse.json() : [];
       const shipmentRows = Array.isArray(rawShipments) ? rawShipments : [];
@@ -429,6 +460,8 @@ export default function RepartoPage() {
       const nextShipments = shipmentRows.map((item) => shipmentView(item, nextClients, nextPoints));
       setShipments(nextShipments);
       const nextRoutes = routeResponse.ok ? await routeResponse.json() : [];
+      const nextWarehouses = warehouseResponse.ok ? await warehouseResponse.json() : [];
+      setWarehouseOrigin(warehouseOriginFromRows(nextWarehouses));
       setRoutes(Array.isArray(nextRoutes) ? nextRoutes : []);
       const firstRoute = Array.isArray(nextRoutes) && nextRoutes.length ? nextRoutes[0] : null;
       setActiveRouteId((current) => current && nextRoutes.some((route: any) => Number(route.id) === current) ? current : firstRoute?.id || null);
@@ -478,7 +511,7 @@ export default function RepartoPage() {
     const included = new Set(ordered.map((item: any) => Number(item.id)));
     return [...ordered, ...dayShipments.filter((item) => !included.has(Number(item.id)))];
   }, [dayShipments, date, suggestedOrderByDate]);
-  const routeStops = activeRoute?.stops?.length ? activeRoute.stops : suggestedStopsWithDistances(orderedSuggestedShipments);
+  const routeStops = activeRoute?.stops?.length ? activeRoute.stops : suggestedStopsWithDistances(orderedSuggestedShipments, warehouseOrigin);
   const completed = routeStops.filter((stop: any) => ["Completada", "Entregado"].includes(String(stop.status || ""))).length;
   const pending = routeStops.filter((stop: any) => !["Completada", "Entregado"].includes(String(stop.status || ""))).length;
   const incidents = dayShipments.filter((item) => String(item.incidents || "").trim()).length;
@@ -658,7 +691,7 @@ const response = await fetch("/api/returns", { method: "POST", headers: { "Conte
       <section className="reparto-datebar"><button type="button" onClick={() => setDate(todayInput())} className={date === todayInput() ? "active" : ""}>Hoy <small>{dateLabel(todayInput())}</small></button><button type="button" onClick={() => setDate(offsetDate(1))} className={date === offsetDate(1) ? "active" : ""}>Mañana <small>{dateLabel(offsetDate(1))}</small></button><label>Otra fecha<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label></section>
       <section className="reparto-kpis"><article><strong>{dayShipments.length}</strong><span>entregas del día</span></article><article><strong>{pending}</strong><span>pendientes</span></article><article><strong>{completed}</strong><span>paradas completadas</span></article><article className={incidents ? "attention" : ""}><strong>{incidents}</strong><span>con incidencias</span></article></section>
       <section className={`reparto-driver-brief${activeRoute ? "" : " is-pending"}`} aria-label="Resumen de la jornada"><header><div><p className="eyebrow">MI JORNADA</p><h2>{activeRoute ? `Ruta ${activeRoute.code}` : "Jornada pendiente de asignación"}</h2><span>{activeRoute ? `${activeRoute.driver || actor} · ${activeRoute.vehicle || "Camión sin indicar"}` : "El almacén aún no ha guardado un camión para esta fecha."}</span></div><strong>{activeRoute ? "LISTO PARA REPARTIR" : "ESPERANDO CARGA"}</strong></header><div className="reparto-driver-brief-grid"><span><b>Pedidos</b>{dayShipments.length} · {routePackages} bultos</span><span><b>Ruta</b>{activeRoute ? `${routeStops.length} paradas` : "Orden sugerido"}</span><span><b>Distancia</b>{routeDistance > 0 ? `${routeDistance.toFixed(1)} km estimados` : "Se calcula al guardar la ruta"}</span><span><b>Seguimiento</b>{completed}/{routeStops.length || dayShipments.length} entregas</span></div>{activeRoute?.maps_url ? <a className="reparto-driver-brief-link" href={activeRoute.maps_url} target="_blank" rel="noreferrer">↗ Abrir navegación de toda la ruta</a> : <small className="reparto-driver-brief-note">Cuando almacén asigne y guarde el camión aparecerán aquí la ruta y sus kilómetros.</small>}</section>
-      {routeStops.length > 0 && <RepartoRouteMapPanel stops={routeStops} route={activeRoute} currentPosition={gpsPosition} gpsActive={gpsActive} gpsError={gpsError} onStartGps={startGps} onStopGps={stopGps} />}
+      {routeStops.length > 0 && <RepartoRouteMapPanel stops={routeStops} route={activeRoute} origin={warehouseOrigin} currentPosition={gpsPosition} gpsActive={gpsActive} gpsError={gpsError} onStartGps={startGps} onStopGps={stopGps} />}
       <section className="reparto-next-stop" aria-label="Siguiente entrega">{nextStop ? <><div><span className="eyebrow">SIGUIENTE PARADA</span><b>{nextStop.client_name || "Cliente sin nombre"}</b><small>{[nextStop.address, nextStop.city].filter(Boolean).join(" · ") || "Dirección no indicada"}{nextStop.opening_time && nextStop.closing_time ? ` · ${nextStop.opening_time}–${nextStop.closing_time}` : ""}</small></div><button type="button" className="button primary" onClick={() => { const shipment = shipments.find((item) => Number(item.id) === Number(nextStop.shipment_id)) || nextStop; void openShipment(shipment); }}>Abrir próxima entrega</button></> : <div><span className="eyebrow">RUTA COMPLETADA</span><b>No quedan paradas pendientes</b><small>Revisa las incidencias y justificantes antes de cerrar la jornada.</small></div>}</section>
       {message && <p className="reparto-message" role="status">{message}</p>}
       <div className="reparto-layout"><section className="reparto-stops panel"><div className="reparto-panel-head"><div><p className="eyebrow">{activeRoute ? activeRoute.code : "ORDEN SUGERIDO"}</p><h2>{activeRoute ? `Ruta de ${activeRoute.driver || "reparto"}` : "Entregas para hoy"}</h2><span>{activeRoute ? `${activeRoute.stops?.length || 0} paradas · ${activeRoute.vehicle || "Vehículo sin indicar"} · Arrastra para reordenar` : "Ordenadas por horario de apertura · Arrastra para reordenar"}</span></div>{activeRoute?.maps_url && <a className="button primary" href={activeRoute.maps_url} target="_blank" rel="noreferrer">Navegar toda la ruta</a>}</div>{loading ? <div className="reparto-loading" role="status">Cargando entregas…</div> : !routeStops.length ? <div className="reparto-empty"><b>No hay entregas para esta fecha.</b><span>Prueba otra fecha o vuelve al CRM para planificar la ruta.</span></div> : <ol className="reparto-stop-list">{routeStops.map((stop: any, index: number) => { const shipment = shipments.find((item) => Number(item.id) === Number(stop.shipment_id)) || stop; const delivery = deliveryState(stop, shipment); const done = delivery.key === "delivered"; const signatureDone = String(shipment.delivery_signature_status || "").toLocaleLowerCase() === "firmado"; const paymentDone = String(shipment.payment_received_status || "").toLocaleLowerCase() === "recibido"; const destination = mapsUrl({ ...shipment, ...stop }); return <li draggable className={`reparto-stop ${delivery.key}${done ? " done" : ""}${String(draggingStopId) === String(stop.id) ? " dragging" : ""}${String(dragOverStopId) === String(stop.id) ? " drag-over" : ""}`} key={stop.id} onDragStart={(event) => startStopDrag(event, stop)} onDragOver={(event) => { event.preventDefault(); setDragOverStopId(stop.id); }} onDragLeave={() => setDragOverStopId((current) => String(current) === String(stop.id) ? null : current)} onDrop={(event) => dropStop(event, stop)} onDragEnd={() => { setDraggingStopId(null); setDragOverStopId(null); }}><div className="reparto-stop-number">{done ? "✓" : stop.position || index + 1}</div><div className="reparto-stop-main"><div className="reparto-stop-title"><div><b>{stop.client_name || shipment.client_name}</b><small>{shipment.code || stop.shipment_code || "Envío"}</small></div><span className={`reparto-stop-status ${delivery.key}`}>{delivery.label}</span></div><p>{[stop.address || shipment.address, stop.city || shipment.city].filter(Boolean).join(" · ") || "Dirección no indicada"}</p><small className="reparto-stop-window">{stop.opening_time && stop.closing_time ? `Horario ${stop.opening_time}–${stop.closing_time}` : "Horario pendiente de indicar"}{stop.distance_km ? ` · ${Number(stop.distance_km).toFixed(1)} km desde la anterior` : ""}</small><small className="reparto-stop-proof">{Math.max(1, Number(shipment.packages || 1))} bultos · {signatureDone ? "✓ Firmado" : "Firma pendiente"} · {paymentDone ? "✓ Cobrado" : "Cobro pendiente"}</small><div className="reparto-stop-actions">{destination ? <a className="reparto-map-button" href={destination} target="_blank" rel="noreferrer">↗ Cómo llegar</a> : <span className="reparto-no-map">Ubicación sin dirección</span>}<button type="button" className="reparto-open-button" onClick={() => void openShipment(shipment)}>Abrir entrega</button><button type="button" className={`reparto-check-button${done ? " checked" : ""}`} onClick={() => void updateStop(stop, done ? "Pendiente" : "Completada")}>{done ? "Deshacer entrega" : "Marcar entregado"}</button><span className="reparto-reorder"><button type="button" aria-label="Subir parada" onClick={() => reorderStopsAround(index, -1)} disabled={index === 0}>↑</button><button type="button" aria-label="Bajar parada" onClick={() => reorderStopsAround(index, 1)} disabled={index === routeStops.length - 1}>↓</button></span></div></div></li>; })}</ol>}</section>
