@@ -170,13 +170,13 @@ export default function PwaEntryPage() {
     <main className="pwa-entry-page">
       <section className="pwa-entry-shell" aria-labelledby="pwa-title">
         <header className="pwa-entry-header">
-          <div className="pwa-entry-brand">
+          <a className="pwa-entry-brand" href="/crm" aria-label="Volver al CRM">
             <span className="pwa-entry-mark" aria-hidden="true">E</span>
             <div>
               <strong>Exclusivas</strong>
               <span>Operativa móvil</span>
             </div>
-          </div>
+          </a>
           <span className="pwa-entry-version">v{APP_VERSION}</span>
         </header>
 

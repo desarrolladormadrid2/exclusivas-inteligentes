@@ -1211,10 +1211,10 @@ export function Sidebar({
       {mobileOpen && (canOpenCommercialView || canOpenWarehouseView || canOpenRepartoView || canOpenWebView) && (
         <div className="sidebar-route-shortcuts" aria-label="Vistas operativas">
           <div className="side-label">VISTAS OPERATIVAS</div>
-          {canOpenCommercialView && <a href="/comercial" onClick={() => setMobileOpen(false)}><ToolbarIcon name="commercial" /><span>Vista comercial</span></a>}
-          {canOpenWarehouseView && <a href="/almacen" onClick={() => setMobileOpen(false)}><ToolbarIcon name="warehouse" /><span>Vista almacén</span></a>}
-          {canOpenRepartoView && <a href="/reparto" onClick={() => setMobileOpen(false)}><ToolbarIcon name="map" /><span>Reparto</span></a>}
-          {canOpenWebView && <a href="/web" onClick={() => setMobileOpen(false)}><ToolbarIcon name="web" /><span>Web pública</span></a>}
+          {canOpenCommercialView && <a href="/comercial" target="_blank" rel="noreferrer" onClick={() => setMobileOpen(false)}><ToolbarIcon name="commercial" /><span>Vista comercial</span></a>}
+          {canOpenWarehouseView && <a href="/almacen" target="_blank" rel="noreferrer" onClick={() => setMobileOpen(false)}><ToolbarIcon name="warehouse" /><span>Vista almacén</span></a>}
+          {canOpenRepartoView && <a href="/reparto" target="_blank" rel="noreferrer" onClick={() => setMobileOpen(false)}><ToolbarIcon name="map" /><span>Reparto</span></a>}
+          {canOpenWebView && <a href="/web" target="_blank" rel="noreferrer" onClick={() => setMobileOpen(false)}><ToolbarIcon name="web" /><span>Web pública</span></a>}
         </div>
       )}
       {mobileOpen && <div className="mobile-sidebar-account"><span><b>{user?.username || "Usuario"}</b><small>{user?.role === "admin" ? "Administrador" : "Usuario"}</small></span><button type="button" onClick={() => { setMobileOpen(false); onLogout(); }}>Cerrar sesión</button></div>}
@@ -12480,8 +12480,8 @@ function WarehouseTabletApp() {
   }
   return <main className="warehouse-tablet-app">
     <header className="warehouse-tablet-header">
-      <a className="warehouse-tablet-brand" href="/almacen" aria-label="Vista almacén"><span className="warehouse-brand-mark">E</span><span><b>Exclusivas</b><small>Almacén operativo</small></span></a>
-      <div className="warehouse-tablet-header-actions"><button type="button" className="warehouse-tablet-back-button" onClick={goBackInWarehouse} disabled={active === "Preparación de pedidos"} aria-label="Volver a la pestaña anterior" title="Volver a la pestaña anterior">← Atrás</button><span><b>{currentUser.username}</b><small>{currentUser.role === "admin" ? "Administrador" : "Almacén"}</small></span><div className="warehouse-tablet-quick-actions" aria-label="Acciones de la vista"><button type="button" className="warehouse-tablet-icon-button" onClick={printWarehouseView} aria-label="Imprimir vista" title="Imprimir vista"><ToolbarIcon name="print" /></button><button type="button" className="warehouse-tablet-icon-button" onClick={downloadWarehouseExcel} aria-label="Descargar Excel" title="Descargar Excel"><ToolbarIcon name="download" /></button></div><button type="button" className="warehouse-tablet-force-refresh" onClick={forceWarehouseRefresh} aria-busy={refreshing} aria-label="Actualizar datos">{refreshing ? <span>Actualizando…</span> : <><span className="warehouse-refresh-label">Actualizar</span><span className="warehouse-refresh-icon" aria-hidden="true">↻</span></>}</button><a className="warehouse-reparto-link" href="/reparto">Reparto</a><button type="button" className="button secondary" onClick={logout}>Salir</button></div>
+      <a className="warehouse-tablet-brand" href="/crm" aria-label="Volver al CRM"><span className="warehouse-brand-mark">E</span><span><b>Exclusivas</b><small>Almacén operativo</small></span></a>
+      <div className="warehouse-tablet-header-actions"><button type="button" className="warehouse-tablet-back-button" onClick={goBackInWarehouse} disabled={active === "Preparación de pedidos"} aria-label="Volver a la pestaña anterior" title="Volver a la pestaña anterior">← Atrás</button><span><b>{currentUser.username}</b><small>{currentUser.role === "admin" ? "Administrador" : "Almacén"}</small></span><div className="warehouse-tablet-quick-actions" aria-label="Acciones de la vista"><button type="button" className="warehouse-tablet-icon-button" onClick={printWarehouseView} aria-label="Imprimir vista" title="Imprimir vista"><ToolbarIcon name="print" /></button><button type="button" className="warehouse-tablet-icon-button" onClick={downloadWarehouseExcel} aria-label="Descargar Excel" title="Descargar Excel"><ToolbarIcon name="download" /></button></div><button type="button" className="warehouse-tablet-force-refresh" onClick={forceWarehouseRefresh} aria-busy={refreshing} aria-label="Actualizar datos">{refreshing ? <span>Actualizando…</span> : <><span className="warehouse-refresh-label">Actualizar</span><span className="warehouse-refresh-icon" aria-hidden="true">↻</span></>}</button><a className="warehouse-reparto-link" href="/reparto" target="_blank" rel="noreferrer">Reparto</a><a className="warehouse-reparto-link" href="/crm">CRM</a><button type="button" className="button secondary" onClick={logout}>Salir</button></div>
     </header>
     <nav className="warehouse-tablet-nav" aria-label="Secciones de almacén">{warehouseTabletSections.map((section) => <button type="button" key={section.id} className={active === section.id ? "is-active" : ""} aria-pressed={active === section.id} aria-current={active === section.id ? "page" : undefined} onClick={() => selectWarehouseSection(section.id)}><span className="warehouse-nav-label"><b>{section.short}</b><small>{section.hint}</small></span></button>)}</nav>
     <section className="warehouse-tablet-content">
@@ -13014,22 +13014,13 @@ function CrmHome({ routeMode = "crm" }: { routeMode?: keyof typeof routeModuleSc
         <span>EXCLUSIVAS INTELIGENTES</span>
       </header>
       <div className="appbar">
-        <div
-          className="brand"
-          role="button"
-          tabIndex={0}
-          aria-label="Ir al inicio"
-          onClick={() => setActive("Inicio")}
-          onKeyDown={(e) =>
-            (e.key === "Enter" || e.key === " ") && setActive("Inicio")
-          }
-        >
+        <a className="brand" href="/crm" aria-label="Ir al CRM">
           <div className="brand-mark">E</div>
           <div>
             <strong>Exclusivas</strong>
             <small>Inteligentes</small>
           </div>
-        </div>
+        </a>
         {active === "Inicio" && homeLoading && (
           <div className="global-loading-status" role="status" aria-live="polite">
             <span className="loading-spinner" aria-hidden="true" />
@@ -13059,25 +13050,25 @@ function CrmHome({ routeMode = "crm" }: { routeMode?: keyof typeof routeModuleSc
               </button>
             </>}
             {canOpenCommercialView && (
-              <a className="button primary quick-icon-action app-route-shortcut" href="/comercial" aria-label="Vista comercial" title="Vista comercial">
+              <a className="button primary quick-icon-action app-route-shortcut" href="/comercial" target="_blank" rel="noreferrer" aria-label="Vista comercial" title="Vista comercial">
                 <ToolbarIcon name="commercial" />
                 <span className="icon-action-label">Vista comercial</span>
               </a>
             )}
             {canOpenWarehouseView && (
-              <a className="button primary quick-icon-action app-route-shortcut" href="/almacen" aria-label="Vista almacén" title="Vista almacén">
+              <a className="button primary quick-icon-action app-route-shortcut" href="/almacen" target="_blank" rel="noreferrer" aria-label="Vista almacén" title="Vista almacén">
                 <ToolbarIcon name="warehouse" />
                 <span className="icon-action-label">Vista almacén</span>
               </a>
             )}
             {canOpenWarehouseView && (
-              <a className="button primary quick-icon-action app-route-shortcut" href="/reparto" aria-label="Vista reparto" title="Vista reparto">
+              <a className="button primary quick-icon-action app-route-shortcut" href="/reparto" target="_blank" rel="noreferrer" aria-label="Vista reparto" title="Vista reparto">
                 <ToolbarIcon name="map" />
                 <span className="icon-action-label">Vista reparto</span>
               </a>
             )}
             {canOpenWebView && (
-              <a className="button primary quick-icon-action app-route-shortcut" href="/web" aria-label="Web pública" title="Web pública">
+              <a className="button primary quick-icon-action app-route-shortcut" href="/web" target="_blank" rel="noreferrer" aria-label="Web pública" title="Web pública">
                 <ToolbarIcon name="web" />
                 <span className="icon-action-label">Web pública</span>
               </a>

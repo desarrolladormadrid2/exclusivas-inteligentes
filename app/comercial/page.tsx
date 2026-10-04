@@ -254,7 +254,7 @@ export default function ComercialPage() {
 
   return <main className="commercial-tablet-shell">
     <header className="commercial-tablet-topbar">
-      <div className="commercial-tablet-brand"><span>E</span><div><b>Exclusivas</b><small>Ruta comercial</small></div></div>
+      <a className="commercial-tablet-brand" href="/crm" aria-label="Volver al CRM"><span>E</span><div><b>Exclusivas</b><small>Ruta comercial</small></div></a>
       <span className="commercial-tablet-status"><i /> CRM conectado</span>
       <button type="button" className={`commercial-menu-button${menuOpen ? " open" : ""}`} onClick={() => setMenuOpen((open) => !open)} aria-expanded={menuOpen} aria-label={menuOpen ? "Cerrar menú" : "Abrir menú"}><span /><span /><span /></button>
     </header>
