@@ -2305,9 +2305,15 @@ export async function crmApiHandler(req, res) {
           const rows = db.prepare(`SELECT vt.*,v.name vehicle_name,v.plate vehicle_plate FROM vehicle_trips vt JOIN vehicles v ON v.id=vt.vehicle_id WHERE CAST(COALESCE(vt.deleted,0) AS INTEGER)=0 ${date ? "AND vt.route_date=?" : ""} ORDER BY vt.route_date DESC,vt.id DESC LIMIT 500`).all(...(date ? [date] : []));
           return send(res, 200, rows);
         }
-        const body = await read(req);
         const id = Number(p[2] || 0);
         const current = id ? db.prepare("SELECT * FROM vehicle_trips WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(id) : null;
+        if (req.method === "DELETE") {
+          if (!current) return send(res, 404, { error: "Jornada no encontrada" });
+          const now = new Date().toISOString();
+          db.prepare("UPDATE vehicle_trips SET deleted='1',deleted_at=?,deleted_by=?,updated_at=? WHERE id=?").run(now, actor, now, id);
+          return send(res, 200, { ok: true, id });
+        }
+        const body = await read(req);
         if (req.method === "POST") {
           const vehicleId = Number(body.vehicle_id || 0);
           if (!db.prepare("SELECT id FROM vehicles WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(vehicleId)) return send(res, 400, { error: "Selecciona un camión válido" });
