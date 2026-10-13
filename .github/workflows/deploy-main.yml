@@ -46,6 +46,12 @@ jobs:
         shell: powershell -ExecutionPolicy Bypass -Command "& '{0}'"
         run: .\scripts\deploy-production.ps1
 
+      - name: Migrate production database to local SQLite once
+        shell: powershell -ExecutionPolicy Bypass -Command "& '{0}'"
+        env:
+          MIGRATION_CONFIRMATION: MIGRAR_PRODUCCION_A_LOCAL
+        run: .\scripts\migrate-production-to-local.ps1
+
       - name: Verify production endpoints
         shell: powershell -ExecutionPolicy Bypass -Command "& '{0}'"
         run: .\scripts\verify-production.ps1
