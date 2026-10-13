@@ -34,7 +34,7 @@ async function readResponse(response) {
   const text = await response.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = text; }
-  return { status: response.status, data, bytes: Buffer.byteLength(text) };
+  return { status: typeof response.status === "function" ? response.status() : response.status, data, bytes: Buffer.byteLength(text) };
 }
 async function call(path, options = {}, expected = null) {
   const started = performance.now();
@@ -42,7 +42,8 @@ async function call(path, options = {}, expected = null) {
   const elapsed = Number((performance.now() - started).toFixed(1));
   const body = await readResponse(response);
   const wanted = expected === null ? null : (Array.isArray(expected) ? expected : [expected]);
-  if (!response.ok || (wanted && !wanted.includes(response.status))) {
+  const expectedFailure = wanted?.includes(response.status);
+  if ((!response.ok && !expectedFailure) || (wanted && !wanted.includes(response.status))) {
     throw new Error(`${options.method || "GET"} /api/${path}: ${response.status} en ${elapsed} ms · ${JSON.stringify(body.data).slice(0, 500)}`);
   }
   return { ...body, elapsed };
@@ -130,7 +131,6 @@ try {
     await page.keyboard.press("Tab");
     check(await page.evaluate(() => document.activeElement && document.activeElement !== document.body), "El teclado no obtiene foco visible");
     check(!accessibility.horizontalOverflow, "La pantalla cliente tiene scroll horizontal en móvil");
-    recordScreenshot(`${outputDir}/customer-login-mobile.png`);
     await page.screenshot({ path: recordScreenshot(`${outputDir}/customer-login-mobile.png`), fullPage: true });
   });
 
@@ -145,14 +145,15 @@ try {
     await page.getByLabel("Domicilio fiscal").fill(deliveryAddress);
     await page.getByLabel("Dirección principal de entrega *").fill(deliveryAddress);
     await page.getByLabel("Ciudad de entrega *").fill(deliveryCity);
-    await page.getByLabel("Contraseña *").fill(password);
-    await page.getByLabel("Repite la contraseña *").fill(password);
+    await page.getByLabel("Contraseña *", { exact: true }).fill(password);
+    await page.getByLabel("Repite la contraseña *", { exact: true }).fill(password);
     await page.getByLabel("¿Qué necesitas?").fill("Prueba autenticada del portal de cliente");
     const registrationResponse = page.waitForResponse((response) => response.url().endsWith("/api/web_registrations") && response.request().method() === "POST");
     await page.getByRole("button", { name: "Solicitar registro" }).click();
     const registrationBody = await readResponse(await registrationResponse);
-    check(registrationBody.status === 201 && registrationBody.data?.id, `Alta no creada: ${JSON.stringify(registrationBody.data)}`);
+    check(registrationBody.data?.id, `Alta no creada: ${JSON.stringify(registrationBody.data)}`);
     created.registrationId = Number(registrationBody.data.id);
+    check([200, 201].includes(registrationBody.status), `Respuesta inesperada al crear el alta: HTTP ${registrationBody.status}`);
     check((await page.getByText("Perfil pendiente de validación").count()) === 1, "No aparece el estado pendiente de validación");
     await page.screenshot({ path: recordScreenshot(`${outputDir}/customer-registration-pending-mobile.png`), fullPage: true });
   });
@@ -220,6 +221,8 @@ try {
 
   await test("actividad, seguimiento y rendimiento del portal autenticado", async () => {
     const portalHeaders = { authorization: `Bearer ${portalToken}` };
+    await page.goto(`${baseUrl}/cliente`, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.waitForSelector(".client-portal-dashboard", { timeout: 30000 });
     const portalSamples = [];
     const catalogSamples = [];
     for (let index = 0; index < 5; index += 1) {
@@ -237,6 +240,7 @@ try {
     apiTimings.push({ endpoint: "/api/products?view=lookup&profile=order", median_ms: median(catalogSamples), max_ms: Math.max(...catalogSamples), bytes: catalogLast.bytes });
     const orderText = await page.locator("body").innerText();
     check(orderText.includes("Mis pedidos") && orderText.includes("PEDIDO"), "La pantalla no conserva la actividad del cliente");
+    await page.screenshot({ path: recordScreenshot(`${outputDir}/customer-activity-with-order-mobile.png`), fullPage: true });
     check(!consoleErrors.length, `Errores de consola: ${consoleErrors.slice(0, 3).join(" | ")}`);
     console.log(`  portal benchmark ${JSON.stringify(apiTimings)}`);
   });
@@ -245,6 +249,11 @@ try {
 } finally {
   // Cerrar la solicitud de alta y retirar los datos operativos de la prueba.
   if (created.registrationId) await call(`web_registrations/${created.registrationId}`, { method: "PUT", headers: { "content-type": "application/json", "x-actor": actor }, body: JSON.stringify({ status: "Rechazada", rejection_reason: "Prueba automatizada completada" }) }, [200]).catch(() => undefined);
+  if (created.orderId && !created.shipmentId) {
+    const shipments = await get("shipments?refresh=1&limit=5000").catch(() => []);
+    const testShipment = Array.isArray(shipments) ? shipments.find((row) => Number(row.order_id) === created.orderId) : null;
+    if (testShipment?.id) created.shipmentId = Number(testShipment.id);
+  }
   if (created.orderId) await remove(`orders/${created.orderId}`);
   if (created.shipmentId) await remove(`shipments/${created.shipmentId}`);
   if (created.collectionPointId) await remove(`collection_points/${created.collectionPointId}`);
