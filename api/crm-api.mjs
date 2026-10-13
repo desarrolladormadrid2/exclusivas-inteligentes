@@ -2243,6 +2243,14 @@ export async function crmApiHandler(req, res) {
         }
         const body = await read(req);
         const id = Number(p[2] || 0);
+        if (req.method === "DELETE") {
+          const current = db.prepare("SELECT id FROM driver_daily_closures WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(id);
+          if (!current) return send(res, 404, { error: "Cierre diario no encontrado" });
+          const now = new Date().toISOString();
+          db.prepare("UPDATE driver_daily_closures SET deleted='1',deleted_at=?,deleted_by=?,updated_at=? WHERE id=?").run(now, actor, now, id);
+          recordAudit(actor, "DELETE", `driver_daily_closures/${id}`, "Archivar cierre diario");
+          return send(res, 200, { ok: true, id });
+        }
         if (req.method === "PUT") {
           const current = db.prepare("SELECT * FROM driver_daily_closures WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(id);
           if (!current) return send(res, 404, { error: "Cierre diario no encontrado" });
@@ -2343,6 +2351,15 @@ export async function crmApiHandler(req, res) {
       }
       if (p[1] === "vehicle_refuels") {
         if (req.method === "GET") return send(res, 200, db.prepare("SELECT vr.*,v.name vehicle_name,v.plate vehicle_plate FROM vehicle_refuels vr JOIN vehicles v ON v.id=vr.vehicle_id WHERE CAST(COALESCE(vr.deleted,0) AS INTEGER)=0 ORDER BY vr.fuel_date DESC,vr.id DESC LIMIT 500").all());
+        if (req.method === "DELETE") {
+          const id = Number(p[2] || 0);
+          const current = db.prepare("SELECT id FROM vehicle_refuels WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(id);
+          if (!current) return send(res, 404, { error: "Repostaje no encontrado" });
+          const now = new Date().toISOString();
+          db.prepare("UPDATE vehicle_refuels SET deleted='1',deleted_at=?,deleted_by=?,updated_at=? WHERE id=?").run(now, actor, now, id);
+          recordAudit(actor, "DELETE", `vehicle_refuels/${id}`, "Archivar repostaje");
+          return send(res, 200, { ok: true, id });
+        }
         const body = await read(req);
         if (req.method === "POST") {
           const vehicleId = Number(body.vehicle_id || 0);
@@ -2358,6 +2375,15 @@ export async function crmApiHandler(req, res) {
       }
       if (p[1] === "vehicle_maintenance") {
         if (req.method === "GET") return send(res, 200, db.prepare("SELECT vm.*,v.name vehicle_name,v.plate vehicle_plate FROM vehicle_maintenance vm JOIN vehicles v ON v.id=vm.vehicle_id WHERE CAST(COALESCE(vm.deleted,0) AS INTEGER)=0 ORDER BY vm.maintenance_date DESC,vm.id DESC LIMIT 500").all());
+        if (req.method === "DELETE") {
+          const id = Number(p[2] || 0);
+          const current = db.prepare("SELECT id FROM vehicle_maintenance WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(id);
+          if (!current) return send(res, 404, { error: "Mantenimiento no encontrado" });
+          const now = new Date().toISOString();
+          db.prepare("UPDATE vehicle_maintenance SET deleted='1',deleted_at=?,deleted_by=?,updated_at=? WHERE id=?").run(now, actor, now, id);
+          recordAudit(actor, "DELETE", `vehicle_maintenance/${id}`, "Archivar mantenimiento");
+          return send(res, 200, { ok: true, id });
+        }
         const body = await read(req);
         if (req.method === "POST") {
           const vehicleId = Number(body.vehicle_id || 0);
@@ -2612,6 +2638,7 @@ export async function crmApiHandler(req, res) {
         const now = new Date().toISOString();
         db.prepare("UPDATE delivery_routes SET deleted='1',deleted_at=?,deleted_by=?,updated_at=? WHERE id=?").run(now, actor, now, Number(p[2]));
         db.prepare("UPDATE vehicle_trips SET deleted='1',deleted_at=?,deleted_by=?,updated_at=? WHERE route_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").run(now, actor, now, Number(p[2]));
+        db.prepare("DELETE FROM delivery_route_positions WHERE route_id=?").run(Number(p[2]));
         return send(res, 200, { ok: true, id: Number(p[2]) });
       }
       if (p[1] === "login" && req.method === "POST") {
