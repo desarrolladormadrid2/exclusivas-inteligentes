@@ -32,10 +32,10 @@ try {
     { product_id: productB.id, quantity: 3, quantity_requested: 3, quantity_unit: "unidad", unit_price: 3.25, discount: 0, vat: 21, amount: 9.75 },
   ] });
   created.orders.push(Number(order.id));
-  const orderLines = await call("order_lines");
+  const orderLines = await call("order_lines?refresh=1");
   const lines = orderLines.filter((line) => Number(line.order_id) === Number(order.id));
   assert(lines.length === 2, `El pedido no conservó sus dos líneas: ${lines.length}`);
-  const productsAfterOrder = await call("products");
+  const productsAfterOrder = await call("products?refresh=1");
   const rowA = productsAfterOrder.find((row) => Number(row.id) === Number(productA.id));
   const rowB = productsAfterOrder.find((row) => Number(row.id) === Number(productB.id));
   assert(Number(rowA.stock_reserved) === 2 && Number(rowB.stock_reserved) === 3, "Las reservas de las dos líneas no coinciden");
@@ -45,27 +45,26 @@ try {
   await call("clients", { method: "PUT", headers, data: { ...client, phone: "611111111" } }, client.id);
   const editedClient = await call("clients", {}, client.id);
   assert(editedClient.phone === "611111111", "La edición del cliente no persistió");
-  const shipments = await call("shipments");
+  const shipments = await call("shipments?refresh=1");
   const shipment = shipments.find((row) => Number(row.order_id) === Number(order.id));
   assert(shipment, "No se generó el envío del pedido");
   const preparedLine = await call("order_lines", { method: "PUT", headers, data: { ...lines[0], prepared: 1, prepared_quantity: 2, preparation_status: "Preparado" } }, lines[0].id);
   assert(Number(preparedLine.prepared) === 1, "No se pudo marcar la línea como preparada");
-  const purchase = await create("purchase_orders", { code: `PW-FLUJO-COMPRA-${suffix}`, supplier_id: supplier.id, status: "Pedido" });
-  const purchaseLine = await create("purchase_order_lines", { purchase_order_id: purchase.id, product_id: productA.id, quantity: 5, unit_cost: 4, amount: 20 });
-  const beforePurchase = Number((await call("products")).find((row) => Number(row.id) === Number(productA.id)).stock);
-  await call("purchase_orders", { method: "PUT", headers, data: { ...purchase, status: "Recibida" } }, purchase.id);
-  const afterPurchase = Number((await call("products")).find((row) => Number(row.id) === Number(productA.id)).stock);
+  const purchase = await create("purchase_orders", { code: `PW-FLUJO-COMPRA-${suffix}`, supplier_id: supplier.id, status: "Pedido", order_date: new Date().toISOString().slice(0, 10), lines: [{ product_id: productA.id, quantity: 5, unit_cost: 4, amount: 20 }] });
+  const beforePurchase = Number((await call("products?refresh=1")).find((row) => Number(row.id) === Number(productA.id)).stock);
+  await call("purchase_orders", { method: "PUT", headers, data: { code: purchase.code, supplier_id: purchase.supplier_id, status: "Recibida", order_date: purchase.order_date, expected_date: purchase.expected_date || "", amount: purchase.amount, notes: purchase.notes || "" } }, purchase.id);
+  const afterPurchase = Number((await call("products?refresh=1")).find((row) => Number(row.id) === Number(productA.id)).stock);
   assert(afterPurchase === beforePurchase + 5, `La recepción no aumentó el stock: ${beforePurchase} -> ${afterPurchase}`);
   const quote = await create("quotes", { code: `PW-FLUJO-PRESUPUESTO-${suffix}`, client_id: client.id, amount: 17, status: "Borrador" });
   const quoteLine = await create("quote_lines", { quote_id: quote.id, product_id: productA.id, quantity: 2, unit_price: 8.5, amount: 17 });
-  const quoteLines = await call("quote_lines");
+  const quoteLines = await call("quote_lines?refresh=1");
   assert(quoteLines.some((line) => Number(line.id) === Number(quoteLine.id) && Number(line.quote_id) === Number(quote.id)), "No se guardó la línea del presupuesto");
   const invoice = await create("invoices", { code: `PW-FLUJO-FACTURA-${suffix}`, client_id: client.id, amount: 100, status: "Pendiente" });
   const paymentA = await create("payments", { invoice_id: invoice.id, amount: 40, method: "Transferencia" });
-  const partialInvoice = (await call("invoices")).find((row) => Number(row.id) === Number(invoice.id));
+  const partialInvoice = (await call("invoices?refresh=1")).find((row) => Number(row.id) === Number(invoice.id));
   assert(partialInvoice?.status === "Parcial", `El cobro parcial no actualizó la factura: ${partialInvoice?.status}`);
   const paymentB = await create("payments", { invoice_id: invoice.id, amount: 60, method: "Transferencia" });
-  const paidInvoice = (await call("invoices")).find((row) => Number(row.id) === Number(invoice.id));
+  const paidInvoice = (await call("invoices?refresh=1")).find((row) => Number(row.id) === Number(invoice.id));
   assert(paidInvoice?.status === "Cobrada", `El cobro final no actualizó la factura: ${paidInvoice?.status}`);
   const note = await create("notes", { title: `PW-FLUJO-NOTA-${suffix}`, content: "Incidencia funcional de prueba", module: "Preparación de pedidos", record_id: order.id, important: 1, priority: "Alta" });
   const completed = await call("notes", { method: "PUT", headers, data: { ...note, completed: 1 } }, note.id);
@@ -74,7 +73,7 @@ try {
   await call("trash", { method: "POST", headers, data: { table: "notes", id: note.id } }, "restore");
   const restoredNote = await call("notes", {}, note.id);
   assert(Number(restoredNote.deleted || 0) === 0, "No se pudo recuperar la nota desde papelera");
-  const audit = await call("audit_logs");
+  const audit = await call("audit_logs?refresh=1");
   assert(audit.some((row) => String(row.resource || "").includes(`orders/${order.id}`)), "No se registró la auditoría del pedido");
   console.log(`PASS production functional flow: pedido ${order.id} · 2 líneas · preparación · compra recibida · nota · auditoría`);
 } catch (error) {
