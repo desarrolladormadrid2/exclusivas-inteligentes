@@ -2605,6 +2605,7 @@ export async function crmApiHandler(req, res) {
       if (p[1] === "routes" && req.method === "DELETE" && p[2]) {
         const now = new Date().toISOString();
         db.prepare("UPDATE delivery_routes SET deleted='1',deleted_at=?,deleted_by=?,updated_at=? WHERE id=?").run(now, actor, now, Number(p[2]));
+        db.prepare("UPDATE vehicle_trips SET deleted='1',deleted_at=?,deleted_by=?,updated_at=? WHERE route_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").run(now, actor, now, Number(p[2]));
         return send(res, 200, { ok: true, id: Number(p[2]) });
       }
       if (p[1] === "login" && req.method === "POST") {
