@@ -196,11 +196,11 @@ export default function CustomerPwaPage() {
         <div className="customer-pwa-card">
           <div className="customer-pwa-intro"><span className="pwa-entry-kicker">PEDIDOS Y ENTREGAS</span><h1 id="customer-pwa-title">Todos tus pedidos online</h1><p>Consulta tus pedidos, fechas de entrega, facturas y seguimiento desde un único sitio.</p></div>
           <div className="customer-pwa-tabs" role="tablist" aria-label="Acceso de cliente">
-            <button type="button" className={mode === "login" ? "active" : ""} onClick={() => switchMode("login")}>Iniciar sesión</button>
-            <button type="button" className={mode === "register" ? "active" : ""} onClick={() => switchMode("register")}>Registrarme</button>
+            <button id="customer-login-tab" type="button" role="tab" aria-selected={mode === "login"} aria-controls="customer-login-panel" className={mode === "login" ? "active" : ""} onClick={() => switchMode("login")}>Iniciar sesión</button>
+            <button id="customer-register-tab" type="button" role="tab" aria-selected={mode === "register"} aria-controls="customer-register-panel" className={mode === "register" ? "active" : ""} onClick={() => switchMode("register")}>Registrarme</button>
           </div>
           {mode === "login" ? (
-            <form className="customer-pwa-form" onSubmit={submitLogin}>
+            <form id="customer-login-panel" className="customer-pwa-form" role="tabpanel" aria-labelledby="customer-login-tab" onSubmit={submitLogin}>
               <label>Email<input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="tu@email.com" /></label>
               <label>Contraseña<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label>
               {error && <small className="customer-pwa-error" role="alert">{error}</small>}
@@ -208,7 +208,7 @@ export default function CustomerPwaPage() {
               <p className="customer-pwa-help">Si todavía no tienes una cuenta, regístrate y el equipo comercial validará tus datos.</p>
             </form>
           ) : (
-            <form className="customer-pwa-form customer-pwa-register-form" onSubmit={submitRegistration}>
+            <form id="customer-register-panel" className="customer-pwa-form customer-pwa-register-form" role="tabpanel" aria-labelledby="customer-register-tab" onSubmit={submitRegistration}>
               <div className="customer-pwa-form-grid">
                 <label>Razón social / empresa *<input required value={registration.company_name} onChange={(event) => updateRegistration("company_name", event.target.value)} /></label>
                 <label>Nombre comercial *<input required value={registration.commercial_name} onChange={(event) => updateRegistration("commercial_name", event.target.value)} placeholder="Cómo te conocen tus clientes" /></label>
