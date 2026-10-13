@@ -1,0 +1,31 @@
+name: Migrate production database to local SQLite
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Escribe MIGRAR_PRODUCCION_A_LOCAL para autorizar la migración única"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: powershell -ExecutionPolicy Bypass -File {0}
+
+jobs:
+  migrate:
+    runs-on: [self-hosted, Windows, exclusivas-inteligentes]
+    timeout-minutes: 30
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run one-time controlled migration
+        env:
+          MIGRATION_CONFIRMATION: ${{ inputs.confirmation }}
+        run: .\scripts\migrate-production-to-local.ps1
