@@ -960,8 +960,37 @@ try {
     );
     recordAudit("Sistema", "SYSTEM", `payments/${Number(payment.id)}/void`, "Anular cobro huérfano", JSON.stringify({ payment_id: Number(payment.id), invoice_id: Number(payment.invoice_id), amount: Number(payment.amount || 0) }));
   }
-  const invoiceIds = db.prepare("SELECT id FROM invoices WHERE CAST(COALESCE(deleted,0) AS INTEGER)=0 AND COALESCE(status,'')<>'Anulada'").all();
-  for (const invoice of invoiceIds) recalculateInvoicePaymentStatus(Number(invoice.id), "Sistema");
+  const invoiceRows = db.prepare(`
+    SELECT i.id,i.amount,i.status,i.due_date,
+      COALESCE(SUM(CASE WHEN p.id IS NOT NULL
+        AND CAST(COALESCE(p.deleted,0) AS INTEGER)=0
+        AND COALESCE(p.status,'Aplicado')<>'Anulado'
+        AND p.voided_at IS NULL
+        THEN p.amount ELSE 0 END),0) AS paid_amount
+    FROM invoices i
+    LEFT JOIN payments p ON p.invoice_id=i.id
+    WHERE CAST(COALESCE(i.deleted,0) AS INTEGER)=0
+      AND COALESCE(i.status,'')<>'Anulada'
+    GROUP BY i.id
+  `).all();
+  const today = new Date().toISOString().slice(0, 10);
+  for (const invoice of invoiceRows) {
+    const paid = Number(invoice.paid_amount || 0);
+    const total = Math.max(0, Number(invoice.amount || 0));
+    const dueDate = String(invoice.due_date || '').slice(0, 10);
+    const nextStatus = paid > 0 && paid + 0.01 < total
+      ? 'Parcial'
+      : total > 0 && paid + 0.01 >= total
+        ? 'Cobrada'
+        : dueDate && dueDate < today
+          ? 'Vencida'
+          : 'Pendiente';
+    if (String(invoice.status || '') !== nextStatus) {
+      db.prepare('UPDATE invoices SET status=?,updated_at=? WHERE id=?').run(nextStatus, now, Number(invoice.id));
+      recordAudit('Sistema', 'SYSTEM', `invoices/${Number(invoice.id)}/payment-status`, 'Recalcular estado de cobro', JSON.stringify({ invoice_id: Number(invoice.id), previous_status: invoice.status || 'Pendiente', status: nextStatus, paid, total }));
+    }
+    try { syncOrderStatusFromInvoice(Number(invoice.id)); } catch {}
+  }
 } catch {}
 for (const column of [
   "pdf_public_id TEXT",
