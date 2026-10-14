@@ -167,6 +167,8 @@ function createInvoicePdf(invoice) {
     `Fecha: ${String(invoice.issue_date || invoice.created_at || new Date().toISOString()).slice(0, 10)}`,
     "",
     `Cliente: ${invoice.client_name || "Cliente no indicado"}`,
+    ...(invoice.client_legal_name && invoice.client_legal_name !== invoice.client_name ? [`Razón social: ${invoice.client_legal_name}`] : []),
+    `NIF/CIF: ${invoice.client_tax_id || "No indicado"}`,
     `Direccion: ${invoice.client_address || "No indicada"}`,
     `Ciudad: ${invoice.client_city || "No indicada"}`,
     `Correo: ${invoice.client_email || "No indicado"}`,
@@ -244,7 +246,16 @@ function invoiceRouteAssignments(invoice) {
     }));
 }
 function invoicePdfData(invoiceId) {
-  const invoice = db.prepare("SELECT i.*,c.name client_name,c.address client_address,c.city client_city,c.email client_email,c.phone client_phone FROM invoices i LEFT JOIN clients c ON c.id=i.client_id WHERE i.id=? AND CAST(COALESCE(i.deleted,0) AS INTEGER)=0").get(Number(invoiceId));
+  const invoice = db.prepare(`SELECT i.*,
+    COALESCE(NULLIF(TRIM(i.client_name_snapshot),''),c.name) client_name,
+    COALESCE(NULLIF(TRIM(i.client_legal_name_snapshot),''),c.legal_name) client_legal_name,
+    COALESCE(NULLIF(TRIM(i.client_tax_id_snapshot),''),c.tax_id) client_tax_id,
+    COALESCE(NULLIF(TRIM(i.client_billing_address_snapshot),''),NULLIF(TRIM(c.billing_address),''),c.address) client_address,
+    COALESCE(NULLIF(TRIM(i.client_billing_city_snapshot),''),NULLIF(TRIM(c.billing_city),''),c.city) client_city,
+    COALESCE(NULLIF(TRIM(i.client_email_snapshot),''),c.email) client_email,
+    COALESCE(NULLIF(TRIM(i.client_phone_snapshot),''),c.phone) client_phone
+    FROM invoices i LEFT JOIN clients c ON c.id=i.client_id
+    WHERE i.id=? AND CAST(COALESCE(i.deleted,0) AS INTEGER)=0`).get(Number(invoiceId));
   if (!invoice) return null;
   const lines = db.prepare("SELECT il.*,p.name product_name,p.sku FROM invoice_lines il LEFT JOIN products p ON p.id=il.product_id WHERE il.invoice_id=? ORDER BY il.id").all(Number(invoiceId));
   return { ...invoice, lines, route_assignments: invoiceRouteAssignments(invoice) };
@@ -284,6 +295,75 @@ async function ensureInvoicePdf(invoiceId, actor = "Sistema", force = false) {
 function orderInvoice(orderId) {
   return db.prepare("SELECT i.* FROM invoices i WHERE CAST(COALESCE(i.deleted,0) AS INTEGER)=0 AND COALESCE(i.status,'')<>'Anulada' AND (i.order_id=? OR EXISTS(SELECT 1 FROM invoice_orders io WHERE io.invoice_id=i.id AND io.order_id=?)) ORDER BY i.id DESC LIMIT 1").get(Number(orderId), Number(orderId));
 }
+function invoiceSnapshotData({ clientId = null, order = null, orders = [] } = {}) {
+  const orderRows = (Array.isArray(orders) ? orders : []).filter(Boolean);
+  if (order && !orderRows.some((row) => Number(row.id) === Number(order.id))) orderRows.unshift(order);
+  const primaryOrder = orderRows[0] || null;
+  const resolvedClientId = Number(clientId || primaryOrder?.client_id || 0) || null;
+  const client = resolvedClientId
+    ? db.prepare("SELECT id,name,legal_name,tax_id,address,city,billing_address,billing_city,email,phone,payment_method_code,payment_terms_code FROM clients WHERE id=?").get(resolvedClientId)
+    : null;
+  const deliveries = orderRows.map((row) => {
+    const point = row.collection_point_id
+      ? db.prepare("SELECT address,city FROM collection_points WHERE id=?").get(Number(row.collection_point_id))
+      : null;
+    return {
+      order_id: Number(row.id || 0) || null,
+      address: String(row.address || point?.address || client?.address || "").trim(),
+      city: String(row.delivery_city || point?.city || client?.city || "").trim(),
+    };
+  }).filter((row) => row.address || row.city);
+  const delivery = deliveries[0] || { address: "", city: "" };
+  const snapshot = {
+    client_id: resolvedClientId,
+    name: String(client?.name || "").trim(),
+    legal_name: String(client?.legal_name || "").trim(),
+    tax_id: String(client?.tax_id || "").trim(),
+    billing_address: String(client?.billing_address || client?.address || "").trim(),
+    billing_city: String(client?.billing_city || client?.city || "").trim(),
+    email: String(client?.email || "").trim(),
+    phone: String(client?.phone || "").trim(),
+    payment_method: String(client?.payment_method_code || "").trim(),
+    payment_terms: String(client?.payment_terms_code || "").trim(),
+    deliveries,
+  };
+  return {
+    client_name_snapshot: snapshot.name || null,
+    client_legal_name_snapshot: snapshot.legal_name || null,
+    client_tax_id_snapshot: snapshot.tax_id || null,
+    client_billing_address_snapshot: snapshot.billing_address || null,
+    client_billing_city_snapshot: snapshot.billing_city || null,
+    client_delivery_address_snapshot: delivery.address || null,
+    client_delivery_city_snapshot: delivery.city || null,
+    client_email_snapshot: snapshot.email || null,
+    client_phone_snapshot: snapshot.phone || null,
+    customer_snapshot_json: JSON.stringify(snapshot),
+  };
+}
+function recalculateInvoicePaymentStatus(invoiceId, actor = "Sistema") {
+  const id = Number(invoiceId || 0);
+  if (!id) return null;
+  const invoice = db.prepare("SELECT id,amount,status,due_date,updated_at FROM invoices WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(id);
+  if (!invoice || String(invoice.status || "") === "Anulada") return invoice || null;
+  const paid = Number(db.prepare("SELECT COALESCE(SUM(amount),0) total FROM payments WHERE invoice_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 AND COALESCE(status,'Aplicado')<>'Anulado' AND voided_at IS NULL").get(id)?.total || 0);
+  const total = Math.max(0, Number(invoice.amount || 0));
+  const today = new Date().toISOString().slice(0, 10);
+  const dueDate = String(invoice.due_date || "").slice(0, 10);
+  const nextStatus = paid > 0 && paid + 0.01 < total
+    ? "Parcial"
+    : total > 0 && paid + 0.01 >= total
+      ? "Cobrada"
+      : dueDate && dueDate < today
+        ? "Vencida"
+        : "Pendiente";
+  if (String(invoice.status || "") !== nextStatus) {
+    const now = new Date().toISOString();
+    db.prepare("UPDATE invoices SET status=?,updated_at=? WHERE id=?").run(nextStatus, now, id);
+    recordAudit(actor, "SYSTEM", `invoices/${id}/payment-status`, "Recalcular estado de cobro", JSON.stringify({ invoice_id: id, previous_status: invoice.status || "Pendiente", status: nextStatus, paid, total }));
+  }
+  syncOrderStatusFromInvoice(id);
+  return { ...invoice, status: nextStatus, paid_amount: Number(paid.toFixed(2)), outstanding_amount: Number(Math.max(0, total - paid).toFixed(2)) };
+}
 function syncOrderStatusFromInvoice(invoiceId) {
   const invoice = db.prepare("SELECT id,order_id,amount,status FROM invoices WHERE id=?").get(Number(invoiceId));
   if (!invoice) return [];
@@ -306,7 +386,8 @@ function ensureOrderInvoice(orderId, actor = "Sistema") {
   }
   const now = new Date().toISOString();
   const code = `FAC-${new Date().getFullYear()}-${String(Date.now()).slice(-7)}-${String(order.id).padStart(4, "0")}`;
-  const created = db.prepare("INSERT INTO invoices(code,order_id,client_id,amount,status,issue_date,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)").run(code, Number(order.id), order.client_id || null, Number(order.amount || 0), "Pendiente", now.slice(0, 10), now, now);
+  const snapshot = invoiceSnapshotData({ clientId: order.client_id, order });
+  const created = db.prepare("INSERT INTO invoices(code,order_id,client_id,amount,status,issue_date,created_at,updated_at,client_name_snapshot,client_legal_name_snapshot,client_tax_id_snapshot,client_billing_address_snapshot,client_billing_city_snapshot,client_delivery_address_snapshot,client_delivery_city_snapshot,client_email_snapshot,client_phone_snapshot,customer_snapshot_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(code, Number(order.id), order.client_id || null, Number(order.amount || 0), "Pendiente", now.slice(0, 10), now, now, snapshot.client_name_snapshot, snapshot.client_legal_name_snapshot, snapshot.client_tax_id_snapshot, snapshot.client_billing_address_snapshot, snapshot.client_billing_city_snapshot, snapshot.client_delivery_address_snapshot, snapshot.client_delivery_city_snapshot, snapshot.client_email_snapshot, snapshot.client_phone_snapshot, snapshot.customer_snapshot_json);
   const invoiceId = Number(created.lastInsertRowid);
   db.prepare("INSERT INTO invoice_lines(invoice_id,product_id,quantity,unit_price,discount,vat,amount) SELECT ?,product_id,quantity,unit_price,discount,vat,amount FROM order_lines WHERE order_id=?").run(invoiceId, Number(order.id));
   const hasLines = db.prepare("SELECT 1 FROM invoice_lines WHERE invoice_id=? LIMIT 1").get(invoiceId);
@@ -648,6 +729,18 @@ try { db.exec("ALTER TABLE orders ADD COLUMN source_order_id INTEGER"); } catch 
 try { db.exec("ALTER TABLE orders ADD COLUMN urgent INTEGER DEFAULT 0"); } catch {}
 try { db.exec("ALTER TABLE orders ADD COLUMN created_by TEXT"); } catch {}
 for (const column of ["order_id", "delivery_note_id"]) { try { db.exec(`ALTER TABLE invoices ADD COLUMN ${column} INTEGER`); } catch {} }
+for (const column of [
+  "client_name_snapshot TEXT",
+  "client_legal_name_snapshot TEXT",
+  "client_tax_id_snapshot TEXT",
+  "client_billing_address_snapshot TEXT",
+  "client_billing_city_snapshot TEXT",
+  "client_delivery_address_snapshot TEXT",
+  "client_delivery_city_snapshot TEXT",
+  "client_email_snapshot TEXT",
+  "client_phone_snapshot TEXT",
+  "customer_snapshot_json TEXT",
+]) { try { db.exec(`ALTER TABLE invoices ADD COLUMN ${column}`); } catch {} }
 try { db.exec("ALTER TABLE quotes ADD COLUMN converted_order_id INTEGER"); } catch {}
 for (const column of ["return_date", "reviewed_by", "reviewed_at", "authorized_by", "authorized_at"]) {
   try { db.exec(`ALTER TABLE returns ADD COLUMN ${column} TEXT`); } catch {}
@@ -656,7 +749,7 @@ try { db.exec("ALTER TABLE orders ADD COLUMN stock_alert INTEGER DEFAULT 0"); } 
 db.exec(
   `CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT UNIQUE NOT NULL,password TEXT NOT NULL,role TEXT DEFAULT 'user',must_change INTEGER DEFAULT 1);CREATE TABLE IF NOT EXISTS suppliers(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,phone TEXT,email TEXT,address TEXT);CREATE TABLE IF NOT EXISTS warehouses(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,address TEXT);CREATE TABLE IF NOT EXISTS delivery_notes(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,order_id INTEGER,client_id INTEGER,status TEXT DEFAULT 'Pendiente');CREATE TABLE IF NOT EXISTS payments(id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_id INTEGER,amount REAL DEFAULT 0,payment_date TEXT DEFAULT CURRENT_DATE,method TEXT DEFAULT 'Transferencia');CREATE TABLE IF NOT EXISTS clients(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,phone TEXT,email TEXT,address TEXT);CREATE TABLE IF NOT EXISTS products(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,unit_price REAL DEFAULT 0,stock REAL DEFAULT 0);CREATE TABLE IF NOT EXISTS orders(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,client_id INTEGER,product_id INTEGER,quantity REAL DEFAULT 0,amount REAL DEFAULT 0,status TEXT DEFAULT 'Pendiente');CREATE TABLE IF NOT EXISTS quotes(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,client_id INTEGER,amount REAL DEFAULT 0,status TEXT DEFAULT 'Borrador');CREATE TABLE IF NOT EXISTS invoices(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,client_id INTEGER,amount REAL DEFAULT 0,status TEXT DEFAULT 'Pendiente');`,
 );
-for (const column of ["notes TEXT", "reference TEXT", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]) {
+for (const column of ["notes TEXT", "reference TEXT", "status TEXT DEFAULT 'Aplicado'", "voided_at TEXT", "voided_by TEXT", "void_reason TEXT", "reversal_of_id INTEGER", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]) {
   try { db.exec(`ALTER TABLE payments ADD COLUMN ${column}`); } catch {}
 }
 // Las cuentas del portal deben disponer de estas columnas tanto en una base
@@ -671,31 +764,49 @@ if (remoteMode && process.env.RUN_REMOTE_MIGRATIONS === "1") {
   }
 }
 for (const [table, columns] of [
-  ["clients", ["city TEXT", "weekly_closed_day TEXT", "invoice_delivery_method TEXT", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
+  ["clients", ["city TEXT", "tax_id TEXT", "weekly_closed_day TEXT", "invoice_delivery_method TEXT", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
   ["suppliers", ["active INTEGER DEFAULT 1", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
   ["orders", ["unit_price REAL DEFAULT 0", "discount REAL DEFAULT 0", "vat REAL DEFAULT 21", "notes TEXT", "loading_notes TEXT", "driver_notes TEXT", "delivery_date TEXT", "address TEXT", "collection_point_id INTEGER", "prepared_by TEXT", "shipped_by TEXT", "delivered_by TEXT", "preparation_date TEXT", "shipping_date TEXT", "delivery_city TEXT", "urgent INTEGER DEFAULT 0", "created_by TEXT", "stock_alert INTEGER DEFAULT 0", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
   ["products", ["sku TEXT", "cost_price REAL DEFAULT 0", "category TEXT", "format TEXT", "unit TEXT", "vat REAL DEFAULT 21", "stock_reserved REAL DEFAULT 0", "active INTEGER DEFAULT 1", "product_status TEXT DEFAULT 'Activo'", "min_stock REAL DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
   ["delivery_notes", ["created_at TEXT", "updated_at TEXT", "deleted INTEGER DEFAULT 0"]],
-  ["invoices", ["issue_date TEXT", "due_date TEXT", "created_at TEXT", "updated_at TEXT", "deleted INTEGER DEFAULT 0"]],
-  ["payments", ["deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
+  ["invoices", ["issue_date TEXT", "due_date TEXT", "client_name_snapshot TEXT", "client_legal_name_snapshot TEXT", "client_tax_id_snapshot TEXT", "client_billing_address_snapshot TEXT", "client_billing_city_snapshot TEXT", "client_delivery_address_snapshot TEXT", "client_delivery_city_snapshot TEXT", "client_email_snapshot TEXT", "client_phone_snapshot TEXT", "customer_snapshot_json TEXT", "created_at TEXT", "updated_at TEXT", "deleted INTEGER DEFAULT 0"]],
+  ["payments", ["status TEXT DEFAULT 'Aplicado'", "voided_at TEXT", "voided_by TEXT", "void_reason TEXT", "reversal_of_id INTEGER", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
   ["notes", ["deleted INTEGER DEFAULT 0", "updated_at TEXT"]],
 ]) {
   for (const column of columns) { try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${column}`); } catch {} }
 }
 if (remoteMode && process.env.RUN_REMOTE_MIGRATIONS === "1") {
   for (const [table, columns] of [
-    ["clients", ["city TEXT", "weekly_closed_day TEXT", "invoice_delivery_method TEXT", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
+    ["clients", ["city TEXT", "tax_id TEXT", "weekly_closed_day TEXT", "invoice_delivery_method TEXT", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
     ["suppliers", ["active INTEGER DEFAULT 1", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
     ["orders", ["unit_price REAL DEFAULT 0", "discount REAL DEFAULT 0", "vat REAL DEFAULT 21", "notes TEXT", "loading_notes TEXT", "driver_notes TEXT", "delivery_date TEXT", "address TEXT", "collection_point_id INTEGER", "prepared_by TEXT", "shipped_by TEXT", "delivered_by TEXT", "preparation_date TEXT", "shipping_date TEXT", "delivery_city TEXT", "urgent INTEGER DEFAULT 0", "created_by TEXT", "stock_alert INTEGER DEFAULT 0", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
     ["products", ["sku TEXT", "cost_price REAL DEFAULT 0", "category TEXT", "format TEXT", "unit TEXT", "vat REAL DEFAULT 21", "stock_reserved REAL DEFAULT 0", "active INTEGER DEFAULT 1", "product_status TEXT DEFAULT 'Activo'", "min_stock REAL DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
     ["delivery_notes", ["created_at TEXT", "updated_at TEXT", "deleted INTEGER DEFAULT 0"]],
-    ["invoices", ["issue_date TEXT", "due_date TEXT", "created_at TEXT", "updated_at TEXT", "deleted INTEGER DEFAULT 0"]],
-    ["payments", ["deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
+    ["invoices", ["issue_date TEXT", "due_date TEXT", "client_name_snapshot TEXT", "client_legal_name_snapshot TEXT", "client_tax_id_snapshot TEXT", "client_billing_address_snapshot TEXT", "client_billing_city_snapshot TEXT", "client_delivery_address_snapshot TEXT", "client_delivery_city_snapshot TEXT", "client_email_snapshot TEXT", "client_phone_snapshot TEXT", "customer_snapshot_json TEXT", "created_at TEXT", "updated_at TEXT", "deleted INTEGER DEFAULT 0"]],
+    ["payments", ["status TEXT DEFAULT 'Aplicado'", "voided_at TEXT", "voided_by TEXT", "void_reason TEXT", "reversal_of_id INTEGER", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
     ["notes", ["deleted INTEGER DEFAULT 0", "updated_at TEXT"]],
   ]) {
     for (const column of columns) { try { db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column}`).run(); } catch {} }
   }
 }
+// Las facturas deben conservar los datos con los que se emitieron aunque la
+// ficha viva del cliente se archive o se modifique posteriormente.
+try {
+  db.exec(`
+    UPDATE invoices
+    SET client_name_snapshot=COALESCE(NULLIF(TRIM(client_name_snapshot),''),(SELECT name FROM clients WHERE clients.id=invoices.client_id)),
+        client_legal_name_snapshot=COALESCE(NULLIF(TRIM(client_legal_name_snapshot),''),(SELECT legal_name FROM clients WHERE clients.id=invoices.client_id)),
+        client_tax_id_snapshot=COALESCE(NULLIF(TRIM(client_tax_id_snapshot),''),(SELECT tax_id FROM clients WHERE clients.id=invoices.client_id)),
+        client_billing_address_snapshot=COALESCE(NULLIF(TRIM(client_billing_address_snapshot),''),(SELECT COALESCE(NULLIF(TRIM(billing_address),''),address) FROM clients WHERE clients.id=invoices.client_id)),
+        client_billing_city_snapshot=COALESCE(NULLIF(TRIM(client_billing_city_snapshot),''),(SELECT COALESCE(NULLIF(TRIM(billing_city),''),city) FROM clients WHERE clients.id=invoices.client_id)),
+        client_delivery_address_snapshot=COALESCE(NULLIF(TRIM(client_delivery_address_snapshot),''),(SELECT COALESCE(NULLIF(TRIM(o.address),''),NULLIF(TRIM(cp.address),''),NULLIF(TRIM(c.address),'')) FROM orders o LEFT JOIN collection_points cp ON cp.id=o.collection_point_id LEFT JOIN clients c ON c.id=o.client_id WHERE o.id=invoices.order_id)),
+        client_delivery_city_snapshot=COALESCE(NULLIF(TRIM(client_delivery_city_snapshot),''),(SELECT COALESCE(NULLIF(TRIM(o.delivery_city),''),NULLIF(TRIM(cp.city),''),NULLIF(TRIM(c.city),'')) FROM orders o LEFT JOIN collection_points cp ON cp.id=o.collection_point_id LEFT JOIN clients c ON c.id=o.client_id WHERE o.id=invoices.order_id),''),
+        client_email_snapshot=COALESCE(NULLIF(TRIM(client_email_snapshot),''),(SELECT email FROM clients WHERE clients.id=invoices.client_id)),
+        client_phone_snapshot=COALESCE(NULLIF(TRIM(client_phone_snapshot),''),(SELECT phone FROM clients WHERE clients.id=invoices.client_id))
+    WHERE CAST(COALESCE(invoices.deleted,0) AS INTEGER)=0
+  `);
+} catch {}
+try { db.exec("UPDATE payments SET status=CASE WHEN voided_at IS NOT NULL OR status='Anulado' THEN 'Anulado' ELSE COALESCE(NULLIF(status,''),'Aplicado') END"); } catch {}
 // Estas migraciones se repiten después de crear las tablas base para que también
 // se apliquen en instalaciones antiguas donde el primer bloque aún no existía.
 for (const [table, columns] of [["orders", ["preparation_date", "shipping_date", "delivery_city", "loading_notes", "driver_notes"]], ["shipments", ["preparation_date", "delivery_city", "driver_notes", "invoice_delivery_method"]]]) for (const column of columns) { try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`); } catch {} }
@@ -713,7 +824,7 @@ try { db.exec("ALTER TABLE inventory_movements ADD COLUMN stock_effect REAL"); }
 for (const [table, columns] of [
   ["products", ["photo_name TEXT", "photo_mime TEXT", "photo_data TEXT", "photo_url TEXT", "photo_public_id TEXT", "photo_thumbnail_url TEXT", "photo_web_url TEXT", "photo_bytes INTEGER DEFAULT 0", "photo_width INTEGER DEFAULT 0", "photo_height INTEGER DEFAULT 0", "photo_format TEXT", "description TEXT", "category_code TEXT", "warehouse_id INTEGER", "preorder INTEGER DEFAULT 1", "product_tracking_code TEXT DEFAULT 'Sin seguimiento'", "inventory_valuation_method TEXT DEFAULT 'FIFO'", "last_direct_cost REAL DEFAULT 0", "accounting_product_group TEXT DEFAULT 'Mercaderías'", "accounting_vat_group TEXT DEFAULT '21%'", "inventory_register_group TEXT DEFAULT 'Mercaderías'", "created_at TEXT", "created_by TEXT", "family TEXT", "subfamily TEXT", "purchase_format TEXT", "sale_format TEXT", "cases_per_pallet REAL DEFAULT 0", "units_per_pallet REAL DEFAULT 0", "weight_kg REAL DEFAULT 0", "volume_m3 REAL DEFAULT 0", "warehouse_location TEXT", "picking_order INTEGER DEFAULT 0", "product_status TEXT DEFAULT 'Activo'", "primary_supplier_id INTEGER", "fixed_supplier INTEGER DEFAULT 0", "target_margin_percent REAL DEFAULT 0", "min_margin_percent REAL DEFAULT 0", "stock_min REAL DEFAULT 0", "stock_target REAL DEFAULT 0", "stock_safety REAL DEFAULT 0", "lot_tracking INTEGER DEFAULT 0", "expiry_tracking INTEGER DEFAULT 0", "returnable_packaging INTEGER DEFAULT 0", "tax_surcharge_percent REAL DEFAULT 0", "extra_tax_name TEXT", "extra_tax_percent REAL DEFAULT 0", "freight_cost REAL DEFAULT 0", "handling_cost REAL DEFAULT 0", "real_cost REAL DEFAULT 0"]],
   ["suppliers", ["tax_id TEXT", "contact TEXT", "payment_terms TEXT", "city TEXT", "latitude REAL", "longitude REAL", "geocoding_status TEXT DEFAULT 'Pendiente'", "minimum_order REAL DEFAULT 0", "transport_cost REAL DEFAULT 0", "lead_time_days INTEGER DEFAULT 0", "reliability_percent REAL DEFAULT 0", "promotions TEXT", "rappel_percent REAL DEFAULT 0", "active INTEGER DEFAULT 1", "external_code TEXT", "source_system TEXT", "source_warehouse_code TEXT", "source_created_at TEXT", "source_closed_at TEXT", "source_balance REAL DEFAULT 0", "source_overdue_balance REAL DEFAULT 0", "source_payments REAL DEFAULT 0"]],
-  ["clients", ["city TEXT", "external_code TEXT", "source_system TEXT", "active INTEGER DEFAULT 1", "billing_address TEXT", "billing_city TEXT", "opening_time TEXT", "closing_time TEXT", "weekly_closed_day TEXT", "invoice_delivery_method TEXT", "latitude REAL", "longitude REAL", "geocoded_at TEXT", "geocoding_status TEXT DEFAULT 'Pendiente'", "payment_method_code TEXT", "payment_terms_code TEXT", "source_warehouse_code TEXT", "source_created_at TEXT", "source_closed_at TEXT", "source_balance REAL DEFAULT 0", "source_overdue_balance REAL DEFAULT 0", "source_sales REAL DEFAULT 0", "source_payments REAL DEFAULT 0"]],
+  ["clients", ["city TEXT", "tax_id TEXT", "external_code TEXT", "source_system TEXT", "active INTEGER DEFAULT 1", "billing_address TEXT", "billing_city TEXT", "opening_time TEXT", "closing_time TEXT", "weekly_closed_day TEXT", "invoice_delivery_method TEXT", "latitude REAL", "longitude REAL", "geocoded_at TEXT", "geocoding_status TEXT DEFAULT 'Pendiente'", "payment_method_code TEXT", "payment_terms_code TEXT", "source_warehouse_code TEXT", "source_created_at TEXT", "source_closed_at TEXT", "source_balance REAL DEFAULT 0", "source_overdue_balance REAL DEFAULT 0", "source_sales REAL DEFAULT 0", "source_payments REAL DEFAULT 0"]],
   ["products", ["external_code TEXT", "source_system TEXT", "active INTEGER DEFAULT 1", "source_type TEXT", "source_substitute TEXT", "assembly_item INTEGER DEFAULT 0", "cost_adjusted INTEGER DEFAULT 0", "default_split_template TEXT", "source_supplier_code TEXT", "source_created_at TEXT", "source_closed_at TEXT"]],
   ["purchase_orders", ["validation_status TEXT DEFAULT 'Pendiente de validar'", "request_id INTEGER", "supplier_ids TEXT", "comparison TEXT", "supplier_invoice_code TEXT", "invoice_date TEXT", "payment_terms_snapshot TEXT", "payment_due_date TEXT", "payment_status TEXT DEFAULT 'Pendiente'", "payment_paid_at TEXT", "payment_reference TEXT"]],
 ]) for (const column of columns) { try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${column}`); } catch {} }
@@ -1540,12 +1651,12 @@ const lookupFields = {
   orders: ["id", "code", "client_id", "status", "amount", "created_at", "updated_at", "delivery_date", "preparation_date", "shipping_date", "address", "delivery_city", "collection_point_id", "urgent", "stock_alert", "loading_notes", "driver_notes"],
   shipments: ["id", "code", "order_id", "client_id", "collection_point_id", "status", "expected_delivery_at", "preparation_date", "address", "delivery_city", "delivery_window_start", "delivery_window_end", "carrier", "packages", "incidents", "notes", "driver_notes", "invoice_delivery_method", "prepared_at", "prepared_by", "preparation_closed_at", "preparation_closed_by", "shipped_at", "shipped_by", "departure_at", "delivered_at", "delivered_by", "delivery_signature_status", "delivery_recipient_name", "delivery_signature_at", "delivery_signature_by", "delivery_signature_note", "payment_received_status", "payment_received_amount", "payment_received_method", "payment_received_reference", "payment_received_note", "payment_received_at", "payment_received_by", "public_tracking_token"],
   order_lines: ["id", "order_id", "product_id", "quantity", "quantity_requested", "quantity_unit", "prepared", "prepared_quantity", "preparation_status", "incident_resolution"],
-  invoices: ["id", "code", "order_id", "client_id", "amount", "status", "created_at", "issue_date", "due_date"],
+  invoices: ["id", "code", "order_id", "client_id", "amount", "status", "created_at", "issue_date", "due_date", "client_name_snapshot", "client_legal_name_snapshot", "client_tax_id_snapshot", "client_billing_address_snapshot", "client_billing_city_snapshot", "client_delivery_address_snapshot", "client_delivery_city_snapshot"],
   purchase_orders: ["id", "code", "supplier_id", "status", "order_date", "expected_date", "amount", "validation_status", "supplier_invoice_code", "invoice_date", "payment_terms_snapshot", "payment_due_date", "payment_status", "payment_paid_at", "payment_reference"],
   goods_receipts: ["id", "code", "counterparty_type", "client_id", "supplier_id", "purchase_order_id", "purchase_invoice_id", "warehouse_id", "receipt_date", "status", "validation_status", "validated_by", "validated_at", "stock_applied", "stock_applied_at", "stock_applied_by", "line_count", "incident_count", "received_by", "notes"],
   goods_receipt_lines: ["id", "receipt_id", "product_id", "product_name_snapshot", "expected_quantity", "received_quantity", "quantity_unit", "damaged_quantity", "substituted_quantity", "substitute_product_id", "unit_cost", "expected_value", "received_value", "economic_difference", "status", "lot_id", "lot_code", "expiry_date", "notes", "location_verified_status", "location_verified_code", "location_verified_reason", "location_verified_by", "location_verified_at"],
   goods_receipt_incidents: ["id", "receipt_id", "receipt_line_id", "supplier_id", "type", "description", "expected_quantity", "received_quantity", "damaged_quantity", "substituted_quantity", "substitute_product_id", "economic_difference", "status", "claim_status", "attachment_name", "attachment_mime", "created_by", "created_at"],
-  payments: ["id", "invoice_id", "amount", "payment_date", "method"],
+  payments: ["id", "invoice_id", "amount", "payment_date", "method", "reference", "notes", "status", "voided_at", "voided_by", "void_reason"],
   inventory_movements: ["id", "product_id", "warehouse_id", "movement_type", "quantity", "stock_effect", "reference", "movement_date", "notes"],
   product_lots: ["id", "product_id", "lot_code", "quantity", "quarantine_quantity", "waste_quantity", "expiry_date", "received_date", "warehouse_id", "barcode"],
   expenses: ["id", "code", "client_id", "expense_date", "category", "vendor", "amount", "vat", "payment_method", "notes", "attachment_name", "status", "created_by", "route_id", "route_code", "vehicle_id", "driver", "created_at"],
@@ -1835,7 +1946,7 @@ function buildRouteWithStops(route, stops, vehicle, vehicleTrip) {
 function getRouteWithStops(id) {
   const route = db.prepare("SELECT * FROM delivery_routes WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(id));
   if (!route) return null;
-  const stops = db.prepare("SELECT * FROM delivery_route_stops WHERE route_id=? ORDER BY position").all(Number(id));
+  const stops = db.prepare("SELECT drs.* FROM delivery_route_stops drs JOIN shipments s ON s.id=drs.shipment_id AND CAST(COALESCE(s.deleted,0) AS INTEGER)=0 AND COALESCE(s.status,'')<>'Cancelado' LEFT JOIN orders o ON o.id=s.order_id WHERE drs.route_id=? AND CAST(COALESCE(drs.deleted,0) AS INTEGER)=0 AND COALESCE(o.status,'')<>'Cancelado' ORDER BY drs.position").all(Number(id));
   const vehicle = route.vehicle_id ? db.prepare("SELECT * FROM vehicles WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(route.vehicle_id)) : null;
   const vehicleTrip = db.prepare("SELECT * FROM vehicle_trips WHERE route_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 1").get(Number(id));
   return buildRouteWithStops(route, stops, vehicle, vehicleTrip);
@@ -1847,7 +1958,7 @@ function getRoutesWithStops(routeRows) {
   const vehicleIds = [...new Set(routeRows.map((route) => Number(route.vehicle_id || 0)).filter(Boolean))];
   const vehicleMarks = vehicleIds.map(() => "?").join(",");
   const statements = [
-    { sql: `SELECT * FROM delivery_route_stops WHERE route_id IN (${routeMarks}) ORDER BY route_id,position`, args: routeIds },
+    { sql: `SELECT drs.* FROM delivery_route_stops drs JOIN shipments s ON s.id=drs.shipment_id AND CAST(COALESCE(s.deleted,0) AS INTEGER)=0 AND COALESCE(s.status,'')<>'Cancelado' LEFT JOIN orders o ON o.id=s.order_id WHERE drs.route_id IN (${routeMarks}) AND CAST(COALESCE(drs.deleted,0) AS INTEGER)=0 AND COALESCE(o.status,'')<>'Cancelado' ORDER BY drs.route_id,drs.position`, args: routeIds },
     { sql: vehicleIds.length ? `SELECT * FROM vehicles WHERE id IN (${vehicleMarks}) AND CAST(COALESCE(deleted,0) AS INTEGER)=0` : "SELECT * FROM vehicles WHERE 1=0", args: vehicleIds },
     { sql: `SELECT * FROM vehicle_trips WHERE route_id IN (${routeMarks}) AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY route_id,id DESC`, args: routeIds },
   ];
@@ -1865,7 +1976,7 @@ function getRoutesWithStops(routeRows) {
   return routeRows.map((route) => buildRouteWithStops(route, stopsByRoute.get(Number(route.id)) || [], vehiclesById.get(Number(route.vehicle_id || 0)) || null, tripsByRoute.get(Number(route.id)) || null));
 }
 function getRouteCloseSummary(routeId) {
-  const stops = db.prepare("SELECT id,shipment_id,status FROM delivery_route_stops WHERE route_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY position").all(Number(routeId));
+  const stops = db.prepare("SELECT drs.id,drs.shipment_id,drs.status FROM delivery_route_stops drs JOIN shipments s ON s.id=drs.shipment_id AND CAST(COALESCE(s.deleted,0) AS INTEGER)=0 AND COALESCE(s.status,'')<>'Cancelado' LEFT JOIN orders o ON o.id=s.order_id WHERE drs.route_id=? AND CAST(COALESCE(drs.deleted,0) AS INTEGER)=0 AND COALESCE(o.status,'')<>'Cancelado' ORDER BY drs.position").all(Number(routeId));
   const shipmentIds = stops.map((stop) => Number(stop.shipment_id)).filter(Boolean);
   const shipments = shipmentIds.length ? db.prepare(`SELECT id,payment_received_status,payment_received_amount,payment_received_method FROM shipments WHERE id IN (${shipmentIds.map(() => "?").join(",")}) AND CAST(COALESCE(deleted,0) AS INTEGER)=0`).all(...shipmentIds) : [];
   const paymentTotals = { cash: 0, card: 0, transfer: 0, other: 0 };
@@ -2458,7 +2569,7 @@ export async function crmApiHandler(req, res) {
       if (p[1] === "routes" && req.method === "GET") {
         if (p[2]) return send(res, 200, getRouteWithStops(p[2]) || { error: "Ruta no encontrada" });
         const routeDate = new URL(req.url, "http://local").searchParams.get("date");
-        const routes = db.prepare(`SELECT * FROM delivery_routes WHERE CAST(COALESCE(deleted,0) AS INTEGER)=0 ${routeDate ? "AND route_date=?" : ""} ORDER BY route_date DESC,id DESC LIMIT 100`).all(...(routeDate ? [routeDate] : []));
+        const routes = db.prepare(`SELECT * FROM delivery_routes WHERE CAST(COALESCE(deleted,0) AS INTEGER)=0 AND EXISTS(SELECT 1 FROM delivery_route_stops active_stop JOIN shipments active_shipment ON active_shipment.id=active_stop.shipment_id AND CAST(COALESCE(active_shipment.deleted,0) AS INTEGER)=0 AND COALESCE(active_shipment.status,'')<>'Cancelado' LEFT JOIN orders active_order ON active_order.id=active_shipment.order_id WHERE active_stop.route_id=delivery_routes.id AND CAST(COALESCE(active_stop.deleted,0) AS INTEGER)=0 AND COALESCE(active_order.status,'')<>'Cancelado') ${routeDate ? "AND route_date=?" : ""} ORDER BY route_date DESC,id DESC LIMIT 100`).all(...(routeDate ? [routeDate] : []));
         return send(res, 200, getRoutesWithStops(routes));
       }
       if (p[1] === "routes" && req.method === "PUT" && p[2] === "board") {
@@ -2472,7 +2583,7 @@ export async function crmApiHandler(req, res) {
         for (const column of columns) {
           const shipmentIds = Array.from(new Set((Array.isArray(column.shipment_ids) ? column.shipment_ids : []).map(Number).filter(Boolean)));
           if (!shipmentIds.length) continue;
-          const shipmentRows = shipmentIds.map((id) => db.prepare("SELECT * FROM shipments WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(id)).filter(Boolean);
+          const shipmentRows = shipmentIds.map((id) => db.prepare("SELECT s.* FROM shipments s LEFT JOIN orders o ON o.id=s.order_id WHERE s.id=? AND CAST(COALESCE(s.deleted,0) AS INTEGER)=0 AND COALESCE(s.status,'')<>'Cancelado' AND COALESCE(o.status,'')<>'Cancelado'").get(id)).filter(Boolean);
           if (shipmentRows.length !== shipmentIds.length) return send(res, 400, { error: "Uno de los pedidos ya no está disponible" });
           if (!draft) {
             const incomplete = shipmentRows.find((shipment) => !shipmentHasCompletePreparedLines(shipment));
@@ -2498,7 +2609,7 @@ export async function crmApiHandler(req, res) {
         for (const column of columns) {
           const shipmentIds = Array.from(new Set((Array.isArray(column.shipment_ids) ? column.shipment_ids : []).map(Number).filter(Boolean)));
           if (!shipmentIds.length) continue;
-          const shipmentRows = shipmentIds.map((id) => db.prepare("SELECT * FROM shipments WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(id)).filter(Boolean);
+          const shipmentRows = shipmentIds.map((id) => db.prepare("SELECT s.* FROM shipments s LEFT JOIN orders o ON o.id=s.order_id WHERE s.id=? AND CAST(COALESCE(s.deleted,0) AS INTEGER)=0 AND COALESCE(s.status,'')<>'Cancelado' AND COALESCE(o.status,'')<>'Cancelado'").get(id)).filter(Boolean);
           if (shipmentRows.length !== shipmentIds.length) return send(res, 400, { error: "Uno de los pedidos ya no está disponible" });
           const stops = shipmentRows.map(resolveShipmentStop);
           const missing = stops.filter((stop) => stop.latitude == null || stop.longitude == null);
@@ -2530,7 +2641,8 @@ export async function crmApiHandler(req, res) {
         const shipmentIds = Array.isArray(body.shipment_ids) ? [...new Set(body.shipment_ids.map(Number).filter(Boolean))] : [];
         if (!String(body.route_date || "").trim()) return send(res, 400, { error: "Indica la fecha de la ruta" });
         if (!shipmentIds.length) return send(res, 400, { error: "Selecciona al menos un envío" });
-        const stops = shipmentIds.map((id) => db.prepare("SELECT * FROM shipments WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(id)).filter(Boolean).map(resolveShipmentStop);
+        const stops = shipmentIds.map((id) => db.prepare("SELECT s.* FROM shipments s LEFT JOIN orders o ON o.id=s.order_id WHERE s.id=? AND CAST(COALESCE(s.deleted,0) AS INTEGER)=0 AND COALESCE(s.status,'')<>'Cancelado' AND COALESCE(o.status,'')<>'Cancelado'").get(id)).filter(Boolean).map(resolveShipmentStop);
+        if (stops.length !== shipmentIds.length) return send(res, 400, { error: "No se pueden incluir pedidos cancelados en una ruta" });
         const missing = stops.filter((stop) => stop.latitude == null || stop.longitude == null);
         if (missing.length) return send(res, 400, { error: "Hay envíos sin geolocalizar", missing: missing.map((stop) => ({ shipment_id: stop.shipment_id, client_name: stop.client_name, address: stop.address })) });
         const originLat = body.origin_latitude === undefined ? stops[0].latitude : Number(body.origin_latitude);
@@ -3336,10 +3448,7 @@ export async function crmApiHandler(req, res) {
               if (hasColumn("payments", "reference")) { columns.splice(4, 0, "reference"); values.splice(4, 0, String(body.reference || "").trim() || null); }
               db.prepare(`INSERT INTO payments(${columns.join(",")}) VALUES(${columns.map(() => "?").join(",")})`).run(...values);
             }
-            const paid = db.prepare("SELECT COALESCE(SUM(amount),0) total FROM payments WHERE invoice_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(linkedInvoiceId).total;
-            const invoiceAmount = db.prepare("SELECT amount FROM invoices WHERE id=?").get(linkedInvoiceId)?.amount || 0;
-            db.prepare("UPDATE invoices SET status=? WHERE id=?").run(Number(paid) >= Number(invoiceAmount) ? "Cobrada" : "Parcial", linkedInvoiceId);
-            syncOrderStatusFromInvoice(linkedInvoiceId);
+            recalculateInvoicePaymentStatus(linkedInvoiceId, actor);
           }
         }
         recordAudit(actor, "POST", `shipments/${shipmentId}/payment-receipt`, "Registrar talón o cobro recibido", JSON.stringify({ shipment_id: shipmentId, order_id: shipment.order_id || null, invoice_id: linkedInvoiceId, payment_status: paymentStatus, amount, method: body.method || null, reference: body.reference || null, attachments: attachments.length }));
@@ -3682,9 +3791,10 @@ export async function crmApiHandler(req, res) {
         if (billed.length) return send(res, 409, { error: `Ya facturado: ${billed.map((row) => row.code).join(", ")}` });
         const total = orders.reduce((sum, row) => sum + Number(row.amount || 0), 0);
         const code = `FAC-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+        const snapshot = invoiceSnapshotData({ clientId: orders[0].client_id, orders });
         if (!remoteMode) db.exec("BEGIN");
         try {
-          const created = db.prepare("INSERT INTO invoices(code,order_id,client_id,amount,status) VALUES(?,?,?,?,?)").run(code, ids[0], orders[0].client_id, total, "Pendiente");
+          const created = db.prepare("INSERT INTO invoices(code,order_id,client_id,amount,status,issue_date,created_at,updated_at,client_name_snapshot,client_legal_name_snapshot,client_tax_id_snapshot,client_billing_address_snapshot,client_billing_city_snapshot,client_delivery_address_snapshot,client_delivery_city_snapshot,client_email_snapshot,client_phone_snapshot,customer_snapshot_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(code, ids[0], orders[0].client_id, total, "Pendiente", new Date().toISOString().slice(0, 10), new Date().toISOString(), new Date().toISOString(), snapshot.client_name_snapshot, snapshot.client_legal_name_snapshot, snapshot.client_tax_id_snapshot, snapshot.client_billing_address_snapshot, snapshot.client_billing_city_snapshot, snapshot.client_delivery_address_snapshot, snapshot.client_delivery_city_snapshot, snapshot.client_email_snapshot, snapshot.client_phone_snapshot, snapshot.customer_snapshot_json);
           const invoiceId = Number(created.lastInsertRowid);
           const line = db.prepare("INSERT INTO invoice_lines(invoice_id,product_id,quantity,unit_price,discount,vat,amount) SELECT ?,product_id,quantity,unit_price,discount,vat,amount FROM order_lines WHERE order_id=?");
           const relation = db.prepare("INSERT INTO invoice_orders(invoice_id,order_id) VALUES(?,?)");
@@ -3733,10 +3843,12 @@ export async function crmApiHandler(req, res) {
           String(Date.now()).slice(-5);
         const fields = delivery
           ? "code,order_id,client_id,status"
-          : "code,order_id,client_id,amount,status";
+          : "code,order_id,client_id,amount,status,issue_date,created_at,updated_at,client_name_snapshot,client_legal_name_snapshot,client_tax_id_snapshot,client_billing_address_snapshot,client_billing_city_snapshot,client_delivery_address_snapshot,client_delivery_city_snapshot,client_email_snapshot,client_phone_snapshot,customer_snapshot_json";
+        const invoiceSnapshot = delivery ? null : invoiceSnapshotData({ clientId: order.client_id, order });
+        const now = new Date().toISOString();
         const values = delivery
           ? [code, order.id, order.client_id, "Pendiente"]
-          : [code, order.id, order.client_id, order.amount || 0, "Pendiente"];
+          : [code, order.id, order.client_id, order.amount || 0, "Pendiente", now.slice(0, 10), now, now, invoiceSnapshot.client_name_snapshot, invoiceSnapshot.client_legal_name_snapshot, invoiceSnapshot.client_tax_id_snapshot, invoiceSnapshot.client_billing_address_snapshot, invoiceSnapshot.client_billing_city_snapshot, invoiceSnapshot.client_delivery_address_snapshot, invoiceSnapshot.client_delivery_city_snapshot, invoiceSnapshot.client_email_snapshot, invoiceSnapshot.client_phone_snapshot, invoiceSnapshot.customer_snapshot_json];
         const created = db
           .prepare(`INSERT INTO ${table} (${fields}) VALUES (${values.map(() => "?").join(",")})`)
           .run(...values);
@@ -3896,13 +4008,17 @@ export async function crmApiHandler(req, res) {
             ? `orders LEFT JOIN clients AS order_client ON order_client.id=orders.client_id`
             : t === "shipments"
               ? `shipments LEFT JOIN orders AS shipment_order ON shipment_order.id=shipments.order_id`
+              : t === "invoices"
+                ? `invoices LEFT JOIN clients AS invoice_client ON invoice_client.id=invoices.client_id`
               : t;
           const selection = t === "orders"
             ? "orders.*,order_client.name AS client_name,order_client.city AS client_city,CASE WHEN orders.status='Facturado' OR EXISTS(SELECT 1 FROM invoice_orders io JOIN invoices bi ON bi.id=io.invoice_id WHERE io.order_id=orders.id AND COALESCE(bi.status,'')<>'Anulada' AND COALESCE(bi.deleted,0)=0) OR EXISTS(SELECT 1 FROM invoices bi WHERE bi.order_id=orders.id AND COALESCE(bi.status,'')<>'Anulada' AND COALESCE(bi.deleted,0)=0) THEN 'Facturado' ELSE 'Sin facturar' END AS billing_status"
             : t === "shipments"
               ? "shipments.*,(SELECT shipping_date FROM orders WHERE orders.id=shipments.order_id) AS shipping_date"
+              : t === "invoices"
+                ? "invoices.*,COALESCE(NULLIF(TRIM(invoices.client_name_snapshot),''),invoice_client.name) AS client_name,COALESCE(NULLIF(TRIM(invoices.client_legal_name_snapshot),''),invoice_client.legal_name) AS client_legal_name,COALESCE(NULLIF(TRIM(invoices.client_tax_id_snapshot),''),invoice_client.tax_id) AS client_tax_id,COALESCE(NULLIF(TRIM(invoices.client_billing_address_snapshot),''),NULLIF(TRIM(invoice_client.billing_address),''),invoice_client.address) AS client_address,COALESCE(NULLIF(TRIM(invoices.client_billing_city_snapshot),''),NULLIF(TRIM(invoice_client.billing_city),''),invoice_client.city) AS client_city,COALESCE(NULLIF(TRIM(invoices.client_email_snapshot),''),invoice_client.email) AS client_email,COALESCE(NULLIF(TRIM(invoices.client_phone_snapshot),''),invoice_client.phone) AS client_phone"
             : p[2] ? "*" : listSelectFor(t);
-          const tableReference = t === "orders" ? "orders" : t;
+          const tableReference = t === "orders" ? "orders" : t === "shipments" ? "shipments" : t === "invoices" ? "invoices" : t;
           const deletedClause = includeDeleted || !hasColumn(tableReference, "deleted") ? "" : ` AND CAST(COALESCE(${tableReference}.deleted,0) AS INTEGER)=0`;
           const row = db.prepare(`SELECT ${selection} FROM ${source} WHERE ${tableReference}.id=?${deletedClause}`).get(Number(p[2]));
           if (!row) return send(res, 404, { error: "Registro no encontrado" });
@@ -3919,6 +4035,8 @@ export async function crmApiHandler(req, res) {
           ? `orders LEFT JOIN clients AS order_client ON order_client.id=orders.client_id`
           : t === "shipments"
             ? `shipments LEFT JOIN orders AS shipment_order ON shipment_order.id=shipments.order_id`
+            : t === "invoices"
+              ? `invoices LEFT JOIN clients AS invoice_client ON invoice_client.id=invoices.client_id`
             : t;
         const selection = isPublicCatalog
           ? "products.id,products.name,products.family,products.category,products.subfamily,products.brand,products.format,products.sku,products.description,products.photo_url,products.photo_thumbnail_url,products.photo_web_url"
@@ -3928,6 +4046,8 @@ export async function crmApiHandler(req, res) {
             ? "orders.*,order_client.name AS client_name,order_client.city AS client_city,CASE WHEN orders.status='Facturado' OR EXISTS(SELECT 1 FROM invoice_orders io JOIN invoices bi ON bi.id=io.invoice_id WHERE io.order_id=orders.id AND COALESCE(bi.status,'')<>'Anulada' AND COALESCE(bi.deleted,0)=0) OR EXISTS(SELECT 1 FROM invoices bi WHERE bi.order_id=orders.id AND COALESCE(bi.status,'')<>'Anulada' AND COALESCE(bi.deleted,0)=0) THEN 'Facturado' ELSE 'Sin facturar' END AS billing_status"
           : t === "shipments"
               ? "shipments.*,(SELECT shipping_date FROM orders WHERE orders.id=shipments.order_id) AS shipping_date"
+            : t === "invoices"
+              ? "invoices.*,COALESCE(NULLIF(TRIM(invoices.client_name_snapshot),''),invoice_client.name) AS client_name,COALESCE(NULLIF(TRIM(invoices.client_legal_name_snapshot),''),invoice_client.legal_name) AS client_legal_name,COALESCE(NULLIF(TRIM(invoices.client_tax_id_snapshot),''),invoice_client.tax_id) AS client_tax_id,COALESCE(NULLIF(TRIM(invoices.client_billing_address_snapshot),''),NULLIF(TRIM(invoice_client.billing_address),''),invoice_client.address) AS client_address,COALESCE(NULLIF(TRIM(invoices.client_billing_city_snapshot),''),NULLIF(TRIM(invoice_client.billing_city),''),invoice_client.city) AS client_city,COALESCE(NULLIF(TRIM(invoices.client_email_snapshot),''),invoice_client.email) AS client_email,COALESCE(NULLIF(TRIM(invoices.client_phone_snapshot),''),invoice_client.phone) AS client_phone"
             : t === "clients"
               ? `clients.*,
                 (SELECT COUNT(*)
@@ -3946,7 +4066,7 @@ export async function crmApiHandler(req, res) {
         const filterParams = [];
         if (!includeDeleted && hasColumn(t, "deleted")) filters.push(`CAST(COALESCE(${t === "orders" ? "orders" : t}.deleted,0) AS INTEGER)=0`);
         if (t === "shipments" && /^\d{4}-\d{2}-\d{2}$/.test(dateFilter)) {
-          filters.push("((shipments.expected_delivery_at>=? AND shipments.expected_delivery_at<?) OR (shipments.expected_delivery_at IS NULL AND substr(COALESCE(shipment_order.shipping_date,shipment_order.delivery_date,shipment_order.preparation_date),1,10)=?))");
+          filters.push("CAST(COALESCE(shipments.deleted,0) AS INTEGER)=0", "COALESCE(shipments.status,'')<>'Cancelado'", "COALESCE(shipment_order.status,'')<>'Cancelado'", "((shipments.expected_delivery_at>=? AND shipments.expected_delivery_at<?) OR (shipments.expected_delivery_at IS NULL AND substr(COALESCE(shipment_order.shipping_date,shipment_order.delivery_date,shipment_order.preparation_date),1,10)=?))");
           filterParams.push(dateFilter, nextDateFilter, dateFilter);
         }
         if (/^\d{4}-\d{2}-\d{2}$/.test(preparationDateFilter) && ["shipments", "orders"].includes(t)) {
@@ -3958,7 +4078,7 @@ export async function crmApiHandler(req, res) {
         }
         const requestedIds = String(query.get("ids") || "").split(",").map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0);
         if (query.has("ids") && ["clients", "collection_points", "products", "orders", "shipments", "invoices"].includes(t)) {
-          const tableReference = t === "orders" ? "orders" : t === "shipments" ? "shipments" : t;
+          const tableReference = t === "orders" ? "orders" : t === "shipments" ? "shipments" : t === "invoices" ? "invoices" : t;
           if (requestedIds.length) {
             filters.push(`${tableReference}.id IN (${requestedIds.map(() => "?").join(",")})`);
             filterParams.push(...requestedIds);
@@ -3993,7 +4113,7 @@ export async function crmApiHandler(req, res) {
         const pagination = limitValue === null ? "" : ` LIMIT ${limitValue} OFFSET ${offsetValue}`;
         const orderBy = isPublicCatalog
           ? "CASE WHEN TRIM(COALESCE(products.photo_web_url,''))<>'' THEN 0 ELSE 1 END, products.id DESC"
-          : `${t === "orders" ? "orders.id" : t === "shipments" ? "shipments.id" : "id"} DESC`;
+          : `${t === "orders" ? "orders.id" : t === "shipments" ? "shipments.id" : t === "invoices" ? "invoices.id" : "id"} DESC`;
         const rows = db.prepare(`SELECT ${selection} FROM ${source} ${where} ORDER BY ${orderBy}${pagination}`).all(...filterParams);
         const responseRows = t === "shipments"
           ? rows.map(attachShipmentTrackingToken)
@@ -4142,12 +4262,16 @@ export async function crmApiHandler(req, res) {
           const amount = Number(d.amount);
           if (!Number.isFinite(amount) || amount <= 0) return send(res, 400, { error: "El importe del cobro debe ser mayor que cero" });
           if (!d.invoice_id) return send(res, 400, { error: "Selecciona una factura para registrar el cobro" });
-          const invoice = db.prepare("SELECT amount,status FROM invoices WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(d.invoice_id);
+          const invoice = db.prepare("SELECT amount,status FROM invoices WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(d.invoice_id));
           if (!invoice) return send(res, 400, { error: "Factura no encontrada" });
           if (String(invoice.status || "") === "Anulada") return send(res, 400, { error: "No se puede cobrar una factura anulada" });
-          const paid = db.prepare("SELECT COALESCE(SUM(amount),0) total FROM payments WHERE invoice_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(d.invoice_id).total;
+          const paid = db.prepare("SELECT COALESCE(SUM(amount),0) total FROM payments WHERE invoice_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 AND COALESCE(status,'Aplicado')<>'Anulado' AND voided_at IS NULL").get(Number(d.invoice_id)).total;
           const nextPaid = Number(paid) + amount;
           if (nextPaid > Number(invoice.amount || 0) + 0.01) return send(res, 400, { error: `El cobro supera el importe pendiente (${Math.max(0, Number(invoice.amount || 0) - Number(paid)).toFixed(2)} €)` });
+          d.status = "Aplicado";
+          d.voided_at = null;
+          d.voided_by = null;
+          d.void_reason = null;
         }
         if (t === "expenses") {
           const amount = Number(d.amount);
@@ -4271,6 +4395,11 @@ export async function crmApiHandler(req, res) {
           const existingOrder = db.prepare("SELECT * FROM orders WHERE code=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 LIMIT 1").get(String(d.code));
           if (existingOrder) return send(res, 200, { ...existingOrder, idempotent: true });
         }
+        if (t === "invoices") {
+          const sourceOrder = d.order_id ? db.prepare("SELECT * FROM orders WHERE id=?").get(Number(d.order_id)) : null;
+          Object.assign(d, invoiceSnapshotData({ clientId: d.client_id, order: sourceOrder }));
+          d.status = String(d.status || "Pendiente");
+        }
         const keys = Object.keys(d),
           r = db
             .prepare(
@@ -4297,10 +4426,7 @@ export async function crmApiHandler(req, res) {
           recordAudit(actor, "POST", `preparation-incidents/${Number(r.lastInsertRowid)}`, "Incidencia preparación", JSON.stringify({ note_id: Number(r.lastInsertRowid), order_id: Number(d.record_id || 0) || null, content: String(d.content || d.title || "Incidencia de preparación") }));
         }
         if (t === "payments" && d.invoice_id) {
-          const invoice = db.prepare("SELECT amount FROM invoices WHERE id=?").get(d.invoice_id);
-          const paid = db.prepare("SELECT COALESCE(SUM(amount),0) total FROM payments WHERE invoice_id=?").get(d.invoice_id).total;
-          db.prepare("UPDATE invoices SET status=? WHERE id=?").run(Number(paid) >= Number(invoice?.amount || 0) ? "Cobrada" : "Parcial", d.invoice_id);
-          syncOrderStatusFromInvoice(d.invoice_id);
+          recalculateInvoicePaymentStatus(d.invoice_id, actor);
         }
         if (t === "orders" && d.product_id && d.quantity)
           db.prepare(
@@ -4350,6 +4476,7 @@ export async function crmApiHandler(req, res) {
         if (t === "shipments") createdRecord.public_tracking_token = ensureShipmentTrackingToken(Number(r.lastInsertRowid));
         if (t === "products") Object.assign(createdRecord, db.prepare("SELECT photo_url,photo_public_id,photo_thumbnail_url,photo_web_url,photo_bytes,photo_width,photo_height,photo_format FROM products WHERE id=?").get(Number(r.lastInsertRowid)) || {});
         if (t === "orders") createdRecord.stock_alerts = [...stockShortages, ...stockAlerts];
+        if (t === "invoices" && String(d.status || "") !== "Anulada") Object.assign(createdRecord, recalculateInvoicePaymentStatus(Number(r.lastInsertRowid), actor) || {});
         if (t === "orders" || t === "quotes") {
           try {
             const pdf = await ensureCommercialDocumentPdf(t === "orders" ? "order" : "quote", Number(r.lastInsertRowid), actor);
@@ -4374,6 +4501,16 @@ export async function crmApiHandler(req, res) {
       if (req.method === "DELETE") {
         invalidateRelatedReadCaches(t);
         const now = new Date().toISOString();
+        if (t === "payments") {
+          const payment = db.prepare("SELECT * FROM payments WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(p[2]));
+          if (!payment) return send(res, 404, { error: "Cobro no encontrado" });
+          if (String(payment.status || "Aplicado") === "Anulado" || payment.voided_at) return send(res, 200, { ok: true, annulled: 1, id: Number(p[2]), already_annulled: true });
+          const reason = String(d.reason || d.void_reason || "Anulación solicitada desde el CRM").trim();
+          db.prepare("UPDATE payments SET status='Anulado',voided_at=?,voided_by=?,void_reason=?,updated_at=? WHERE id=?").run(now, actor, reason, now, Number(p[2]));
+          const recalculated = payment.invoice_id ? recalculateInvoicePaymentStatus(payment.invoice_id, actor) : null;
+          recordAudit(actor, "POST", `payments/${Number(p[2])}/void`, "Anular cobro", JSON.stringify({ payment_id: Number(p[2]), invoice_id: payment.invoice_id || null, amount: Number(payment.amount || 0), reason, invoice_status: recalculated?.status || null }));
+          return send(res, 200, { ok: true, annulled: 1, id: Number(p[2]), status: "Anulado", voided_at: now, voided_by: actor, void_reason: reason, invoice: recalculated ? { id: recalculated.id, status: recalculated.status, paid_amount: recalculated.paid_amount, outstanding_amount: recalculated.outstanding_amount } : null });
+        }
         if (t === "orders") {
           const order = db.prepare("SELECT * FROM orders WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(p[2]));
           if (!order) return send(res, 404, { error: "Registro no encontrado" });
@@ -4412,8 +4549,14 @@ export async function crmApiHandler(req, res) {
           if (duplicate) return send(res, 409, { error: "Ya existe un producto con ese SKU" });
         }
         invalidateRelatedReadCaches(t);
-        const currentRecord = db.prepare(`SELECT id FROM ${t} WHERE id=?`).get(Number(p[2]));
+        const currentRecord = db.prepare(`SELECT * FROM ${t} WHERE id=?`).get(Number(p[2]));
         if (!currentRecord) return send(res, 404, { error: "Registro no encontrado" });
+        if (t === "payments") {
+          if (String(currentRecord.status || "Aplicado") === "Anulado" || currentRecord.voided_at) return send(res, 409, { error: "Un cobro anulado no se puede editar; registra un nuevo cobro si necesitas corregirlo" });
+          for (const field of ["invoice_id", "amount", "payment_date"]) {
+            if (d[field] !== undefined && String(d[field] ?? "") !== String(currentRecord[field] ?? "")) return send(res, 409, { error: "Los datos económicos de un cobro son inmutables; anúlalo y registra uno nuevo" });
+          }
+        }
         const currentPurchase = t === "purchase_orders" ? db.prepare("SELECT * FROM purchase_orders WHERE id=?").get(Number(p[2])) : null;
         if (t === "purchase_orders") {
           const supplierId = Number(d.supplier_id ?? currentPurchase?.supplier_id ?? 0);
@@ -4706,6 +4849,8 @@ export async function crmApiHandler(req, res) {
         db.prepare(
           `UPDATE ${t} SET ${keys.map((k) => k + "=?").join(",")} WHERE id=?`,
         ).run(...keys.map((k) => d[k]), p[2]);
+        if (t === "payments" && currentRecord.invoice_id) recalculateInvoicePaymentStatus(currentRecord.invoice_id, actor);
+        if (t === "invoices" && String(d.status || "") !== "Anulada") recalculateInvoicePaymentStatus(Number(p[2]), actor);
         if (t === "order_lines" && normalizedLotAllocations) {
           db.prepare("DELETE FROM order_line_lots WHERE order_line_id=?").run(Number(p[2]));
           const insertLotAllocation = db.prepare("INSERT INTO order_line_lots(order_line_id,lot_id,lot_code,expiry_date,quantity,created_at,updated_at) VALUES(?,?,?,?,?,?,?)");

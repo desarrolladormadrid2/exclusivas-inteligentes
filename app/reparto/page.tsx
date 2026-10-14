@@ -489,7 +489,7 @@ export default function RepartoPage() {
         fetch("/api/delivery_history?limit=100"),
       ]);
       const rawShipments = shipmentResponse.ok ? await shipmentResponse.json() : [];
-      const shipmentRows = Array.isArray(rawShipments) ? rawShipments : [];
+      const shipmentRows = (Array.isArray(rawShipments) ? rawShipments : []).filter((item: any) => !["Cancelado", "Anulado"].includes(String(item?.status || "")));
       const queryIds = (values: any[]) => [...new Set(values.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0))].join(",") || "0";
       const [clientResponse, pointResponse] = await Promise.all([
         fetch(`/api/clients?view=lookup&ids=${queryIds(shipmentRows.map((item: any) => item.client_id))}`),
@@ -547,6 +547,7 @@ export default function RepartoPage() {
   }, []);
 
   const dayShipments = useMemo(() => shipments
+    .filter((item) => !["Cancelado", "Anulado"].includes(String(item.status || "")))
     .filter((item) => String(item.shipping_date || item.expected_delivery_at || "").slice(0, 10) === date)
     .sort((a, b) => String(a.opening_time || "99:99").localeCompare(String(b.opening_time || "99:99")) || String(a.client_name).localeCompare(String(b.client_name), "es")), [shipments, date]);
   const activeRoute = routes.find((route) => Number(route.id) === Number(activeRouteId)) || null;
