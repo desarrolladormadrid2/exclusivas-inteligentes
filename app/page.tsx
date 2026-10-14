@@ -4688,7 +4688,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     // La factura conserva una copia histórica del cliente. Versionamos esta
     // caché para que los listados guardados antes de esa migración no sigan
     // mostrando "Cliente no disponible" aunque la API ya tenga el histórico.
-    const cacheKeyPrefix = c.api === "invoices" ? "excluvas.listado.v4" : "excluvas.listado.v3";
+    const cacheKeyPrefix = ["invoices", "payments"].includes(c.api) ? "excluvas.listado.v4" : "excluvas.listado.v3";
     const cacheKey = `${cacheKeyPrefix}.${c.api}.${preparationCacheDate || "all-dates"}.${showDeleted ? "deleted" : "active"}.${showInactive ? "all-statuses" : "active-only"}`;
     const applyList = (value: any[]) => {
       const enrichedRows = c.api === "orders"
