@@ -3657,12 +3657,15 @@ export async function crmApiHandler(req, res) {
       if (t === "billing" && req.method === "GET") {
         try { db.exec(`CREATE TABLE IF NOT EXISTS invoice_orders(id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_id INTEGER NOT NULL,order_id INTEGER NOT NULL,UNIQUE(invoice_id,order_id),UNIQUE(order_id));`); } catch {}
         const params = new URL(req.url, "http://local").searchParams;
-        const clauses = ["COALESCE(o.deleted,0)=0"];
+        // SQLite receives some boolean flags as text when data is restored or
+        // imported. Cast the logical-delete flag before comparing it so that
+        // active orders are not hidden from the billing selector.
+        const clauses = ["CAST(COALESCE(o.deleted,0) AS INTEGER)=0"];
         const args = [];
         if (params.get("from")) { clauses.push("date(COALESCE(o.delivery_date,o.created_at)) >= date(?)"); args.push(params.get("from")); }
         if (params.get("to")) { clauses.push("date(COALESCE(o.delivery_date,o.created_at)) <= date(?)"); args.push(params.get("to")); }
         if (params.get("client_id")) { clauses.push("o.client_id=?"); args.push(Number(params.get("client_id"))); }
-        const rows = db.prepare(`SELECT o.id,o.code,o.client_id,o.status,o.amount,o.created_at,o.delivery_date,o.shipping_date,c.name client_name,CASE WHEN o.status='Facturado' OR EXISTS(SELECT 1 FROM invoice_orders io JOIN invoices i ON i.id=io.invoice_id WHERE io.order_id=o.id AND COALESCE(i.status,'')<>'Anulada' AND COALESCE(i.deleted,0)=0) OR EXISTS(SELECT 1 FROM invoices i WHERE i.order_id=o.id AND COALESCE(i.status,'')<>'Anulada' AND COALESCE(i.deleted,0)=0) THEN 1 ELSE 0 END billed,CASE WHEN o.status='Facturado' OR EXISTS(SELECT 1 FROM invoice_orders io JOIN invoices i ON i.id=io.invoice_id WHERE io.order_id=o.id AND COALESCE(i.status,'')<>'Anulada' AND COALESCE(i.deleted,0)=0) OR EXISTS(SELECT 1 FROM invoices i WHERE i.order_id=o.id AND COALESCE(i.status,'')<>'Anulada' AND COALESCE(i.deleted,0)=0) THEN 'Facturado' ELSE 'Sin facturar' END billing_status FROM orders o LEFT JOIN clients c ON c.id=o.client_id WHERE ${clauses.join(" AND ")} ORDER BY date(COALESCE(o.delivery_date,o.created_at)) DESC,o.id DESC`).all(...args);
+        const rows = db.prepare(`SELECT o.id,o.code,o.client_id,o.status,o.amount,o.created_at,o.delivery_date,o.shipping_date,c.name client_name,CASE WHEN o.status='Facturado' OR EXISTS(SELECT 1 FROM invoice_orders io JOIN invoices i ON i.id=io.invoice_id WHERE io.order_id=o.id AND COALESCE(i.status,'')<>'Anulada' AND CAST(COALESCE(i.deleted,0) AS INTEGER)=0) OR EXISTS(SELECT 1 FROM invoices i WHERE i.order_id=o.id AND COALESCE(i.status,'')<>'Anulada' AND CAST(COALESCE(i.deleted,0) AS INTEGER)=0) THEN 1 ELSE 0 END billed,CASE WHEN o.status='Facturado' OR EXISTS(SELECT 1 FROM invoice_orders io JOIN invoices i ON i.id=io.invoice_id WHERE io.order_id=o.id AND COALESCE(i.status,'')<>'Anulada' AND CAST(COALESCE(i.deleted,0) AS INTEGER)=0) OR EXISTS(SELECT 1 FROM invoices i WHERE i.order_id=o.id AND COALESCE(i.status,'')<>'Anulada' AND CAST(COALESCE(i.deleted,0) AS INTEGER)=0) THEN 'Facturado' ELSE 'Sin facturar' END billing_status FROM orders o LEFT JOIN clients c ON c.id=o.client_id WHERE ${clauses.join(" AND ")} ORDER BY date(COALESCE(o.delivery_date,o.created_at)) DESC,o.id DESC`).all(...args);
         return send(res, 200, rows);
       }
       if (t === "billing" && req.method === "POST") {
@@ -3671,11 +3674,11 @@ export async function crmApiHandler(req, res) {
         const ids = Array.from(new Set((Array.isArray(d.order_ids) ? d.order_ids : []).map(Number).filter(Number.isInteger)));
         if (!ids.length) return send(res, 400, { error: "Selecciona al menos un pedido" });
         const marks = ids.map(() => "?").join(",");
-        const orders = db.prepare(`SELECT o.*,c.name client_name FROM orders o LEFT JOIN clients c ON c.id=o.client_id WHERE o.id IN (${marks}) AND COALESCE(o.deleted,0)=0`).all(...ids);
+        const orders = db.prepare(`SELECT o.*,c.name client_name FROM orders o LEFT JOIN clients c ON c.id=o.client_id WHERE o.id IN (${marks}) AND CAST(COALESCE(o.deleted,0) AS INTEGER)=0`).all(...ids);
         if (orders.length !== ids.length) return send(res, 400, { error: "Uno de los pedidos ya no está disponible" });
         const clients = new Set(orders.map((row) => Number(row.client_id || 0)));
         if (clients.size !== 1) return send(res, 400, { error: "Solo se pueden agrupar pedidos del mismo cliente" });
-        const billed = db.prepare(`SELECT o.id order_id,COALESCE(i.code,'Factura existente') code FROM orders o LEFT JOIN invoice_orders io ON io.order_id=o.id LEFT JOIN invoices i ON i.id=io.invoice_id AND COALESCE(i.status,'')<>'Anulada' AND COALESCE(i.deleted,0)=0 WHERE o.id IN (${marks}) AND (o.status='Facturado' OR i.id IS NOT NULL OR EXISTS(SELECT 1 FROM invoices bi WHERE bi.order_id=o.id AND COALESCE(bi.status,'')<>'Anulada' AND COALESCE(bi.deleted,0)=0))`).all(...ids);
+        const billed = db.prepare(`SELECT o.id order_id,COALESCE(i.code,'Factura existente') code FROM orders o LEFT JOIN invoice_orders io ON io.order_id=o.id LEFT JOIN invoices i ON i.id=io.invoice_id AND COALESCE(i.status,'')<>'Anulada' AND CAST(COALESCE(i.deleted,0) AS INTEGER)=0 WHERE o.id IN (${marks}) AND (o.status='Facturado' OR i.id IS NOT NULL OR EXISTS(SELECT 1 FROM invoices bi WHERE bi.order_id=o.id AND COALESCE(bi.status,'')<>'Anulada' AND CAST(COALESCE(bi.deleted,0) AS INTEGER)=0))`).all(...ids);
         if (billed.length) return send(res, 409, { error: `Ya facturado: ${billed.map((row) => row.code).join(", ")}` });
         const total = orders.reduce((sum, row) => sum + Number(row.amount || 0), 0);
         const code = `FAC-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
@@ -3714,11 +3717,11 @@ export async function crmApiHandler(req, res) {
         if (!order) return send(res, 404, { error: "Pedido no encontrado" });
         const delivery = action === "convert-delivery";
         if (delivery) {
-          const existingDelivery = db.prepare("SELECT id,code FROM delivery_notes WHERE order_id=? AND COALESCE(deleted,0)=0 ORDER BY id DESC LIMIT 1").get(order.id);
+          const existingDelivery = db.prepare("SELECT id,code FROM delivery_notes WHERE order_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 1").get(order.id);
           if (existingDelivery) return send(res, 409, { error: `El pedido ${order.code} ya tiene el albarán ${existingDelivery.code}`, ...existingDelivery });
         }
         if (!delivery) {
-          const existingInvoice = db.prepare("SELECT i.code FROM invoices i LEFT JOIN invoice_orders io ON io.invoice_id=i.id AND io.order_id=? WHERE (i.order_id=? OR io.order_id=?) AND COALESCE(i.status,'')<>'Anulada' AND COALESCE(i.deleted,0)=0 LIMIT 1").get(order.id, order.id, order.id);
+          const existingInvoice = db.prepare("SELECT i.code FROM invoices i LEFT JOIN invoice_orders io ON io.invoice_id=i.id AND io.order_id=? WHERE (i.order_id=? OR io.order_id=?) AND COALESCE(i.status,'')<>'Anulada' AND CAST(COALESCE(i.deleted,0) AS INTEGER)=0 LIMIT 1").get(order.id, order.id, order.id);
           if (order.status === "Facturado" || existingInvoice) return send(res, 409, { error: `El pedido ${order.code} ya está facturado${existingInvoice?.code ? ` en ${existingInvoice.code}` : ""}` });
         }
         const table = delivery ? "delivery_notes" : "invoices";
@@ -3783,7 +3786,7 @@ export async function crmApiHandler(req, res) {
           ? db.prepare("SELECT * FROM orders WHERE id=?").get(delivery.order_id)
           : null;
         const existing = db.prepare(
-          "SELECT id,code FROM invoices WHERE COALESCE(deleted,0)=0 AND COALESCE(status,'')<>'Anulada' AND (delivery_note_id=? OR (order_id IS NOT NULL AND order_id=?) OR EXISTS(SELECT 1 FROM invoice_orders io WHERE io.invoice_id=invoices.id AND io.order_id=?)) LIMIT 1",
+          "SELECT id,code FROM invoices WHERE CAST(COALESCE(deleted,0) AS INTEGER)=0 AND COALESCE(status,'')<>'Anulada' AND (delivery_note_id=? OR (order_id IS NOT NULL AND order_id=?) OR EXISTS(SELECT 1 FROM invoice_orders io WHERE io.invoice_id=invoices.id AND io.order_id=?)) LIMIT 1",
         ).get(delivery.id, delivery.order_id || 0, delivery.order_id || 0);
         if (existing) return send(res, 409, { error: `La factura ${existing.code} ya existe`, ...existing });
         const code = `FAC-${new Date().getFullYear()}-${String(Date.now()).slice(-5)}`;
