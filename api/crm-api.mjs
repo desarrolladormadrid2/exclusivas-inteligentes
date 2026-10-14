@@ -807,35 +807,6 @@ try {
   `);
 } catch {}
 try { db.exec("UPDATE payments SET status=CASE WHEN voided_at IS NOT NULL OR status='Anulado' THEN 'Anulado' ELSE COALESCE(NULLIF(status,''),'Aplicado') END"); } catch {}
-// Repara automáticamente el estado derivado de las facturas al arrancar. Los
-// cobros son un registro financiero inmutable: si falta su factura relacionada
-// no se borra el cobro, se anula y se deja trazabilidad para no contaminar los
-// totales ni la pantalla de cobros.
-try {
-  const now = new Date().toISOString();
-  const orphanPayments = db.prepare(`
-    SELECT p.id,p.invoice_id,p.amount
-    FROM payments p
-    LEFT JOIN invoices i ON i.id=p.invoice_id
-    WHERE CAST(COALESCE(p.deleted,0) AS INTEGER)=0
-      AND p.invoice_id IS NOT NULL
-      AND i.id IS NULL
-      AND COALESCE(p.status,'Aplicado')<>'Anulado'
-      AND p.voided_at IS NULL
-  `).all();
-  for (const payment of orphanPayments) {
-    db.prepare("UPDATE payments SET status='Anulado',voided_at=?,voided_by=?,void_reason=?,updated_at=? WHERE id=?").run(
-      now,
-      "Sistema",
-      "Anulado automáticamente: la factura asociada ya no existe",
-      now,
-      Number(payment.id),
-    );
-    recordAudit("Sistema", "SYSTEM", `payments/${Number(payment.id)}/void`, "Anular cobro huérfano", JSON.stringify({ payment_id: Number(payment.id), invoice_id: Number(payment.invoice_id), amount: Number(payment.amount || 0) }));
-  }
-  const invoiceIds = db.prepare("SELECT id FROM invoices WHERE CAST(COALESCE(deleted,0) AS INTEGER)=0 AND COALESCE(status,'')<>'Anulada'").all();
-  for (const invoice of invoiceIds) recalculateInvoicePaymentStatus(Number(invoice.id), "Sistema");
-} catch {}
 // Estas migraciones se repiten después de crear las tablas base para que también
 // se apliquen en instalaciones antiguas donde el primer bloque aún no existía.
 for (const [table, columns] of [["orders", ["preparation_date", "shipping_date", "delivery_city", "loading_notes", "driver_notes"]], ["shipments", ["preparation_date", "delivery_city", "driver_notes", "invoice_delivery_method"]]]) for (const column of columns) { try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`); } catch {} }
@@ -962,6 +933,36 @@ db.exec(`CREATE TABLE IF NOT EXISTS invoice_orders(id INTEGER PRIMARY KEY AUTOIN
 if (!remoteMode) {
   try { db.exec("INSERT OR IGNORE INTO invoice_orders(invoice_id,order_id) SELECT id,order_id FROM invoices WHERE order_id IS NOT NULL"); } catch {}
 }
+// Repara automáticamente el estado derivado de las facturas al arrancar. Los
+// cobros son un registro financiero inmutable: si falta su factura relacionada
+// no se borra el cobro, se anula y se deja trazabilidad para no contaminar los
+// totales ni la pantalla de cobros. Se ejecuta después de crear invoice_orders,
+// porque el recálculo también sincroniza el estado del pedido relacionado.
+try {
+  const now = new Date().toISOString();
+  const orphanPayments = db.prepare(`
+    SELECT p.id,p.invoice_id,p.amount
+    FROM payments p
+    LEFT JOIN invoices i ON i.id=p.invoice_id
+    WHERE CAST(COALESCE(p.deleted,0) AS INTEGER)=0
+      AND p.invoice_id IS NOT NULL
+      AND i.id IS NULL
+      AND COALESCE(p.status,'Aplicado')<>'Anulado'
+      AND p.voided_at IS NULL
+  `).all();
+  for (const payment of orphanPayments) {
+    db.prepare("UPDATE payments SET status='Anulado',voided_at=?,voided_by=?,void_reason=?,updated_at=? WHERE id=?").run(
+      now,
+      "Sistema",
+      "Anulado automáticamente: la factura asociada ya no existe",
+      now,
+      Number(payment.id),
+    );
+    recordAudit("Sistema", "SYSTEM", `payments/${Number(payment.id)}/void`, "Anular cobro huérfano", JSON.stringify({ payment_id: Number(payment.id), invoice_id: Number(payment.invoice_id), amount: Number(payment.amount || 0) }));
+  }
+  const invoiceIds = db.prepare("SELECT id FROM invoices WHERE CAST(COALESCE(deleted,0) AS INTEGER)=0 AND COALESCE(status,'')<>'Anulada'").all();
+  for (const invoice of invoiceIds) recalculateInvoicePaymentStatus(Number(invoice.id), "Sistema");
+} catch {}
 for (const column of [
   "pdf_public_id TEXT",
   "pdf_url TEXT",
