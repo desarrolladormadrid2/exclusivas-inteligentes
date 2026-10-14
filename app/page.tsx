@@ -4685,11 +4685,22 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     // Entradas pasó de compartir datos con movimientos a usar goods_receipts).
     // Versionar la clave evita rehidratar filas antiguas con IDs incompatibles.
     const preparationCacheDate = active === "Preparación de pedidos" ? preparationDateFilter : "";
-    const cacheKey = `excluvas.listado.v3.${c.api}.${preparationCacheDate || "all-dates"}.${showDeleted ? "deleted" : "active"}.${showInactive ? "all-statuses" : "active-only"}`;
+    // La factura conserva una copia histórica del cliente. Versionamos esta
+    // caché para que los listados guardados antes de esa migración no sigan
+    // mostrando "Cliente no disponible" aunque la API ya tenga el histórico.
+    const cacheKeyPrefix = c.api === "invoices" ? "excluvas.listado.v4" : "excluvas.listado.v3";
+    const cacheKey = `${cacheKeyPrefix}.${c.api}.${preparationCacheDate || "all-dates"}.${showDeleted ? "deleted" : "active"}.${showInactive ? "all-statuses" : "active-only"}`;
     const applyList = (value: any[]) => {
       const enrichedRows = c.api === "orders"
         ? value.map((item: any) => ({ ...item, billing_status: item.billing_status || (item.status === "Facturado" ? "Facturado" : "Sin facturar") }))
-        : value;
+        : c.api === "invoices"
+          ? value.map((item: any) => ({
+            ...item,
+            client_name: item.client_name || item.client_name_snapshot || "",
+            client_city: item.client_city || item.client_billing_city_snapshot || item.client_delivery_city_snapshot || "",
+            client_address: item.client_address || item.client_billing_address_snapshot || item.client_delivery_address_snapshot || "",
+          }))
+          : value;
       const statusRows = !showInactive && ["suppliers", "clients", "products"].includes(c.api)
         ? enrichedRows.filter((item: any) => c.api === "products"
           ? Number(item.active ?? 1) === 1 && !["inactivo", "baja", "descatalogado"].includes(String(item.product_status || "Activo").toLowerCase())
