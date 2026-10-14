@@ -7793,6 +7793,10 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                               ? `${r.client_name}${r.client_city ? ` · ${r.client_city}` : ""}`
                               : f === "supplier_id" && r.supplier_name
                               ? r.supplier_name
+                              : f === "invoice_id" && r.invoice_code
+                              ? `${r.invoice_code}${r.invoice_client_name ? ` · ${r.invoice_client_name}` : ""}${r.status === "Anulado" ? " · cobro anulado" : ""}`
+                              : f === "invoice_id" && r.status === "Anulado"
+                              ? `Factura #${r.invoice_id} · cobro anulado`
                               : f === "counterparty_type"
                               ? (r.counterparty_type || "Proveedor")
                               : f === "stock_applied"

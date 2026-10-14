@@ -4069,6 +4069,8 @@ export async function crmApiHandler(req, res) {
               ? `shipments LEFT JOIN orders AS shipment_order ON shipment_order.id=shipments.order_id`
               : t === "invoices"
                 ? `invoices LEFT JOIN clients AS invoice_client ON invoice_client.id=invoices.client_id`
+              : t === "payments"
+                ? `payments LEFT JOIN invoices AS payment_invoice ON payment_invoice.id=payments.invoice_id LEFT JOIN clients AS payment_client ON payment_client.id=payment_invoice.client_id`
               : t;
           const selection = t === "orders"
             ? "orders.*,order_client.name AS client_name,order_client.city AS client_city,CASE WHEN orders.status='Facturado' OR EXISTS(SELECT 1 FROM invoice_orders io JOIN invoices bi ON bi.id=io.invoice_id WHERE io.order_id=orders.id AND COALESCE(bi.status,'')<>'Anulada' AND COALESCE(bi.deleted,0)=0) OR EXISTS(SELECT 1 FROM invoices bi WHERE bi.order_id=orders.id AND COALESCE(bi.status,'')<>'Anulada' AND COALESCE(bi.deleted,0)=0) THEN 'Facturado' ELSE 'Sin facturar' END AS billing_status"
@@ -4076,8 +4078,10 @@ export async function crmApiHandler(req, res) {
               ? "shipments.*,(SELECT shipping_date FROM orders WHERE orders.id=shipments.order_id) AS shipping_date"
               : t === "invoices"
                 ? "invoices.*,COALESCE(NULLIF(TRIM(invoices.client_name_snapshot),''),invoice_client.name) AS client_name,COALESCE(NULLIF(TRIM(invoices.client_legal_name_snapshot),''),invoice_client.legal_name) AS client_legal_name,COALESCE(NULLIF(TRIM(invoices.client_tax_id_snapshot),''),invoice_client.tax_id) AS client_tax_id,COALESCE(NULLIF(TRIM(invoices.client_billing_address_snapshot),''),NULLIF(TRIM(invoice_client.billing_address),''),invoice_client.address) AS client_address,COALESCE(NULLIF(TRIM(invoices.client_billing_city_snapshot),''),NULLIF(TRIM(invoice_client.billing_city),''),invoice_client.city) AS client_city,COALESCE(NULLIF(TRIM(invoices.client_email_snapshot),''),invoice_client.email) AS client_email,COALESCE(NULLIF(TRIM(invoices.client_phone_snapshot),''),invoice_client.phone) AS client_phone"
-            : p[2] ? "*" : listSelectFor(t);
-          const tableReference = t === "orders" ? "orders" : t === "shipments" ? "shipments" : t === "invoices" ? "invoices" : t;
+              : t === "payments"
+                ? "payments.*,payment_invoice.code AS invoice_code,COALESCE(NULLIF(TRIM(payment_invoice.client_name_snapshot),''),payment_client.name) AS invoice_client_name"
+              : p[2] ? "*" : listSelectFor(t);
+          const tableReference = t === "orders" ? "orders" : t === "shipments" ? "shipments" : t === "invoices" ? "invoices" : t === "payments" ? "payments" : t;
           const deletedClause = includeDeleted || !hasColumn(tableReference, "deleted") ? "" : ` AND CAST(COALESCE(${tableReference}.deleted,0) AS INTEGER)=0`;
           const row = db.prepare(`SELECT ${selection} FROM ${source} WHERE ${tableReference}.id=?${deletedClause}`).get(Number(p[2]));
           if (!row) return send(res, 404, { error: "Registro no encontrado" });
@@ -4096,6 +4100,8 @@ export async function crmApiHandler(req, res) {
             ? `shipments LEFT JOIN orders AS shipment_order ON shipment_order.id=shipments.order_id`
             : t === "invoices"
               ? `invoices LEFT JOIN clients AS invoice_client ON invoice_client.id=invoices.client_id`
+              : t === "payments"
+                ? `payments LEFT JOIN invoices AS payment_invoice ON payment_invoice.id=payments.invoice_id LEFT JOIN clients AS payment_client ON payment_client.id=payment_invoice.client_id`
             : t;
         const selection = isPublicCatalog
           ? "products.id,products.name,products.family,products.category,products.subfamily,products.brand,products.format,products.sku,products.description,products.photo_url,products.photo_thumbnail_url,products.photo_web_url"
@@ -4107,6 +4113,8 @@ export async function crmApiHandler(req, res) {
               ? "shipments.*,(SELECT shipping_date FROM orders WHERE orders.id=shipments.order_id) AS shipping_date"
             : t === "invoices"
               ? "invoices.*,COALESCE(NULLIF(TRIM(invoices.client_name_snapshot),''),invoice_client.name) AS client_name,COALESCE(NULLIF(TRIM(invoices.client_legal_name_snapshot),''),invoice_client.legal_name) AS client_legal_name,COALESCE(NULLIF(TRIM(invoices.client_tax_id_snapshot),''),invoice_client.tax_id) AS client_tax_id,COALESCE(NULLIF(TRIM(invoices.client_billing_address_snapshot),''),NULLIF(TRIM(invoice_client.billing_address),''),invoice_client.address) AS client_address,COALESCE(NULLIF(TRIM(invoices.client_billing_city_snapshot),''),NULLIF(TRIM(invoice_client.billing_city),''),invoice_client.city) AS client_city,COALESCE(NULLIF(TRIM(invoices.client_email_snapshot),''),invoice_client.email) AS client_email,COALESCE(NULLIF(TRIM(invoices.client_phone_snapshot),''),invoice_client.phone) AS client_phone"
+            : t === "payments"
+              ? "payments.*,payment_invoice.code AS invoice_code,COALESCE(NULLIF(TRIM(payment_invoice.client_name_snapshot),''),payment_client.name) AS invoice_client_name"
             : t === "clients"
               ? `clients.*,
                 (SELECT COUNT(*)
