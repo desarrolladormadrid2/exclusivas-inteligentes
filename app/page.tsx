@@ -6770,7 +6770,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         order_id: "Pedido no disponible",
         purchase_order_id: "Compra no disponible",
         purchase_invoice_id: "Factura de compra no disponible",
-        invoice_id: "Factura no disponible",
+        invoice_id: active === "Cobros" ? `Factura #${value} · no vinculada` : "Factura no disponible",
         shipment_id: "Hoja de carga no disponible",
       };
       return missingRelationLabels[field] || "Relación no disponible";

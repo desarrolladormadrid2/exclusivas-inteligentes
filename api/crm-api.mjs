@@ -807,6 +807,35 @@ try {
   `);
 } catch {}
 try { db.exec("UPDATE payments SET status=CASE WHEN voided_at IS NOT NULL OR status='Anulado' THEN 'Anulado' ELSE COALESCE(NULLIF(status,''),'Aplicado') END"); } catch {}
+// Repara automáticamente el estado derivado de las facturas al arrancar. Los
+// cobros son un registro financiero inmutable: si falta su factura relacionada
+// no se borra el cobro, se anula y se deja trazabilidad para no contaminar los
+// totales ni la pantalla de cobros.
+try {
+  const now = new Date().toISOString();
+  const orphanPayments = db.prepare(`
+    SELECT p.id,p.invoice_id,p.amount
+    FROM payments p
+    LEFT JOIN invoices i ON i.id=p.invoice_id
+    WHERE CAST(COALESCE(p.deleted,0) AS INTEGER)=0
+      AND p.invoice_id IS NOT NULL
+      AND i.id IS NULL
+      AND COALESCE(p.status,'Aplicado')<>'Anulado'
+      AND p.voided_at IS NULL
+  `).all();
+  for (const payment of orphanPayments) {
+    db.prepare("UPDATE payments SET status='Anulado',voided_at=?,voided_by=?,void_reason=?,updated_at=? WHERE id=?").run(
+      now,
+      "Sistema",
+      "Anulado automáticamente: la factura asociada ya no existe",
+      now,
+      Number(payment.id),
+    );
+    recordAudit("Sistema", "SYSTEM", `payments/${Number(payment.id)}/void`, "Anular cobro huérfano", JSON.stringify({ payment_id: Number(payment.id), invoice_id: Number(payment.invoice_id), amount: Number(payment.amount || 0) }));
+  }
+  const invoiceIds = db.prepare("SELECT id FROM invoices WHERE CAST(COALESCE(deleted,0) AS INTEGER)=0 AND COALESCE(status,'')<>'Anulada'").all();
+  for (const invoice of invoiceIds) recalculateInvoicePaymentStatus(Number(invoice.id), "Sistema");
+} catch {}
 // Estas migraciones se repiten después de crear las tablas base para que también
 // se apliquen en instalaciones antiguas donde el primer bloque aún no existía.
 for (const [table, columns] of [["orders", ["preparation_date", "shipping_date", "delivery_city", "loading_notes", "driver_notes"]], ["shipments", ["preparation_date", "delivery_city", "driver_notes", "invoice_delivery_method"]]]) for (const column of columns) { try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`); } catch {} }
@@ -2815,9 +2844,9 @@ export async function crmApiHandler(req, res) {
         if (!client) return send(res, 404, { error: "Cliente no encontrado o desactivado" });
         const orders = db.prepare("SELECT id,code,status,amount,created_at,updated_at,delivery_date,preparation_date,shipping_date,address,urgent FROM orders WHERE client_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 50").all(session.id);
         const shipments = db.prepare("SELECT id,code,order_id,status,expected_delivery_at,address,packages,delivered_at,delivery_signature_status,delivery_recipient_name,delivery_signature_at,public_tracking_token FROM shipments WHERE client_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 50").all(session.id).map(attachShipmentTrackingToken);
-        const paymentColumns = ["id", "invoice_id", "amount", "payment_date", "method", "reference", "notes"].filter((column) => hasColumn("payments", column));
+        const paymentColumns = ["id", "invoice_id", "amount", "payment_date", "method", "reference", "notes", "status"].filter((column) => hasColumn("payments", column));
         const payments = paymentColumns.length > 1
-          ? db.prepare(`SELECT ${paymentColumns.join(",")} FROM payments WHERE invoice_id IN (SELECT id FROM invoices WHERE client_id=?) AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY payment_date DESC,id DESC LIMIT 100`).all(session.id)
+          ? db.prepare(`SELECT ${paymentColumns.join(",")} FROM payments WHERE invoice_id IN (SELECT id FROM invoices WHERE client_id=?) AND CAST(COALESCE(deleted,0) AS INTEGER)=0 AND COALESCE(status,'Aplicado')<>'Anulado' AND voided_at IS NULL ORDER BY payment_date DESC,id DESC LIMIT 100`).all(session.id)
           : [];
         const paidByInvoice = new Map();
         for (const payment of payments) paidByInvoice.set(Number(payment.invoice_id), Number(paidByInvoice.get(Number(payment.invoice_id)) || 0) + Number(payment.amount || 0));
@@ -4055,8 +4084,8 @@ export async function crmApiHandler(req, res) {
                  WHERE pending_invoice.client_id=clients.id
                    AND CAST(COALESCE(pending_invoice.deleted,0) AS INTEGER)=0
                    AND COALESCE(pending_invoice.status,'Pendiente') NOT IN ('Cobrada','Pagada','Anulada','Proforma')
-                   AND COALESCE(pending_invoice.amount,0)-COALESCE((SELECT SUM(payment.amount) FROM payments payment WHERE payment.invoice_id=pending_invoice.id AND CAST(COALESCE(payment.deleted,0) AS INTEGER)=0),0)>0) AS pending_invoice_count,
-                (SELECT COALESCE(SUM(CASE WHEN COALESCE(pending_invoice.amount,0)-COALESCE((SELECT SUM(payment.amount) FROM payments payment WHERE payment.invoice_id=pending_invoice.id AND CAST(COALESCE(payment.deleted,0) AS INTEGER)=0),0)>0 THEN COALESCE(pending_invoice.amount,0)-COALESCE((SELECT SUM(payment.amount) FROM payments payment WHERE payment.invoice_id=pending_invoice.id AND CAST(COALESCE(payment.deleted,0) AS INTEGER)=0),0) ELSE 0 END),0)
+                   AND COALESCE(pending_invoice.amount,0)-COALESCE((SELECT SUM(payment.amount) FROM payments payment WHERE payment.invoice_id=pending_invoice.id AND CAST(COALESCE(payment.deleted,0) AS INTEGER)=0 AND COALESCE(payment.status,'Aplicado')<>'Anulado' AND payment.voided_at IS NULL),0)>0) AS pending_invoice_count,
+                (SELECT COALESCE(SUM(CASE WHEN COALESCE(pending_invoice.amount,0)-COALESCE((SELECT SUM(payment.amount) FROM payments payment WHERE payment.invoice_id=pending_invoice.id AND CAST(COALESCE(payment.deleted,0) AS INTEGER)=0 AND COALESCE(payment.status,'Aplicado')<>'Anulado' AND payment.voided_at IS NULL),0)>0 THEN COALESCE(pending_invoice.amount,0)-COALESCE((SELECT SUM(payment.amount) FROM payments payment WHERE payment.invoice_id=pending_invoice.id AND CAST(COALESCE(payment.deleted,0) AS INTEGER)=0 AND COALESCE(payment.status,'Aplicado')<>'Anulado' AND payment.voided_at IS NULL),0) ELSE 0 END),0)
                  FROM invoices pending_invoice
                  WHERE pending_invoice.client_id=clients.id
                    AND CAST(COALESCE(pending_invoice.deleted,0) AS INTEGER)=0
