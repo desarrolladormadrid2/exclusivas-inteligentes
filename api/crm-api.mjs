@@ -4783,6 +4783,7 @@ export async function crmApiHandler(req, res) {
             const nextStatus = String(d.status || "").trim();
             if (!["Borrador", "Enviado", "Parcialmente recibido", "Recibido", "Recibido con incidencia", "Cancelado"].includes(nextStatus)) return send(res, 400, { error: "El estado del pedido de compra no es válido" });
             if (["Recibido", "Recibido con incidencia", "Parcialmente recibido"].includes(nextStatus)) return send(res, 409, { error: "Registra la mercancía desde Entradas para validar cantidades y actualizar el stock" });
+            if (nextStatus === "Cancelado" && db.prepare("SELECT id FROM goods_receipts WHERE purchase_order_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 LIMIT 1").get(Number(p[2]))) return send(res, 409, { error: "Este pedido ya tiene una entrada registrada. Completa su seguimiento desde Entradas." });
           }
           if (Array.isArray(d.lines)) {
             if (String(currentPurchase?.status || "Borrador") !== "Borrador") return send(res, 409, { error: "Solo se pueden modificar las líneas de un pedido en borrador" });
