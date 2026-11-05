@@ -4438,6 +4438,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const [documentCreationNotice, setDocumentCreationNotice] = useState<any>(null);
   const [entryDetail, setEntryDetail] = useState<any>(null);
   const [entryEdit, setEntryEdit] = useState<any>(null);
+  const [showTestEntries, setShowTestEntries] = useState(false);
   const [entryIncidentSaving, setEntryIncidentSaving] = useState<number | null>(null);
   const [entryValidationSaving, setEntryValidationSaving] = useState(false);
   const [entryLocationSaving, setEntryLocationSaving] = useState<number | null>(null);
@@ -4545,7 +4546,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     products: ["name", "sku", "barcode", "category", "format", "unit", "unit_price", "cost_price", "stock", "stock_reserved", "min_stock", "warehouse_location", "warehouse_id", "product_status"],
     warehouses: ["code", "name", "address", "manager"],
     collection_points: ["code", "name", "address", "city", "opening_time", "closing_time", "geocoding_status"],
-    goods_receipts: ["code", "counterparty_name", "purchase_order_code", "receipt_date", "status", "validation_status", "stock_applied"],
+    goods_receipts: ["code", "counterparty_name", "purchase_order_code", "status"],
     inventory_movements: ["order_id", "shipment_id", "product_id", "warehouse_id", "movement_type", "quantity", "movement_date", "client_id", "created_by", "reference"],
     returns: ["code", "client_id", "invoice_id", "product_id", "quantity", "reason", "status", "amount"],
   };
@@ -4641,7 +4642,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         return;
       }
       const compactFields = warehouseListFields[c.api];
-      const compactVersionKey = `excluvas.columns.compact-v3.${c.api}`;
+      const compactVersionKey = c.api === "goods_receipts" ? "excluvas.columns.compact-v4.goods_receipts" : `excluvas.columns.compact-v3.${c.api}`;
       const saved = localStorage.getItem(`excluvas.columns.${c.api}`);
       if (compactFields) {
         if (!saved || localStorage.getItem(compactVersionKey) !== "1") {
@@ -7079,6 +7080,11 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const productCategories = isProducts ? Array.from(new Set(rows.map((row) => String(row.category || "").trim()).filter(Boolean))).sort() : [];
   const productBrands = isProducts ? Array.from(new Set(rows.map((row) => String(row.brand || "").trim()).filter(Boolean))).sort() : [];
   const listFilterActive = ["Pedidos", "Facturas", "Cobros", "Devoluciones", "Presupuestos", "Albaranes", "Compras", "Entradas", "Salidas", "Gastos y tickets"].includes(active);
+  const isTestName = (value: any) => /^(?:__(?:QA|TEST)(?:_|\b)|(?:QA|TEST|PRUEBA|DEMO|PW|E2E)[-_ ])/i.test(String(value || "").trim());
+  const isTestEntry = (row: any) => [row.code, row.purchase_order_code].some(isTestName);
+  const visibleEntrySuppliers = (lookups.suppliers || []).filter((supplier: any) => showTestEntries || !isTestName(supplier.name));
+  const visibleEntryClients = (lookups.clients || []).filter((client: any) => showTestEntries || !isTestName(client.name));
+  const hiddenTestEntryCount = active === "Entradas" ? rows.filter(isTestEntry).length : 0;
   const listStatusOptions = Array.from(new Set(rows.map((row: any) => String(row.status || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, "es"));
   const quickViewOptions = active === "Pedidos"
     ? [{ value: "all", label: "Todos los pedidos" }, { value: "today", label: "Pedidos de hoy" }, { value: "unbilled", label: "Sin facturar" }, { value: "not-shipped", label: "Pendientes de enviar" }, { value: "review", label: "Pendientes de revisar" }]
@@ -7130,7 +7136,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       || (quickView === "critical" && criticalStock)
       || (quickView === "review" && (reviewStatus || currentBillingStatus !== "Facturado" && active === "Pedidos"));
     if (isCrmPreparation) return matchesText && matchesQuickView && (!preparationDateFilter || rowDate === preparationDateFilter);
-    if (!isProducts && !isLoadPreparation) return matchesText && matchesBilling && matchesShipping && matchesQuickView && matchesOrderCreatedFrom && matchesOrderCreatedTo && (!listFilterActive || (matchesListClient && matchesListSupplier && matchesEntryCounterparty && matchesListFrom && matchesListTo && matchesListStatus));
+    if (!isProducts && !isLoadPreparation) return (active !== "Entradas" || showTestEntries || !isTestEntry(row)) && matchesText && matchesBilling && matchesShipping && matchesQuickView && matchesOrderCreatedFrom && matchesOrderCreatedTo && (!listFilterActive || (matchesListClient && matchesListSupplier && matchesEntryCounterparty && matchesListFrom && matchesListTo && matchesListStatus));
     if (isLoadPreparation) return matchesText && matchesQuickView && (!preparationDateFilter || String(row.preparation_date || "").slice(0, 10) === preparationDateFilter);
     const matchesCategory = !productFilters.category || row.category === productFilters.category;
     const matchesBrand = !productFilters.brand || row.brand === productFilters.brand;
@@ -7765,6 +7771,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           <span className="list-count" role="status">
             {loading ? "Cargando registros…" : `${filteredRows.length} registros${totalPages > 1 ? ` · página ${currentPage}/${totalPages}` : ""}`}
           </span>
+          {active === "Entradas" && hiddenTestEntryCount > 0 && <p className="supplier-test-data-note goods-receipt-test-note" role="status">{showTestEntries ? `Mostrando ${hiddenTestEntryCount} ${hiddenTestEntryCount === 1 ? "registro de prueba" : "registros de prueba"}.` : `${hiddenTestEntryCount} ${hiddenTestEntryCount === 1 ? "registro de prueba oculto" : "registros de prueba ocultos"}.`} <button type="button" className="row-action" aria-pressed={showTestEntries} onClick={() => setShowTestEntries((current) => !current)}>{showTestEntries ? "Ocultar pruebas" : "Ver pruebas"}</button></p>}
           {quickViewOptions.length > 1 && <div className="saved-views" aria-label="Vistas rápidas">
             <span className="saved-views-label">Vistas</span>
             {quickViewOptions.map((option) => <button key={option.value} type="button" className={`saved-view-button${quickView === option.value ? " is-active" : ""}`} aria-pressed={quickView === option.value} onClick={() => { setQuickView(option.value); try { localStorage.setItem(`excluvas.quick-view.${c.api}`, option.value); } catch {} }}>{option.label}</button>)}
@@ -7776,8 +7783,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           {listFilterActive && <>
             {active === "Entradas" ? <>
               <label className="list-filter-field">Tipo<select value={entryCounterpartyType} onChange={(event) => { setEntryCounterpartyType(event.target.value); setListClient(""); setListSupplier(""); }} aria-label="Filtrar entradas por tipo"><option>Todos</option><option>Proveedor</option><option>Cliente</option></select></label>
-              {(entryCounterpartyType === "Todos" || entryCounterpartyType === "Cliente") && <label className="list-filter-field">Cliente<select value={listClient} onChange={(event) => setListClient(event.target.value)} aria-label="Filtrar entradas por cliente"><option value="">Todos los clientes</option>{(lookups.clients || []).map((client: any) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label>}
-              {(entryCounterpartyType === "Todos" || entryCounterpartyType === "Proveedor") && <label className="list-filter-field">Proveedor<select value={listSupplier} onChange={(event) => setListSupplier(event.target.value)} aria-label="Filtrar entradas por proveedor"><option value="">Todos los proveedores</option>{(lookups.suppliers || []).map((supplier: any) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}</select></label>}
+              {(entryCounterpartyType === "Todos" || entryCounterpartyType === "Cliente") && <label className="list-filter-field">Cliente<select value={listClient} onChange={(event) => setListClient(event.target.value)} aria-label="Filtrar entradas por cliente"><option value="">Todos los clientes</option>{visibleEntryClients.map((client: any) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label>}
+              {(entryCounterpartyType === "Todos" || entryCounterpartyType === "Proveedor") && <label className="list-filter-field">Proveedor<select value={listSupplier} onChange={(event) => setListSupplier(event.target.value)} aria-label="Filtrar entradas por proveedor"><option value="">Todos los proveedores</option>{visibleEntrySuppliers.map((supplier: any) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}</select></label>}
             </> : <>
               <label className="list-filter-field">Cliente<select value={listClient} onChange={(event) => setListClient(event.target.value)} aria-label={`Filtrar ${active.toLowerCase()} por cliente`}><option value="">Todos los clientes</option>{(lookups.clients || []).map((client: any) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label>
               {active === "Compras" && <label className="list-filter-field">Proveedor<select value={listSupplier} onChange={(event) => setListSupplier(event.target.value)} aria-label="Filtrar compras por proveedor"><option value="">Todos los proveedores</option>{(lookups.suppliers || []).map((supplier: any) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}</select></label>}
@@ -7930,7 +7937,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                 {visibleFields.map((f: string, fieldIndex: number) => (
                   <Fragment key={f}>
                     <th className={isDateField(f) ? "sortable-date-column" : undefined}>
-                      <button type="button" className="table-sort-button" onClick={() => { setStockSort("none"); setDateSort(null); setTableSort((current) => current?.field === f ? { field: f, direction: current.direction === "asc" ? "desc" : "asc" } : { field: f, direction: "asc" }); }} aria-label={`Ordenar ${compactFieldLabels[f] || c.labels[c.fields.indexOf(f)] || f}`} title="Ordenar columna">{compactFieldLabels[f] || c.labels[c.fields.indexOf(f)] || f}<span aria-hidden="true">{tableSort?.field === f ? (tableSort.direction === "asc" ? " ↑" : " ↓") : " ↕"}</span></button>
+                      <button type="button" className="table-sort-button" onClick={() => { setStockSort("none"); setDateSort(null); setTableSort((current) => current?.field === f ? { field: f, direction: current.direction === "asc" ? "desc" : "asc" } : { field: f, direction: "asc" }); }} aria-label={`Ordenar ${active === "Entradas" && f === "code" ? "Entrada" : active === "Entradas" && f === "purchase_order_code" ? "Pedido relacionado" : compactFieldLabels[f] || c.labels[c.fields.indexOf(f)] || f}`} title="Ordenar columna">{active === "Entradas" && f === "code" ? "Entrada" : active === "Entradas" && f === "purchase_order_code" ? "Pedido relacionado" : compactFieldLabels[f] || c.labels[c.fields.indexOf(f)] || f}<span aria-hidden="true">{tableSort?.field === f ? (tableSort.direction === "asc" ? " ↑" : " ↓") : " ↕"}</span></button>
                     </th>
                     {active === "Stock" && fieldIndex === 0 && <th className="product-lots-column">LOTES</th>}
                   </Fragment>
@@ -7946,7 +7953,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                     {isProducts && renderProductLots(r)}
                     {visibleFields.map((f: string, fieldIndex: number) => (
                       <Fragment key={f}>
-                        <td data-label={compactFieldLabels[f] || c.labels[c.fields.indexOf(f)] || f} className={`${stockCellClass(r, f)}${active === "Stock" && ["stock", "stock_reserved", "available_stock", "min_stock"].includes(f) && Number(r[f]) < 0 ? " stock-negative" : ""}`}>
+                        <td data-label={active === "Entradas" && f === "code" ? "Entrada" : active === "Entradas" && f === "purchase_order_code" ? "Pedido relacionado" : compactFieldLabels[f] || c.labels[c.fields.indexOf(f)] || f} title={active === "Entradas" && ["code", "purchase_order_code"].includes(f) && r[f] ? String(r[f]) : undefined} className={`${active === "Entradas" && ["code", "purchase_order_code"].includes(f) ? "goods-receipt-reference " : ""}${stockCellClass(r, f)}${active === "Stock" && ["stock", "stock_reserved", "available_stock", "min_stock"].includes(f) && Number(r[f]) < 0 ? " stock-negative" : ""}`}>
                           {inlineEditing === (r.id ?? r.product_id) ? (
                             renderInlineEditor(f, r)
                           ) : (
@@ -7968,6 +7975,14 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                               ? `${r.invoice_code}${r.invoice_client_name ? ` · ${r.invoice_client_name}` : ""}${r.status === "Anulado" ? " · cobro anulado" : ""}`
                               : f === "invoice_id" && r.status === "Anulado"
                               ? `Factura #${r.invoice_id} · cobro anulado`
+                              : active === "Entradas" && isTestEntry(r) && f === "code"
+                              ? "Entrada de prueba"
+                              : active === "Entradas" && isTestEntry(r) && f === "counterparty_name"
+                              ? (r.counterparty_type === "Cliente" ? "Cliente de prueba" : "Proveedor de prueba")
+                              : active === "Entradas" && isTestEntry(r) && f === "purchase_order_code"
+                              ? (r.purchase_order_code ? "Pedido de prueba" : "—")
+                              : active === "Entradas" && f === "status"
+                              ? <span className="goods-receipt-status"><b>{r.status || "Pendiente"}</b><small>{[r.receipt_date ? formatTableValue("receipt_date", r.receipt_date) : "Sin fecha", r.validation_status || "Validación pendiente", Number(r.stock_applied ?? 1) === 1 ? "stock sumado" : "stock pendiente"].join(" · ")}</small></span>
                               : f === "counterparty_type"
                               ? (r.counterparty_type || "Proveedor")
                               : f === "stock_applied"
@@ -8126,7 +8141,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         </div>
       )}
       {!isCrmPreparation && listIsReady && !filteredRows.length && (
-        <p className="muted empty-row">{rows.length ? "No hay productos que coincidan con los filtros." : "No hay registros todavía."}</p>
+        <p className="muted empty-row">{active === "Entradas" && hiddenTestEntryCount > 0 && !showTestEntries ? "Todavía no hay entradas operativas. Los registros de prueba están apartados arriba." : active === "Entradas" ? (rows.length ? "No hay entradas que coincidan con los filtros." : "Todavía no hay entradas registradas.") : rows.length ? "No hay productos que coincidan con los filtros." : "No hay registros todavía."}</p>
       )}
       {deletedUndo && deletedUndo.api === c.api && <div className="undo-toast" role="status"><span>Se ha enviado a la papelera: <b>{deletedUndo.label}</b></span><button type="button" className="button secondary" onClick={() => void undoDelete()}>Deshacer</button></div>}
       </div>

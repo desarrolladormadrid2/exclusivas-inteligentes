@@ -8,7 +8,7 @@ La ejecución debe producir una matriz de resultados por caso (`Correcto`, `Fall
 
 ## Dos niveles de revisión
 
-El documento contiene 261 casos de negocio/datos/errores y 18 casos transversales de capacidad de acción. Se usan dos niveles para no confundir un repaso habitual de salud con una auditoría profunda:
+El documento contiene 263 casos de negocio/datos/errores y 18 casos transversales de capacidad de acción (281 en total). Se usan dos niveles para no confundir un repaso habitual de salud con una auditoría profunda:
 
 ### Revisión normal
 
@@ -20,9 +20,15 @@ Si la revisión normal encuentra un bloqueo de stock, cobro, documento, permiso 
 
 ### Revisión exhaustiva
 
-Ejecuta **todos los casos A01–AF18**, cada variación indicada en ellos, todas las acciones de la matriz de roles, casos de límites/errores y revisión visual completa en cada tamaño. Se realiza para la auditoría integral solicitada, antes de cerrar una incidencia crítica, después de cambios amplios del flujo o antes de dar por estable el proceso. Requiere copia de SQLite aislada, inventario de saldos y conciliación final.
+Ejecuta **todos los casos A01–AF20**, cada variación indicada en ellos, todas las acciones de la matriz de roles, casos de límites/errores y revisión visual completa en cada tamaño. Se realiza para la auditoría integral solicitada, antes de cerrar una incidencia crítica, después de cambios amplios del flujo o antes de dar por estable el proceso. Requiere copia de SQLite aislada, inventario de saldos y conciliación final.
 
 Una funcionalidad necesaria que no exista o no pueda ejecutarse se registra como `Brecha funcional` y no como “No aplica” ni como aprobado. “No aplica” solo se usa cuando la condición está realmente ausente en el escenario y se explica por qué.
+
+### Casos añadidos por hallazgos de auditoría
+
+**AF19 — Datos de prueba frente a registros operativos:** comprobar que entradas, pedidos, productos, clientes y proveedores identificados como QA/demo/prueba no se confundan con registros reales. La vista operativa debe priorizar datos de negocio legibles, conservar las pruebas accesibles sin borrarlas y dejar claro cuándo no existen registros reales. Verificar que los nombres relacionados se muestren en lugar de IDs o códigos técnicos, y que las referencias extensas no rompan la tabla en móvil o tablet.
+
+**AF20 — Totales tras editar líneas:** crear un pedido con varias líneas, modificar y retirar líneas y comprobar que el total de cabecera se recalcula con los mismos criterios que el documento y la factura. Reabrir el registro y contrastar cabecera, líneas, PDF y valores de API; comprobar además pedidos preexistentes con diferencias sin alterar automáticamente documentos históricos.
 
 ## Revisión de capacidad de acción por rol
 
