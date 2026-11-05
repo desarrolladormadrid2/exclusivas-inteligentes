@@ -390,6 +390,7 @@ const cfg: any = {
       "phone",
       "email",
       "invoice_delivery_method",
+      "equivalence_surcharge_enabled",
       "pending_invoice_count",
       "pending_invoice_total",
       "address",
@@ -414,6 +415,7 @@ const cfg: any = {
       "Teléfono",
       "Email",
       "Entrega de factura",
+      "Recargo de equivalencia",
       "Facturas pendientes",
       "Importe pendiente de cobro",
       "Dirección de entrega",
@@ -3017,7 +3019,7 @@ function SmartPurchasing({ user }: { user?: any }) {
     const provider = row.recommended_supplier;
     if (!provider?.supplier_id) return alert("No hay proveedor comparable para esta propuesta.");
     const today = tabletTodayInput(), expected = new Date(Date.now() + Number(provider.lead_time_days || 2) * 86400000).toISOString().slice(0, 10), headers = { "Content-Type": "application/json", "X-Actor": actor };
-    const orderResponse = await fetch("/api/purchase_orders", { method: "POST", headers, body: JSON.stringify({ code: `PRE-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`, supplier_id: provider.supplier_id, status: "Borrador", validation_status: "Pendiente de validar", order_date: today, expected_date: expected, amount: Number(row.suggested_quantity) * Number(provider.real_cost || 0), notes: `Propuesta automática para ${row.name}. Requiere validación antes de enviar.` }) });
+    const orderResponse = await fetch("/api/purchase_orders", { method: "POST", headers, body: JSON.stringify({ code: `PRE-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`, supplier_id: provider.supplier_id, status: "Borrador", validation_status: "Pendiente de validar", order_date: today, expected_date: expected, amount: Number(row.suggested_quantity) * Number(provider.real_cost || 0), notes: `Propuesta automática para ${row.name}. Requiere validación antes de enviar.`, lines: [{ product_id: Number(row.product_id), quantity: Number(row.suggested_quantity), unit_cost: Number(provider.real_cost || 0), amount: Number(row.suggested_quantity) * Number(provider.real_cost || 0), quantity_unit: row.unit || row.format || "unidad" }] }) });
     const order = await orderResponse.json().catch(() => ({}));
     if (!orderResponse.ok) return alert(order.error || "No se pudo crear el prepedido");
     await fetch(`/api/purchase_suggestions/${row.suggestion_id}`, { method: "PUT", headers, body: JSON.stringify({ status: "Aprobada" }) });
@@ -3055,7 +3057,36 @@ function SmartPurchasing({ user }: { user?: any }) {
   const [statusFilter, setStatusFilter] = useState("Todos");
   const visibleRequests = requests.filter((request) => statusFilter === "Todos" || request.status === statusFilter);
   const detailOffers = detailRequest ? offers.filter((offer) => Number(offer.request_id) === Number(detailRequest.id)) : [];
-  return <div className="smart-purchasing"><div className="manager-head"><div><p className="eyebrow">ABASTECIMIENTO CONTROLADO</p><h2>Compras inteligentes</h2><p className="muted">Solicita precios a varios proveedores y compara referencias, costes, plazos y condiciones en un único lugar.</p></div><div><button type="button" className="button secondary" onClick={() => void load()}>Actualizar</button><button type="button" className="button primary" onClick={() => setRequestOpen(true)}>Nueva solicitud de precios</button></div></div>{loading && <div className="data-loading" role="status"><span className="loading-spinner" aria-hidden="true" /><LoadingIndicator label="Cargando compras inteligentes…" /></div>}{loadError && <div className="error-message">{loadError}</div>}{message && <div className="success-message">{message}</div>}<section className="smart-purchasing-panel"><div className="smart-panel-head"><div><b>Artículos que necesitan compra</b><small>Selecciona productos para preparar una solicitud con sus referencias y precios.</small></div><span>{loading ? "—" : `${suggestions.length} propuestas`}</span></div>{!loading && !suggestions.length ? <p className="empty-state">No hay productos bajo mínimos ahora mismo. Puedes crear una solicitud desde el botón superior.</p> : <div className="smart-suggestion-list">{suggestions.map((row) => <article key={row.suggestion_id} className={selectedProducts.includes(Number(row.product_id)) ? "smart-suggestion selected" : "smart-suggestion"}><input type="checkbox" checked={selectedProducts.includes(Number(row.product_id))} onChange={() => toggleValue("products", Number(row.product_id))} aria-label={`Seleccionar ${row.name}`} /><div className="smart-suggestion-main"><b>{row.name}</b><small>{row.sku || "Sin referencia"} · Disponible {row.available_stock} · Mínimo {row.stock_min || row.min_stock || 0} · Proponer {row.suggested_quantity}</small><p>{row.reason}</p></div><div className="smart-supplier-compare">{row.comparisons?.slice(0, 3).map((offer: any) => <span key={offer.id} className={row.recommended_supplier?.supplier_id === offer.supplier_id ? "recommended" : ""}>{offer.supplier_name} · {Number(offer.real_cost || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" })} · {offer.lead_time_days || 0} días · {offer.promotion || "Sin promoción"}</span>)}{!row.comparisons?.length && <span>Sin ofertas alternativas registradas</span>}</div><button type="button" className="button secondary" onClick={() => void approve(row)}>Aprobar propuesta</button></article>)}</div>}</section><section className="smart-suppliers-panel"><div><b>Proveedores destinatarios</b><small>Selecciona uno o varios proveedores para la misma solicitud.</small></div><div className="smart-supplier-checks">{suppliers.map((supplier) => <label key={supplier.id}><input type="checkbox" checked={selectedSuppliers.includes(Number(supplier.id))} onChange={() => toggleValue("suppliers", Number(supplier.id))} />{supplier.name}<small>{supplier.email || "Sin email"}</small></label>)}</div></section><section className="smart-requests-panel"><div className="smart-panel-head"><div><b>Solicitudes y respuestas</b><small>Control de estados y comparativa de ofertas recibidas.</small></div><label className="smart-status-filter">Estado<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>{statusOptions.map((status) => <option key={status}>{status}</option>)}</select></label></div>{visibleRequests.length ? <div className="smart-request-list">{visibleRequests.map((request) => { const requestSuppliers = parseList(request.supplier_ids).map((id) => suppliers.find((supplier) => Number(supplier.id) === id)).filter(Boolean); const responseCount = offers.filter((offer) => Number(offer.request_id) === Number(request.id)).length; return <article className="smart-request-card" key={request.id}><div><b>{request.code}</b><span>{request.status}</span><small>{parseList(request.product_ids).length} productos · {requestSuppliers.length} proveedores · {responseCount} respuestas · {request.created_at?.slice(0, 10) || ""}</small></div><div className="smart-request-actions"><button type="button" className="button secondary" onClick={() => setDetailRequest(request)}>Comparar respuestas</button>{requestSuppliers.map((supplier: any) => <span className="smart-share-links" key={supplier.id}>{request.channels?.includes("email") && <a href={mailLink(request, supplier)} title={`Enviar por email a ${supplier.name}`}>✉ {supplier.name}</a>}{request.channels?.includes("web") && <a href={publicLink(request, Number(supplier.id))} target="_blank" rel="noreferrer">↗ Web</a>}{request.channels?.includes("whatsapp") && <a href={whatsappLink(request, supplier)} target="_blank" rel="noreferrer">☏ WhatsApp</a>}</span>)}</div></article>; })}</div> : <p className="empty-state">No hay solicitudes con ese estado.</p>}</section>{requestOpen && <div className="preview-overlay smart-request-overlay" onClick={(event) => event.target === event.currentTarget && setRequestOpen(false)}><form className="smart-request-modal" onSubmit={(event) => void createRequest(event)}><header><div><p className="eyebrow">NUEVA SOLICITUD</p><h2>Solicitar precios y referencias</h2><small>Se generará un formulario por proveedor con los campos de compra comparables.</small></div><button type="button" onClick={() => setRequestOpen(false)} aria-label="Cerrar">×</button></header><div className="smart-request-modal-grid"><fieldset><legend>Productos</legend><div className="smart-request-check-list">{products.map((product) => <label key={product.id}><input type="checkbox" checked={selectedProducts.includes(Number(product.id))} onChange={() => toggleValue("products", Number(product.id))} /><span><b>{product.name}</b><small>{product.sku || product.external_code || "Sin referencia"} · {product.unit || product.format || "unidad"}</small></span></label>)}</div></fieldset><fieldset><legend>Proveedores</legend><div className="smart-request-check-list">{suppliers.map((supplier) => <label key={supplier.id}><input type="checkbox" checked={selectedSuppliers.includes(Number(supplier.id))} onChange={() => toggleValue("suppliers", Number(supplier.id))} /><span><b>{supplier.name}</b><small>{supplier.email || "Sin email"} · {supplier.phone || "Sin teléfono"}</small></span></label>)}</div></fieldset></div><div className="smart-request-channel-fields"><fieldset><legend>Canales</legend><label><input type="checkbox" checked={draft.channels.includes("email")} onChange={() => toggleChannel("email")} /> Email (abrir mensaje preparado)</label><label><input type="checkbox" checked={draft.channels.includes("web")} onChange={() => toggleChannel("web")} /> Formulario web</label><label><input type="checkbox" checked={draft.channels.includes("whatsapp")} onChange={() => toggleChannel("whatsapp")} /> Enlace WhatsApp</label></fieldset><label>Fecha límite para responder<input type="date" value={draft.valid_until || ""} onChange={(event) => setDraft({ ...draft, valid_until: event.target.value })} /></label></div><label>Mensaje para el proveedor<textarea value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} /></label><footer><button type="button" className="button secondary" onClick={() => setRequestOpen(false)}>Cancelar</button><button type="submit" className="button primary">Generar solicitud</button></footer></form></div>}{detailRequest && <div className="preview-overlay smart-request-overlay" onClick={(event) => event.target === event.currentTarget && setDetailRequest(null)}><section className="smart-request-modal smart-comparison-modal"><header><div><p className="eyebrow">COMPARATIVA DE PROVEEDORES</p><h2>{detailRequest.code}</h2><small>Compara las respuestas recibidas por producto, referencia y coste.</small></div><button type="button" onClick={() => setDetailRequest(null)} aria-label="Cerrar">×</button></header><div className="smart-comparison-table"><div className="smart-comparison-row smart-comparison-head"><b>Producto</b><b>Proveedor</b><b>Referencia</b><b>Coste</b><b>Plazo</b></div>{detailOffers.flatMap((offer) => { let lines: any[] = []; try { lines = JSON.parse(String(offer.lines_json || "[]")); } catch {} const supplier = suppliers.find((item) => Number(item.id) === Number(offer.supplier_id)); return lines.map((line) => <div className="smart-comparison-row" key={`${offer.id}-${line.product_id}`}><span>{products.find((product) => Number(product.id) === Number(line.product_id))?.name || `Producto #${line.product_id}`}</span><span>{supplier?.name || `Proveedor #${offer.supplier_id}`}</span><span>{line.supplier_ref || "—"}</span><strong>{line.unit_cost ? Number(line.unit_cost).toLocaleString("es-ES", { style: "currency", currency: "EUR" }) : "—"}</strong><span>{line.lead_time_days || offer.delivery_days || 0} días</span></div>); })}</div>{!detailOffers.length && <p className="empty-state">Aún no hay respuestas recibidas. Comparte los enlaces con los proveedores.</p>}{detailOffers.length > 0 && <section className="smart-offer-actions"><b>Acciones sobre una oferta completa</b>{detailOffers.map((offer) => <div key={offer.id}><span>{suppliers.find((item) => Number(item.id) === Number(offer.supplier_id))?.name || `Proveedor #${offer.supplier_id}`} · {offer.valid_until || "Sin validez indicada"}</span><button type="button" className="button secondary" onClick={() => void applyOffer(offer)}>Aplicar oferta</button><button type="button" className="button primary" onClick={() => void createOrderFromOffer(offer)}>Crear pedido de compra</button></div>)}</section>}<footer><button type="button" className="button secondary" onClick={() => setDetailRequest(null)}>Cerrar</button></footer></section></div>}</div>;
+  return (
+    <div className="smart-purchasing">
+      <div className="manager-head">
+        <div><p className="eyebrow">ABASTECIMIENTO CONTROLADO</p><h2>Compras inteligentes</h2><p className="muted">Solicita precios a varios proveedores y compara referencias, costes, plazos y condiciones en un único lugar.</p></div>
+        <div><button type="button" className="button secondary" onClick={() => void load()}>Actualizar</button><button type="button" className="button primary" onClick={() => setRequestOpen(true)}>Nueva solicitud de precios</button></div>
+      </div>
+      {loading && <div className="data-loading" role="status"><span className="loading-spinner" aria-hidden="true" /><LoadingIndicator label="Cargando compras inteligentes…" /></div>}
+      {loadError && <div className="error-message">{loadError}</div>}
+      {message && <div className="success-message">{message}</div>}
+      <section className="smart-purchasing-panel">
+        <div className="smart-panel-head"><div><b>Artículos que necesitan compra</b><small>Selecciona productos para preparar una solicitud con sus referencias y precios.</small></div><span>{loading ? "—" : `${suggestions.length} propuestas`}</span></div>
+        {!loading && !suggestions.length ? <p className="empty-state">No hay productos bajo mínimos ahora mismo. Puedes crear una solicitud desde el botón superior.</p> : <div className="smart-suggestion-list">{suggestions.map((row) => <article key={row.suggestion_id} className={selectedProducts.includes(Number(row.product_id)) ? "smart-suggestion selected" : "smart-suggestion"}>
+          <input type="checkbox" checked={selectedProducts.includes(Number(row.product_id))} onChange={() => toggleValue("products", Number(row.product_id))} aria-label={`Seleccionar ${row.name}`} />
+          <div className="smart-suggestion-main"><b>{row.name}</b><small>{row.sku || "Sin referencia"} · Disponible {row.available_stock} · Mínimo {row.stock_min || row.min_stock || 0} · Proponer {row.suggested_quantity}</small><p>{row.reason}</p></div>
+          <div className="smart-supplier-compare" aria-label={`Proveedores para ${row.name}`}>
+            {row.comparisons?.slice(0, 5).map((offer: any) => <span key={offer.id} className={row.recommended_supplier?.supplier_id === offer.supplier_id ? "recommended" : ""}><b>{offer.supplier_name}</b> · {offer.has_price ? Number(offer.real_cost).toLocaleString("es-ES", { style: "currency", currency: "EUR" }) : "Solicitar precio"} · {offer.lead_time_days || 0} días · {offer.source || "Sin precio registrado"}</span>)}
+            {!row.comparisons?.length && <span>Sin proveedores relacionados. Selecciona proveedores abajo para solicitar ofertas.</span>}
+          </div>
+          <button type="button" className="button secondary" disabled={!row.recommended_supplier?.supplier_id} onClick={() => void approve(row)}>{row.recommended_supplier?.supplier_id ? "Crear borrador más barato" : "Solicitar precios primero"}</button>
+        </article>)}</div>}
+      </section>
+      <section className="smart-suppliers-panel"><div><b>Proveedores destinatarios</b><small>Selecciona uno o varios proveedores para la misma solicitud.</small></div><div className="smart-supplier-checks">{suppliers.map((supplier) => <label key={supplier.id}><input type="checkbox" checked={selectedSuppliers.includes(Number(supplier.id))} onChange={() => toggleValue("suppliers", Number(supplier.id))} />{supplier.name}<small>{supplier.email || "Sin email"}</small></label>)}</div></section>
+      <section className="smart-requests-panel">
+        <div className="smart-panel-head"><div><b>Solicitudes y respuestas</b><small>Control de estados y comparativa de ofertas recibidas.</small></div><label className="smart-status-filter">Estado<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>{statusOptions.map((status) => <option key={status}>{status}</option>)}</select></label></div>
+        {visibleRequests.length ? <div className="smart-request-list">{visibleRequests.map((request) => { const requestSuppliers = parseList(request.supplier_ids).map((id) => suppliers.find((supplier) => Number(supplier.id) === id)).filter(Boolean); const responseCount = offers.filter((offer) => Number(offer.request_id) === Number(request.id)).length; return <article className="smart-request-card" key={request.id}><div><b>{request.code}</b><span>{request.status}</span><small>{parseList(request.product_ids).length} productos · {requestSuppliers.length} proveedores · {responseCount} respuestas · {request.created_at?.slice(0, 10) || ""}</small></div><div className="smart-request-actions"><button type="button" className="button secondary" onClick={() => setDetailRequest(request)}>Comparar respuestas</button>{requestSuppliers.map((supplier: any) => <span className="smart-share-links" key={supplier.id}>{request.channels?.includes("email") && <a href={mailLink(request, supplier)} title={`Enviar por email a ${supplier.name}`}>✉ {supplier.name}</a>}{request.channels?.includes("web") && <a href={publicLink(request, Number(supplier.id))} target="_blank" rel="noreferrer">↗ Web</a>}{request.channels?.includes("whatsapp") && <a href={whatsappLink(request, supplier)} target="_blank" rel="noreferrer">☏ WhatsApp</a>}</span>)}</div></article>; })}</div> : <p className="empty-state">No hay solicitudes con ese estado.</p>}
+      </section>
+      {requestOpen && <div className="preview-overlay smart-request-overlay" onClick={(event) => event.target === event.currentTarget && setRequestOpen(false)}><form className="smart-request-modal" onSubmit={(event) => void createRequest(event)}><header><div><p className="eyebrow">NUEVA SOLICITUD</p><h2>Solicitar precios y referencias</h2><small>Se generará un formulario por proveedor con los campos de compra comparables.</small></div><button type="button" onClick={() => setRequestOpen(false)} aria-label="Cerrar">×</button></header><div className="smart-request-modal-grid"><fieldset><legend>Productos</legend><div className="smart-request-check-list">{products.map((product) => <label key={product.id}><input type="checkbox" checked={selectedProducts.includes(Number(product.id))} onChange={() => toggleValue("products", Number(product.id))} /><span><b>{product.name}</b><small>{product.sku || product.external_code || "Sin referencia"} · {product.unit || product.format || "unidad"}</small></span></label>)}</div></fieldset><fieldset><legend>Proveedores</legend><div className="smart-request-check-list">{suppliers.map((supplier) => <label key={supplier.id}><input type="checkbox" checked={selectedSuppliers.includes(Number(supplier.id))} onChange={() => toggleValue("suppliers", Number(supplier.id))} /><span><b>{supplier.name}</b><small>{supplier.email || "Sin email"} · {supplier.phone || "Sin teléfono"}</small></span></label>)}</div></fieldset></div><div className="smart-request-channel-fields"><fieldset><legend>Canales</legend><label><input type="checkbox" checked={draft.channels.includes("email")} onChange={() => toggleChannel("email")} /> Email (abrir mensaje preparado)</label><label><input type="checkbox" checked={draft.channels.includes("web")} onChange={() => toggleChannel("web")} /> Formulario web</label><label><input type="checkbox" checked={draft.channels.includes("whatsapp")} onChange={() => toggleChannel("whatsapp")} /> Enlace WhatsApp</label></fieldset><label>Fecha límite para responder<input type="date" value={draft.valid_until || ""} onChange={(event) => setDraft({ ...draft, valid_until: event.target.value })} /></label></div><label>Mensaje para el proveedor<textarea value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} /></label><footer><button type="button" className="button secondary" onClick={() => setRequestOpen(false)}>Cancelar</button><button type="submit" className="button primary">Generar solicitud</button></footer></form></div>}
+      {detailRequest && <div className="preview-overlay smart-request-overlay" onClick={(event) => event.target === event.currentTarget && setDetailRequest(null)}><section className="smart-request-modal smart-comparison-modal"><header><div><p className="eyebrow">COMPARATIVA DE PROVEEDORES</p><h2>{detailRequest.code}</h2><small>Compara las respuestas recibidas por producto, referencia y coste.</small></div><button type="button" onClick={() => setDetailRequest(null)} aria-label="Cerrar">×</button></header><div className="smart-comparison-table"><div className="smart-comparison-row smart-comparison-head"><b>Producto</b><b>Proveedor</b><b>Referencia</b><b>Coste</b><b>Plazo</b></div>{detailOffers.flatMap((offer) => { let lines: any[] = []; try { lines = JSON.parse(String(offer.lines_json || "[]")); } catch {} const supplier = suppliers.find((item) => Number(item.id) === Number(offer.supplier_id)); return lines.map((line) => <div className="smart-comparison-row" key={`${offer.id}-${line.product_id}`}><span>{products.find((product) => Number(product.id) === Number(line.product_id))?.name || `Producto #${line.product_id}`}</span><span>{supplier?.name || `Proveedor #${offer.supplier_id}`}</span><span>{line.supplier_ref || "—"}</span><strong>{line.unit_cost ? Number(line.unit_cost).toLocaleString("es-ES", { style: "currency", currency: "EUR" }) : "—"}</strong><span>{line.lead_time_days || offer.delivery_days || 0} días</span></div>); })}</div>{!detailOffers.length && <p className="empty-state">Aún no hay respuestas recibidas. Comparte los enlaces con los proveedores.</p>}{detailOffers.length > 0 && <section className="smart-offer-actions"><b>Acciones sobre una oferta completa</b>{detailOffers.map((offer) => <div key={offer.id}><span>{suppliers.find((item) => Number(item.id) === Number(offer.supplier_id))?.name || `Proveedor #${offer.supplier_id}`} · {offer.valid_until || "Sin validez indicada"}</span><button type="button" className="button secondary" onClick={() => void applyOffer(offer)}>Aplicar oferta</button><button type="button" className="button primary" onClick={() => void createOrderFromOffer(offer)}>Crear pedido de compra</button></div>)}</section>}<footer><button type="button" className="button secondary" onClick={() => setDetailRequest(null)}>Cerrar</button></footer></section></div>}
+    </div>
+  );
 }
 
 export function SupplierOfferPortal() {
@@ -4287,6 +4318,38 @@ function GoodsReceiptEditModal({ receipt, lookups, actor, onClose, onSaved }: { 
   return <div className="preview-overlay" role="dialog" aria-modal="true" onMouseDown={(event) => event.target === event.currentTarget && !saving && onClose()}><form className="goods-receipt-edit-modal" onSubmit={save} onClick={(event) => event.stopPropagation()}><header className="preview-header"><div><b>Editar entrada · {receipt.code}</b><small>Actualiza los datos generales sin alterar las cantidades ya incorporadas al stock.</small></div><button type="button" className="preview-close" aria-label="Cerrar" onClick={() => !saving && onClose()}>×</button></header><div className="goods-receipt-edit-grid"><label>Código de entrada<input value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value })} /></label><label>Tipo de entrada<select value={form.counterparty_type} onChange={(event) => setForm({ ...form, counterparty_type: event.target.value, client_id: "", supplier_id: "", purchase_order_id: "", purchase_invoice_id: "" })}><option value="Proveedor">Proveedor</option><option value="Cliente">Cliente</option></select></label>{form.counterparty_type === "Cliente" ? <label>Cliente<select value={form.client_id} onChange={(event) => setForm({ ...form, client_id: event.target.value })}><option value="">Seleccionar cliente…</option>{clients.map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label> : <label>Proveedor<select value={form.supplier_id} onChange={(event) => setForm({ ...form, supplier_id: event.target.value, purchase_order_id: "" })}><option value="">Seleccionar proveedor…</option>{suppliers.map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}{form.counterparty_type === "Proveedor" && <label>Pedido de compra<select value={form.purchase_order_id} onChange={(event) => setForm({ ...form, purchase_order_id: event.target.value })}><option value="">Sin pedido vinculado</option>{purchaseOrders.map((item: any) => <option key={item.id} value={item.id}>{item.code} · {item.status}</option>)}</select></label>}{form.counterparty_type === "Proveedor" && <label>Factura de compra<select value={form.purchase_invoice_id} onChange={(event) => setForm({ ...form, purchase_invoice_id: event.target.value })}><option value="">Sin factura vinculada</option>{(lookups.invoices || []).map((item: any) => <option key={item.id} value={item.id}>{item.code} · {item.status || "Pendiente"}</option>)}</select></label>}<label>Almacén<select value={form.warehouse_id} onChange={(event) => setForm({ ...form, warehouse_id: event.target.value })}><option value="">Seleccionar almacén…</option>{warehouses.map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Fecha de recepción<input type="date" value={form.receipt_date} onChange={(event) => setForm({ ...form, receipt_date: event.target.value })} /></label><label className="goods-receipt-wide">Notas generales<textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="Observaciones de la recepción…" /></label></div>{error && <p className="error-message" role="alert">{error}</p>}<footer className="preview-actions"><button type="button" className="button secondary" onClick={onClose} disabled={saving}>Cancelar</button><button type="submit" className="button primary" disabled={saving}>{saving ? "Guardando…" : "Guardar cambios"}</button></footer></form></div>;
 }
 
+function AddressAutocomplete({ address, city, onChange }: { address: string; city: string; onChange: (value: { address: string; city: string; latitude: number | null; longitude: number | null; geocoded_at: string | null; geocoding_status: string }) => void }) {
+  const [query, setQuery] = useState(address || "");
+  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const selectedQueryRef = useRef("");
+  useEffect(() => setQuery(address || ""), [address]);
+  useEffect(() => {
+    const text = query.trim();
+    if (text.length < 3 || text === selectedQueryRef.current) { setSuggestions([]); return undefined; }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setLoading(true);
+      try {
+        const response = await fetch(`/api/geocode?address=${encodeURIComponent(text)}&city=${encodeURIComponent(city)}`, { signal: controller.signal });
+        const body = await response.json();
+        setSuggestions(Array.isArray(body) ? body : []);
+      } catch { setSuggestions([]); }
+      finally { setLoading(false); }
+    }, 350);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [query, city, address]);
+  function selectSuggestion(item: any) {
+    const parts = item.address || {};
+    const selectedAddress = [parts.road || parts.pedestrian || parts.path, parts.house_number].filter(Boolean).join(", ") || String(item.display_name || "").split(",")[0];
+    const selectedCity = parts.city || parts.town || parts.village || parts.municipality || parts.county || city || "";
+    onChange({ address: selectedAddress, city: selectedCity, latitude: Number(item.lat), longitude: Number(item.lon), geocoded_at: new Date().toISOString(), geocoding_status: "Geolocalizada" });
+    selectedQueryRef.current = selectedAddress;
+    setQuery(selectedAddress); setSuggestions([]);
+  }
+  return <div className="address-autocomplete"><input aria-label="Dirección" autoComplete="street-address" value={query} placeholder="Escribe y selecciona una dirección…" onChange={(event) => { const value = event.target.value; selectedQueryRef.current = ""; setQuery(value); onChange({ address: value, city, latitude: null, longitude: null, geocoded_at: null, geocoding_status: "Pendiente" }); }} />{loading && <small>Buscando direcciones…</small>}{suggestions.length > 0 && <div className="address-autocomplete-suggestions">{suggestions.map((item) => <button type="button" key={`${item.place_id}-${item.lat}`} onClick={() => selectSuggestion(item)}>{item.display_name}</button>)}</div>}<small>Selecciona una sugerencia para guardar también latitud y longitud.</small></div>;
+}
+
 const settledInvoiceStatuses = new Set(["Cobrada", "Pagada", "Anulada", "Proforma"]);
 
 function invoicePaidAmount(invoiceId: any, payments: any[]) {
@@ -5115,11 +5178,12 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       setError("Completa el código, el cliente y el lugar de envío antes de guardar el pedido.");
       return;
     }
-    if (isPurchaseForm && !editing && (!String(currentForm.code || "").trim() || !currentForm.supplier_id || !String(currentForm.order_date || "").trim())) {
+    const isPurchaseDraft = isPurchaseForm && String(currentForm.status || "Borrador") === "Borrador";
+    if (isPurchaseForm && !isPurchaseDraft && (!String(currentForm.code || "").trim() || !currentForm.supplier_id || !String(currentForm.order_date || "").trim())) {
       setError("Completa el código, el proveedor y la fecha de compra antes de guardar.");
       return;
     }
-    if (isPurchaseForm && !quoteLines.length) {
+    if (isPurchaseForm && !isPurchaseDraft && !quoteLines.length) {
       setError("Añade al menos una línea con producto y unidades compradas antes de guardar.");
       return;
     }
@@ -5143,7 +5207,11 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     const reopenPreparation = c.api === "orders" && editing && !isOrderSent(editing);
     let clientGeodata: Record<string, any> = {};
     if (c.api === "clients" && String(currentForm.address || "").trim() && (!editing || String(editing.address || "").trim() !== String(currentForm.address || "").trim() || String(editing.city || "").trim() !== String(currentForm.city || "").trim())) {
-      clientGeodata = await geocodeAddress(String(currentForm.address).trim(), String(currentForm.city || "").trim());
+      const selectedLatitude = Number(currentForm.latitude);
+      const selectedLongitude = Number(currentForm.longitude);
+      clientGeodata = Number.isFinite(selectedLatitude) && Number.isFinite(selectedLongitude) && selectedLatitude !== 0 && selectedLongitude !== 0
+        ? { latitude: selectedLatitude, longitude: selectedLongitude, geocoded_at: currentForm.geocoded_at || new Date().toISOString(), geocoding_status: "Geolocalizada" }
+        : await geocodeAddress(String(currentForm.address).trim(), String(currentForm.city || "").trim());
     }
     const payload = {
       ...currentForm,
@@ -5240,6 +5308,12 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     e.preventDefault();
     if (active === "Productos" && !editing) {
       setProductConfirmOpen(true);
+      return;
+    }
+    if (isPurchaseForm && e?.nativeEvent?.submitter?.dataset?.purchaseAction === "confirm") {
+      const nextForm = { ...formRef.current, status: "Enviado" };
+      if (!window.confirm("El pedido quedará marcado como enviado al proveedor. ¿Continuar?")) return;
+      await saveRecord(e, nextForm);
       return;
     }
     await saveRecord(e);
@@ -6832,7 +6906,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                 : field === "invoice_id" ? lookups.invoices
                 : field === "shipment_id" ? lookups.shipments
                   : [];
-    if (lookupSource.length && field.endsWith("_id")) {
+    const relationField = ["client_id", "product_id", "warehouse_id", "supplier_id", "primary_supplier_id", "collection_point_id", "order_id", "purchase_order_id", "purchase_invoice_id", "invoice_id", "shipment_id"].includes(field);
+    if (lookupSource.length && relationField) {
       const item = lookupSource.find((entry: any) => Number(entry.id) === Number(value));
       if (item) {
         if (field === "product_id") return active === "Stock" ? (item.name || `Producto ${value}`) : `${item.name || `Producto ${value}`}${item.sku ? ` · ${item.sku}` : ""}`;
@@ -6840,7 +6915,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         return item.name || item.code || `Registro ${value}`;
       }
     }
-    if (field.endsWith("_id") && value !== null && value !== undefined && value !== "") {
+    if (relationField && value !== null && value !== undefined && value !== "") {
       const missingRelationLabels: Record<string, string> = {
         client_id: "Cliente no disponible",
         product_id: "Producto no disponible",
@@ -7223,6 +7298,11 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           <option value="Física">Factura física</option>
           <option value="Email">Por email</option>
         </select>
+      ) : active === "Clientes" && f === "equivalence_surcharge_enabled" ? (
+        <select aria-label="Recargo de equivalencia" value={String(form[f] ?? "0")} onChange={(event) => handleFormChange(f, event.target.value)}>
+          <option value="0">No aplicar</option>
+          <option value="1">Aplicar según IVA</option>
+        </select>
       ) : active === "Productos" && f === "barcode" ? (
         <div className="product-barcode-field">
           <div className="product-barcode-entry">
@@ -7231,12 +7311,18 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           </div>
           <small className="product-barcode-help">Puedes escanear con una pistola conectada al equipo o usar la cámara.</small>
         </div>
-      ) : active === "Productos" && f === "supplier_id" ? (
+      ) : ["Productos", "Compras"].includes(active) && f === "supplier_id" ? (
         <div className="supplier-picker">
           <input aria-label="Buscar proveedor" autoComplete="off" placeholder="Buscar por nombre, NIF, teléfono o email…" value={supplierSearch || (lookups.suppliers || []).find((item: any) => Number(item.id) === Number(form.supplier_id))?.name || ""} onChange={(event) => { const value = event.target.value; setSupplierSearch(value); if (!value) handleFormChange(f, ""); }} />
           {supplierSearch && !form.supplier_id && <div className="supplier-suggestions">{(lookups.suppliers || []).filter((item: any) => `${item.name || ""} ${item.tax_id || ""} ${item.phone || ""} ${item.email || ""}`.toLowerCase().includes(supplierSearch.toLowerCase())).slice(0, 8).map((item: any) => <button type="button" key={item.id} onClick={() => { setSupplierSearch(item.name || ""); handleFormChange(f, String(item.id)); }}><b>{item.name}</b><small>{[item.tax_id, item.phone, item.email].filter(Boolean).join(" · ") || "Sin datos adicionales"}</small></button>)}{!(lookups.suppliers || []).some((item: any) => `${item.name || ""} ${item.tax_id || ""} ${item.phone || ""} ${item.email || ""}`.toLowerCase().includes(supplierSearch.toLowerCase())) && <span>No hay proveedores que coincidan.</span>}</div>}
           <button type="button" className="button secondary supplier-new-button" onClick={() => setNewSupplierOpen(true)}>＋ Crear proveedor</button>
         </div>
+      ) : ["Clientes", "Proveedores", "Lugares de recogida", "Almacenes"].includes(active) && f === "address" ? (
+        <AddressAutocomplete address={String(form.address || "")} city={String(form.city || "")} onChange={(value) => setForm((current: any) => ({ ...current, ...value }))} />
+      ) : ["Clientes", "Proveedores", "Lugares de recogida", "Almacenes"].includes(active) && ["latitude", "longitude"].includes(f) ? (
+        <input aria-label={`${c.labels[i]} automática`} value={form[f] ?? ""} readOnly placeholder="Se completa al seleccionar la dirección" />
+      ) : ["Clientes", "Proveedores", "Lugares de recogida", "Almacenes"].includes(active) && f === "geocoding_status" ? (
+        <input aria-label="Estado de geolocalización" value={form[f] || "Pendiente"} readOnly />
       ) : active === "Devoluciones" && f === "lot_id" ? (
         <select aria-label="Lote de la devolución" value={form[f] ?? ""} disabled={!form.product_id} onChange={(event) => { const value = event.target.value; const lot = (lookups.product_lots || []).find((item: any) => Number(item.id) === Number(value)); setForm((current: any) => ({ ...current, lot_id: value, lot_code_snapshot: lot?.lot_code || "", expiry_date_snapshot: lot?.expiry_date || "" })); }}>
           <option value="">Seleccionar lote…</option>
@@ -7302,7 +7388,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         <select aria-label={c.labels[i]} value={form[f] ?? "Pendiente"} onChange={(e) => handleFormChange(f, e.target.value)}><option>Pendiente</option><option>Pagada</option><option>Anulada</option></select>
       ) : f === "status" ? (
         <select aria-label={c.labels[i]} value={form[f] ?? (active === "Pedidos" ? "Nuevo" : "Pendiente")} onChange={(e) => handleFormChange(f, e.target.value)}>
-          {(active === "Facturas" ? ["Proforma", "Pendiente", "Parcial", "Cobrada", "Vencida", "Anulada"] : [...(active === "Documentos" ? ["Activa", "Borrador", "Archivada"] : []), ...(active === "Pedidos" ? ["Nuevo"] : []), "Pendiente", "Confirmado", "Preparando", "Preparado", "Enviado", "Entregado", "Cancelado", "Cobrada"]).map((s) => <option key={s}>{s}</option>)}
+          {(active === "Compras" ? ["Borrador", "Enviado", "En tránsito", "Parcialmente recibido", "Recibido", "Recibido con incidencia", "Cancelado"] : active === "Facturas" ? ["Proforma", "Pendiente", "Parcial", "Cobrada", "Vencida", "Anulada"] : [...(active === "Documentos" ? ["Activa", "Borrador", "Archivada"] : []), ...(active === "Pedidos" ? ["Nuevo"] : []), "Pendiente", "Confirmado", "Preparando", "Preparado", "Enviado", "Entregado", "Cancelado", "Cobrada"]).map((s) => <option key={s}>{s}</option>)}
         </select>
       ) : ["content", "description"].includes(f) || (active === "Pedidos" && ["loading_notes", "driver_notes", "notes"].includes(f)) ? (
         <textarea aria-label={c.labels[i]} required={active === "Productos" && f === "description" ? true : !["description", "notes", "loading_notes", "driver_notes"].includes(f)} value={form[f] ?? ""} onChange={(e) => handleFormChange(f, e.target.value)} />
@@ -7316,7 +7402,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             ? ["title", "content"].includes(f)
             : active === "Productos"
             ? f === "name"
-            : !["phone", "email", "address", "notes", "opening_time", "closing_time", "weekly_closed_day", "delivery_window_start", "delivery_window_end", "attachment_name", "sent_by", "delivered_by"].includes(f) && !(c.api === "expenses" && f === "code")}
+            : !["phone", "email", "address", "notes", "opening_time", "closing_time", "weekly_closed_day", "delivery_window_start", "delivery_window_end", "attachment_name", "sent_by", "delivered_by", "latitude", "longitude", "geocoding_status"].includes(f) && !(c.api === "expenses" && f === "code")}
           type={["amount", "stock", "stock_reserved", "quantity", "unit_price", "box_price", "pack4_price", "pack6_price", "pallet_price", "client_id", "product_id", "order_id", "invoice_id", "stock_min", "stock_target", "stock_safety", "units_per_case", "cases_per_pallet", "units_per_pallet", "weight_kg", "volume_m3", "picking_order", "target_margin_percent", "min_margin_percent", "freight_cost", "handling_cost", "real_cost", "tax_surcharge_percent", "extra_tax_percent", "cost_price", "last_direct_cost", "markup_percent"].includes(f) ? "number" : timeFields.has(f) ? "time" : ["movement_date", "return_date", "reviewed_at", "authorized_at"].includes(f) ? "datetime-local" : ["expense_date", "invoice_date", "payment_due_date", "delivery_date", "preparation_date", "shipping_date", "created_at"].includes(f) ? "date" : "text"}
           step={["unit_price", "cost_price", "last_direct_cost", "markup_percent"].includes(f) ? "0.01" : undefined}
           value={form[f] ?? ""}
@@ -7404,7 +7490,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                   : active === "Gastos y tickets"
                     ? { expense_date: tabletTodayInput(), category: "Otros", vat: "21", payment_method: "Tarjeta" }
                   : isPurchaseForm
-                    ? { code: `COM-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`, status: "Pendiente", order_date: tabletTodayInput(), invoice_date: tabletTodayInput(), payment_status: "Pendiente", expected_date: "", amount: 0 }
+                    ? { code: `COM-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`, status: "Borrador", order_date: tabletTodayInput(), invoice_date: tabletTodayInput(), payment_status: "Pendiente", expected_date: "", amount: 0 }
                   : isOrderForm || active === "Pedidos"
                     ? (() => { const defaultOrderDate = nextOrderWorkingDate(); return { code: nextOrderCode(), status: "Nuevo", created_by: user?.username || "Usuario local", preparation_date: defaultOrderDate, shipping_date: defaultOrderDate, delivery_date: defaultOrderDate }; })()
                     : {}
@@ -7613,9 +7699,12 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
               </small>
             </label>
           )}
-          {active !== "Entradas" && <button className="button primary" disabled={recordSaving}>
+          {active !== "Entradas" && (isPurchaseForm ? <>
+            <button type="submit" className="button secondary" disabled={recordSaving}>{recordSaving ? "Guardando…" : "Guardar borrador"}</button>
+            <button type="submit" className="button primary" data-purchase-action="confirm" disabled={recordSaving}>{recordSaving ? "Guardando…" : "Guardar pedido"}</button>
+          </> : <button className="button primary" disabled={recordSaving}>
             {recordSaving ? "Guardando…" : editing ? "Guardar cambios" : formTitle}
-          </button>}
+          </button>)}
           {editing && active !== "Entradas" && (
             <button
               type="button"

@@ -1,6 +1,6 @@
 {
   "name": "site-creator-vinext-starter",
-  "version": "2.0.299",
+  "version": "2.0.301",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -19,6 +19,7 @@
     "db:migrar-turso": "node scripts/migrar-a-turso.mjs",
     "db:sync-local": "node scripts/sync-turso-to-local.mjs",
     "db:benchmark": "node scripts/benchmark-database-modes.mjs",
+    "db:import-proveedores": "node scripts/import-suppliers-local.mjs",
     "test": "npm run build && node --test tests/rendered-html.test.mjs tests/netlify-adapter.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"

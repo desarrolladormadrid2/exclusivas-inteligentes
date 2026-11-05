@@ -3256,6 +3256,10 @@ footer span {
 .goods-receipts-table th:nth-child(7) { width: 6%; }
 .goods-receipts-table th:last-child { width: 20%; }
 .goods-receipts-table td:last-child { white-space: nowrap; overflow-wrap: normal; }
+.goods-receipt-location-check .goods-receipt-location-inputs,
+.goods-receipt-location-check .goods-receipt-location-actions,
+.goods-receipt-location-check .goods-receipt-location-status { display: none; }
+.goods-receipt-location-check::after { content: "La ubicación se asignará al colocar el producto en el almacén."; display: block; margin-top: 8px; color: #89651a; font-size: 11px; }
 
 /* Contactos: controles más claros y cómodos en pantallas pequeñas. */
 .contacts-toolbar > div:last-child { flex-wrap: wrap; }
@@ -7023,4 +7027,47 @@ body.reparto-modal-open {
   .supplier-order-detail-lines > div > strong { grid-column: 2; }
   .supplier-observation-add { grid-template-columns: minmax(0, 1fr); }
   .supplier-observation-add button { justify-self: end; }
+}
+.address-autocomplete {
+  position: relative;
+}
+
+.address-autocomplete > input {
+  width: 100%;
+}
+
+.address-autocomplete > small {
+  display: block;
+  margin-top: 4px;
+  color: #65717c;
+  font-size: 11px;
+}
+
+.address-autocomplete-suggestions {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% - 2px);
+  left: 0;
+  right: 0;
+  border: 1px solid #bfcbd3;
+  background: #fff;
+  box-shadow: 0 5px 14px rgba(22, 38, 50, .16);
+}
+
+.address-autocomplete-suggestions button {
+  display: block;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-bottom: 1px solid #e3e8eb;
+  background: #fff;
+  color: #193248;
+  text-align: left;
+  cursor: pointer;
+}
+
+.address-autocomplete-suggestions button:hover,
+.address-autocomplete-suggestions button:focus-visible {
+  background: #f3f6f7;
+  outline: 0;
 }

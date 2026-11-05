@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { PNG } from "pngjs";
 import { createRemoteDatabaseSync } from "../remote-db-sync.mjs";
+import { calculateInvoiceTotals } from "./invoice-totals.mjs";
 const APP_VERSION = (() => {
   try {
     return String(JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version || "desconocida");
@@ -154,11 +155,13 @@ function pdfLiteral(value) {
 function createInvoicePdf(invoice) {
   const lineRows = Array.isArray(invoice.lines) ? invoice.lines : [];
   const routeAssignments = Array.isArray(invoice.route_assignments) ? invoice.route_assignments : [];
-  const lineTotal = lineRows.reduce((sum, line) => sum + Number(line.amount || Number(line.quantity || 0) * Number(line.unit_price || 0)), 0);
+  const calculated = lineRows.length ? calculateInvoiceTotals(lineRows, Boolean(Number(invoice.equivalence_surcharge_enabled || 0))) : null;
   const vatRate = Number(invoice.vat || 21);
-  const base = lineTotal || (Number(invoice.amount || 0) / (1 + vatRate / 100));
-  const total = lineTotal ? base * (1 + vatRate / 100) : Number(invoice.amount || 0);
-  const vat = total - base;
+  const base = Number(invoice.base_amount ?? calculated?.base_amount ?? 0) || (Number(invoice.amount || 0) / (1 + vatRate / 100));
+  const vat = Number(invoice.vat_amount ?? calculated?.vat_amount ?? 0) || (lineRows.length ? Number(calculated?.vat_amount || 0) : Number(invoice.amount || 0) - base);
+  const surcharge = Number(invoice.equivalence_surcharge_amount ?? calculated?.equivalence_surcharge_amount ?? 0);
+  const total = lineRows.length ? Number(calculated?.total_amount || base + vat + surcharge) : Number(invoice.amount || 0) || base + vat + surcharge;
+  const breakdown = calculated?.equivalence_surcharge_breakdown || (() => { try { return JSON.parse(invoice.equivalence_surcharge_breakdown || "[]"); } catch { return []; } })();
   const lines = [
     "EXCLUSIVAS INTELIGENTES",
     "DISTRIBUIDORA DE BEBIDAS",
@@ -176,14 +179,15 @@ function createInvoicePdf(invoice) {
     "",
     "CONCEPTOS",
     ...(lineRows.length ? lineRows.flatMap((line) => {
-      const description = line.product_name || `Producto #${line.product_id || ""}`;
+      const description = line.description || line.product_name || `Producto #${line.product_id || ""}`;
       const quantity = Number(line.quantity || 0);
       const amount = Number(line.amount || quantity * Number(line.unit_price || 0));
-      return [`${description} · ${quantity} uds. · ${amount.toFixed(2)} EUR`];
+      return [`${description} · ${quantity} uds. · ${amount.toFixed(2)} EUR${line.line_type === "GTR" ? " · IVA 21% · Cuenta 70500000" : ""}`];
     }) : ["Sin lineas de producto asociadas"]),
     "",
     `Base imponible: ${base.toFixed(2)} EUR`,
-    `IVA (${vatRate.toFixed(0)}%): ${vat.toFixed(2)} EUR`,
+    ...(breakdown.length ? breakdown.map((row) => `IVA (${Number(row.vat_rate || 0).toFixed(0)}%): ${Number(row.vat_amount || 0).toFixed(2)} EUR`) : [`IVA: ${vat.toFixed(2)} EUR`]),
+    ...(Number(invoice.equivalence_surcharge_enabled || 0) && surcharge > 0 ? [`Recargo de equivalencia: ${surcharge.toFixed(2)} EUR`] : []),
     `TOTAL: ${total.toFixed(2)} EUR`,
     "",
     "Documento generado por Exclusivas Inteligentes.",
@@ -345,7 +349,7 @@ function invoiceSnapshotData({ clientId = null, order = null, orders = [] } = {}
   const primaryOrder = orderRows[0] || null;
   const resolvedClientId = Number(clientId || primaryOrder?.client_id || 0) || null;
   const client = resolvedClientId
-    ? db.prepare("SELECT id,name,legal_name,tax_id,address,city,billing_address,billing_city,email,phone,payment_method_code,payment_terms_code FROM clients WHERE id=?").get(resolvedClientId)
+    ? db.prepare("SELECT id,name,legal_name,tax_id,address,city,billing_address,billing_city,email,phone,payment_method_code,payment_terms_code,equivalence_surcharge_enabled FROM clients WHERE id=?").get(resolvedClientId)
     : null;
   const deliveries = orderRows.map((row) => {
     const point = row.collection_point_id
@@ -369,6 +373,7 @@ function invoiceSnapshotData({ clientId = null, order = null, orders = [] } = {}
     phone: String(client?.phone || "").trim(),
     payment_method: String(client?.payment_method_code || "").trim(),
     payment_terms: String(client?.payment_terms_code || "").trim(),
+    equivalence_surcharge_enabled: Boolean(Number(client?.equivalence_surcharge_enabled || 0)),
     deliveries,
   };
   return {
@@ -381,8 +386,26 @@ function invoiceSnapshotData({ clientId = null, order = null, orders = [] } = {}
     client_delivery_city_snapshot: delivery.city || null,
     client_email_snapshot: snapshot.email || null,
     client_phone_snapshot: snapshot.phone || null,
+    equivalence_surcharge_enabled: snapshot.equivalence_surcharge_enabled ? 1 : 0,
     customer_snapshot_json: JSON.stringify(snapshot),
   };
+}
+function recalculateInvoiceTax(invoiceId, actor = "Sistema") {
+  const id = Number(invoiceId || 0);
+  if (!id) return null;
+  const invoice = db.prepare("SELECT i.*,c.equivalence_surcharge_enabled client_equivalence_surcharge_enabled FROM invoices i LEFT JOIN clients c ON c.id=i.client_id WHERE i.id=? AND CAST(COALESCE(i.deleted,0) AS INTEGER)=0").get(id);
+  if (!invoice) return null;
+  const lines = db.prepare("SELECT * FROM invoice_lines WHERE invoice_id=? ORDER BY id").all(id);
+  if (!lines.length) return invoice;
+  const enabled = Boolean(Number(invoice.equivalence_surcharge_enabled ?? invoice.client_equivalence_surcharge_enabled ?? 0));
+  const totals = calculateInvoiceTotals(lines, enabled);
+  const updateLine = db.prepare("UPDATE invoice_lines SET amount=?,equivalence_surcharge_percent=?,equivalence_surcharge_amount=? WHERE id=?");
+  for (const line of totals.lines) updateLine.run(Number(line.amount || 0), Number(line.equivalence_surcharge_percent || 0), Number(line.equivalence_surcharge_amount || 0), Number(line.id));
+  const now = new Date().toISOString();
+  db.prepare("UPDATE invoices SET amount=?,base_amount=?,vat_amount=?,equivalence_surcharge_enabled=?,equivalence_surcharge_amount=?,equivalence_surcharge_breakdown=?,updated_at=? WHERE id=?").run(totals.total_amount, totals.base_amount, totals.vat_amount, enabled ? 1 : 0, totals.equivalence_surcharge_amount, JSON.stringify(totals.equivalence_surcharge_breakdown), now, id);
+  recordAudit(actor, "SYSTEM", `invoices/${id}/taxes`, "Recalcular IVA y recargo de equivalencia", JSON.stringify({ invoice_id: id, ...totals, equivalence_surcharge_enabled: enabled }));
+  invalidateReadCache("invoices");
+  return { ...invoice, ...totals, amount: totals.total_amount, equivalence_surcharge_enabled: enabled ? 1 : 0 };
 }
 function recalculateInvoicePaymentStatus(invoiceId, actor = "Sistema") {
   const id = Number(invoiceId || 0);
@@ -431,11 +454,13 @@ function ensureOrderInvoice(orderId, actor = "Sistema") {
   const now = new Date().toISOString();
   const code = `FAC-${new Date().getFullYear()}-${String(Date.now()).slice(-7)}-${String(order.id).padStart(4, "0")}`;
   const snapshot = invoiceSnapshotData({ clientId: order.client_id, order });
-  const created = db.prepare("INSERT INTO invoices(code,order_id,client_id,amount,status,issue_date,created_at,updated_at,client_name_snapshot,client_legal_name_snapshot,client_tax_id_snapshot,client_billing_address_snapshot,client_billing_city_snapshot,client_delivery_address_snapshot,client_delivery_city_snapshot,client_email_snapshot,client_phone_snapshot,customer_snapshot_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(code, Number(order.id), order.client_id || null, Number(order.amount || 0), "Pendiente", now.slice(0, 10), now, now, snapshot.client_name_snapshot, snapshot.client_legal_name_snapshot, snapshot.client_tax_id_snapshot, snapshot.client_billing_address_snapshot, snapshot.client_billing_city_snapshot, snapshot.client_delivery_address_snapshot, snapshot.client_delivery_city_snapshot, snapshot.client_email_snapshot, snapshot.client_phone_snapshot, snapshot.customer_snapshot_json);
+  const created = db.prepare("INSERT INTO invoices(code,order_id,client_id,amount,status,issue_date,created_at,updated_at,client_name_snapshot,client_legal_name_snapshot,client_tax_id_snapshot,client_billing_address_snapshot,client_billing_city_snapshot,client_delivery_address_snapshot,client_delivery_city_snapshot,client_email_snapshot,client_phone_snapshot,equivalence_surcharge_enabled,customer_snapshot_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(code, Number(order.id), order.client_id || null, Number(order.amount || 0), "Pendiente", now.slice(0, 10), now, now, snapshot.client_name_snapshot, snapshot.client_legal_name_snapshot, snapshot.client_tax_id_snapshot, snapshot.client_billing_address_snapshot, snapshot.client_billing_city_snapshot, snapshot.client_delivery_address_snapshot, snapshot.client_delivery_city_snapshot, snapshot.client_email_snapshot, snapshot.client_phone_snapshot, snapshot.equivalence_surcharge_enabled, snapshot.customer_snapshot_json);
   const invoiceId = Number(created.lastInsertRowid);
   db.prepare("INSERT INTO invoice_lines(invoice_id,product_id,quantity,unit_price,discount,vat,amount) SELECT ?,product_id,quantity,unit_price,discount,vat,amount FROM order_lines WHERE order_id=?").run(invoiceId, Number(order.id));
   const hasLines = db.prepare("SELECT 1 FROM invoice_lines WHERE invoice_id=? LIMIT 1").get(invoiceId);
   if (!hasLines && order.product_id && Number(order.quantity || 0) > 0) db.prepare("INSERT INTO invoice_lines(invoice_id,product_id,quantity,unit_price,discount,vat,amount) VALUES(?,?,?,?,?,?,?)").run(invoiceId, Number(order.product_id), Number(order.quantity), Number(order.unit_price || 0), Number(order.discount || 0), Number(order.vat || 21), Number(order.amount || 0));
+  appendGtrInvoiceLine(invoiceId);
+  recalculateInvoiceTax(invoiceId, actor);
   db.prepare("INSERT INTO invoice_orders(invoice_id,order_id) VALUES(?,?)").run(invoiceId, Number(order.id));
   db.prepare("UPDATE orders SET status='Facturado',updated_at=? WHERE id=?").run(now, Number(order.id));
   recordAudit(actor, "POST", `orders/${Number(order.id)}/convert-invoice`, "Generar factura al cargar", JSON.stringify({ order_id: Number(order.id), invoice_id: invoiceId, code }));
@@ -448,6 +473,26 @@ function markInvoicePdfStale(invoiceId) {
   if (!invoiceId || !hasColumn("invoices", "pdf_status")) return;
   db.prepare("UPDATE invoices SET pdf_status='Pendiente de regenerar',updated_at=? WHERE id=?").run(new Date().toISOString(), Number(invoiceId));
   invalidateReadCache("invoices");
+}
+function ensureGtrServiceProduct() {
+  const existing = db.prepare("SELECT id FROM products WHERE sku='GTR-SERVICIO' AND CAST(COALESCE(deleted,0) AS INTEGER)=0 LIMIT 1").get();
+  if (existing) return Number(existing.id);
+  const now = new Date().toISOString();
+  const created = db.prepare("INSERT INTO products(name,sku,description,unit,unit_price,cost_price,vat,accounting_product_group,accounting_vat_group,inventory_register_group,product_status,active,preorder,stock,stock_reserved,stock_min,stock_target,stock_safety,created_at,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run("Gestión de Tratamiento de Residuos (GTR)", "GTR-SERVICIO", "Servicio asociado de gestión de tratamiento de residuos.", "servicio", 1.17, 0, 21, "Servicios", "21%", "Servicios", "Servicio", 1, 0, 0, 0, 0, 0, 0, now, "Sistema");
+  recordAudit("Sistema", "POST", `products/${Number(created.lastInsertRowid)}`, "Crear servicio GTR", "Concepto GTR · 1,17 € · IVA 21% · cuenta 70500000");
+  return Number(created.lastInsertRowid);
+}
+function appendGtrDeliveryLine(deliveryNoteId) {
+  const productId = ensureGtrServiceProduct();
+  const existing = db.prepare("SELECT id FROM delivery_note_lines WHERE delivery_note_id=? AND (line_type='GTR' OR product_id=?) LIMIT 1").get(Number(deliveryNoteId), productId);
+  if (existing) return;
+  db.prepare("INSERT INTO delivery_note_lines(delivery_note_id,product_id,quantity,description,unit_price,vat,amount,line_type,accounting_account) VALUES(?,?,?,?,?,?,?,?,?)").run(Number(deliveryNoteId), productId, 1, "Gestión de Tratamiento de Residuos (GTR)", 1.17, 21, 1.17, "GTR", "70500000");
+}
+function appendGtrInvoiceLine(invoiceId) {
+  const productId = ensureGtrServiceProduct();
+  const existing = db.prepare("SELECT id FROM invoice_lines WHERE invoice_id=? AND (line_type='GTR' OR product_id=?) LIMIT 1").get(Number(invoiceId), productId);
+  if (existing) return;
+  db.prepare("INSERT INTO invoice_lines(invoice_id,product_id,quantity,unit_price,discount,vat,amount,description,line_type,accounting_account) VALUES(?,?,?,?,?,?,?,?,?,?)").run(Number(invoiceId), productId, 1, 1.17, 0, 21, 1.17, "Gestión de Tratamiento de Residuos (GTR)", "GTR", "70500000");
 }
 function invoiceShareUrl(req, token) {
   const host = String(req.headers.host || "exclusivas-inteligentes.vercel.app");
@@ -498,10 +543,10 @@ function createCommercialDocumentPdf(document, type) {
     "",
     "CONCEPTOS",
     ...(lineRows.length ? lineRows.flatMap((line) => {
-      const description = line.product_name || `Producto #${line.product_id || ""}`;
+      const description = line.description || line.product_name || `Producto #${line.product_id || ""}`;
       const quantity = Number(line.quantity || line.quantity_requested || 0);
       const amount = Number(line.amount || quantity * Number(line.unit_price || 0));
-      return [`${description} · ${quantity} uds. · ${amount.toFixed(2)} EUR`];
+      return [`${description} · ${quantity} uds. · ${amount.toFixed(2)} EUR${line.line_type === "GTR" ? " · IVA 21% · Cuenta 70500000" : ""}`];
     }) : ["Sin líneas de producto asociadas"]),
     "",
     `Base imponible: ${base.toFixed(2)} EUR`,
@@ -816,7 +861,7 @@ if (remoteMode && process.env.RUN_REMOTE_MIGRATIONS === "1") {
   }
 }
 for (const [table, columns] of [
-  ["clients", ["city TEXT", "tax_id TEXT", "weekly_closed_day TEXT", "invoice_delivery_method TEXT", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
+  ["clients", ["city TEXT", "tax_id TEXT", "weekly_closed_day TEXT", "invoice_delivery_method TEXT", "equivalence_surcharge_enabled INTEGER DEFAULT 0", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
   ["suppliers", ["active INTEGER DEFAULT 1", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
   ["orders", ["unit_price REAL DEFAULT 0", "discount REAL DEFAULT 0", "vat REAL DEFAULT 21", "notes TEXT", "loading_notes TEXT", "driver_notes TEXT", "delivery_date TEXT", "address TEXT", "collection_point_id INTEGER", "prepared_by TEXT", "shipped_by TEXT", "delivered_by TEXT", "preparation_date TEXT", "shipping_date TEXT", "delivery_city TEXT", "urgent INTEGER DEFAULT 0", "created_by TEXT", "stock_alert INTEGER DEFAULT 0", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
   ["products", ["sku TEXT", "cost_price REAL DEFAULT 0", "category TEXT", "format TEXT", "unit TEXT", "vat REAL DEFAULT 21", "stock_reserved REAL DEFAULT 0", "active INTEGER DEFAULT 1", "product_status TEXT DEFAULT 'Activo'", "min_stock REAL DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
@@ -829,7 +874,7 @@ for (const [table, columns] of [
 }
 if (remoteMode && process.env.RUN_REMOTE_MIGRATIONS === "1") {
   for (const [table, columns] of [
-    ["clients", ["city TEXT", "tax_id TEXT", "weekly_closed_day TEXT", "invoice_delivery_method TEXT", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
+    ["clients", ["city TEXT", "tax_id TEXT", "weekly_closed_day TEXT", "invoice_delivery_method TEXT", "equivalence_surcharge_enabled INTEGER DEFAULT 0", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
     ["suppliers", ["active INTEGER DEFAULT 1", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
     ["orders", ["unit_price REAL DEFAULT 0", "discount REAL DEFAULT 0", "vat REAL DEFAULT 21", "notes TEXT", "loading_notes TEXT", "driver_notes TEXT", "delivery_date TEXT", "address TEXT", "collection_point_id INTEGER", "prepared_by TEXT", "shipped_by TEXT", "delivered_by TEXT", "preparation_date TEXT", "shipping_date TEXT", "delivery_city TEXT", "urgent INTEGER DEFAULT 0", "created_by TEXT", "stock_alert INTEGER DEFAULT 0", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
     ["products", ["sku TEXT", "cost_price REAL DEFAULT 0", "category TEXT", "format TEXT", "unit TEXT", "vat REAL DEFAULT 21", "stock_reserved REAL DEFAULT 0", "active INTEGER DEFAULT 1", "product_status TEXT DEFAULT 'Activo'", "min_stock REAL DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
@@ -876,10 +921,13 @@ try { db.exec("ALTER TABLE inventory_movements ADD COLUMN stock_effect REAL"); }
 for (const [table, columns] of [
   ["products", ["photo_name TEXT", "photo_mime TEXT", "photo_data TEXT", "photo_url TEXT", "photo_public_id TEXT", "photo_thumbnail_url TEXT", "photo_web_url TEXT", "photo_bytes INTEGER DEFAULT 0", "photo_width INTEGER DEFAULT 0", "photo_height INTEGER DEFAULT 0", "photo_format TEXT", "description TEXT", "category_code TEXT", "warehouse_id INTEGER", "preorder INTEGER DEFAULT 1", "product_tracking_code TEXT DEFAULT 'Sin seguimiento'", "inventory_valuation_method TEXT DEFAULT 'FIFO'", "last_direct_cost REAL DEFAULT 0", "accounting_product_group TEXT DEFAULT 'Mercaderías'", "accounting_vat_group TEXT DEFAULT '21%'", "inventory_register_group TEXT DEFAULT 'Mercaderías'", "created_at TEXT", "created_by TEXT", "family TEXT", "subfamily TEXT", "purchase_format TEXT", "sale_format TEXT", "cases_per_pallet REAL DEFAULT 0", "units_per_pallet REAL DEFAULT 0", "weight_kg REAL DEFAULT 0", "volume_m3 REAL DEFAULT 0", "warehouse_location TEXT", "picking_order INTEGER DEFAULT 0", "product_status TEXT DEFAULT 'Activo'", "primary_supplier_id INTEGER", "fixed_supplier INTEGER DEFAULT 0", "target_margin_percent REAL DEFAULT 0", "min_margin_percent REAL DEFAULT 0", "stock_min REAL DEFAULT 0", "stock_target REAL DEFAULT 0", "stock_safety REAL DEFAULT 0", "lot_tracking INTEGER DEFAULT 0", "expiry_tracking INTEGER DEFAULT 0", "returnable_packaging INTEGER DEFAULT 0", "tax_surcharge_percent REAL DEFAULT 0", "extra_tax_name TEXT", "extra_tax_percent REAL DEFAULT 0", "freight_cost REAL DEFAULT 0", "handling_cost REAL DEFAULT 0", "real_cost REAL DEFAULT 0"]],
   ["suppliers", ["tax_id TEXT", "contact TEXT", "payment_terms TEXT", "city TEXT", "latitude REAL", "longitude REAL", "geocoding_status TEXT DEFAULT 'Pendiente'", "minimum_order REAL DEFAULT 0", "transport_cost REAL DEFAULT 0", "lead_time_days INTEGER DEFAULT 0", "reliability_percent REAL DEFAULT 0", "promotions TEXT", "rappel_percent REAL DEFAULT 0", "active INTEGER DEFAULT 1", "external_code TEXT", "source_system TEXT", "source_warehouse_code TEXT", "source_created_at TEXT", "source_closed_at TEXT", "source_balance REAL DEFAULT 0", "source_overdue_balance REAL DEFAULT 0", "source_payments REAL DEFAULT 0"]],
-  ["clients", ["city TEXT", "tax_id TEXT", "external_code TEXT", "source_system TEXT", "active INTEGER DEFAULT 1", "billing_address TEXT", "billing_city TEXT", "opening_time TEXT", "closing_time TEXT", "weekly_closed_day TEXT", "invoice_delivery_method TEXT", "latitude REAL", "longitude REAL", "geocoded_at TEXT", "geocoding_status TEXT DEFAULT 'Pendiente'", "payment_method_code TEXT", "payment_terms_code TEXT", "source_warehouse_code TEXT", "source_created_at TEXT", "source_closed_at TEXT", "source_balance REAL DEFAULT 0", "source_overdue_balance REAL DEFAULT 0", "source_sales REAL DEFAULT 0", "source_payments REAL DEFAULT 0"]],
+  ["clients", ["city TEXT", "tax_id TEXT", "external_code TEXT", "source_system TEXT", "active INTEGER DEFAULT 1", "billing_address TEXT", "billing_city TEXT", "opening_time TEXT", "closing_time TEXT", "weekly_closed_day TEXT", "invoice_delivery_method TEXT", "equivalence_surcharge_enabled INTEGER DEFAULT 0", "latitude REAL", "longitude REAL", "geocoded_at TEXT", "geocoding_status TEXT DEFAULT 'Pendiente'", "payment_method_code TEXT", "payment_terms_code TEXT", "source_warehouse_code TEXT", "source_created_at TEXT", "source_closed_at TEXT", "source_balance REAL DEFAULT 0", "source_overdue_balance REAL DEFAULT 0", "source_sales REAL DEFAULT 0", "source_payments REAL DEFAULT 0"]],
   ["products", ["external_code TEXT", "source_system TEXT", "active INTEGER DEFAULT 1", "source_type TEXT", "source_substitute TEXT", "assembly_item INTEGER DEFAULT 0", "cost_adjusted INTEGER DEFAULT 0", "default_split_template TEXT", "source_supplier_code TEXT", "source_created_at TEXT", "source_closed_at TEXT"]],
   ["purchase_orders", ["validation_status TEXT DEFAULT 'Pendiente de validar'", "request_id INTEGER", "supplier_ids TEXT", "comparison TEXT", "supplier_invoice_code TEXT", "invoice_date TEXT", "payment_terms_snapshot TEXT", "payment_due_date TEXT", "payment_status TEXT DEFAULT 'Pendiente'", "payment_paid_at TEXT", "payment_reference TEXT", "ocr_file_name TEXT", "ocr_extracted_text TEXT"]],
 ]) for (const column of columns) { try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${column}`); } catch {} }
+for (const [table, columns] of [["suppliers", ["source_dataverse_matched INTEGER DEFAULT 0"]], ["invoices", ["base_amount REAL DEFAULT 0", "vat_amount REAL DEFAULT 0", "equivalence_surcharge_enabled INTEGER DEFAULT 0", "equivalence_surcharge_amount REAL DEFAULT 0", "equivalence_surcharge_breakdown TEXT"]], ["invoice_lines", ["equivalence_surcharge_percent REAL DEFAULT 0", "equivalence_surcharge_amount REAL DEFAULT 0"]]]) {
+  for (const column of columns) { try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${column}`); } catch {} }
+}
 // Horarios independientes de la dirección para planificar futuras rutas.
 for (const [table, columns] of [["clients", ["opening_time TEXT", "closing_time TEXT", "weekly_closed_day TEXT", "invoice_delivery_method TEXT"]], ["collection_points", ["opening_time TEXT", "closing_time TEXT"]]]) {
   for (const column of columns) { try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${column}`); } catch {} }
@@ -981,6 +1029,9 @@ if (!remoteMode) {
 db.exec(
   `CREATE TABLE IF NOT EXISTS order_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,order_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity REAL DEFAULT 0,unit_price REAL DEFAULT 0,discount REAL DEFAULT 0,vat REAL DEFAULT 21,amount REAL DEFAULT 0,barcode_scanned_code TEXT,barcode_scan_status TEXT DEFAULT 'pending',barcode_scanned_at TEXT,barcode_scanned_by TEXT);CREATE TABLE IF NOT EXISTS quote_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,quote_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity REAL DEFAULT 0,unit_price REAL DEFAULT 0,discount REAL DEFAULT 0,vat REAL DEFAULT 21,amount REAL DEFAULT 0);CREATE TABLE IF NOT EXISTS delivery_note_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,delivery_note_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity REAL DEFAULT 0);CREATE TABLE IF NOT EXISTS invoice_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity REAL DEFAULT 0,unit_price REAL DEFAULT 0,discount REAL DEFAULT 0,vat REAL DEFAULT 21,amount REAL DEFAULT 0);`,
 );
+for (const [table, columns] of [["delivery_note_lines", ["description TEXT", "unit_price REAL DEFAULT 0", "vat REAL DEFAULT 21", "amount REAL DEFAULT 0", "line_type TEXT", "accounting_account TEXT"]], ["invoice_lines", ["description TEXT", "line_type TEXT", "accounting_account TEXT"]]]) {
+  for (const column of columns) { try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${column}`); } catch {} }
+}
 db.exec(`CREATE TABLE IF NOT EXISTS invoice_orders(id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_id INTEGER NOT NULL,order_id INTEGER NOT NULL,UNIQUE(invoice_id,order_id),UNIQUE(order_id));`);
 if (!remoteMode) {
   try { db.exec("INSERT OR IGNORE INTO invoice_orders(invoice_id,order_id) SELECT id,order_id FROM invoices WHERE order_id IS NOT NULL"); } catch {}
@@ -1264,25 +1315,31 @@ function haversineKm(aLat, aLon, bLat, bLon) {
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(aLat)) * Math.cos(rad(bLat)) * Math.sin(dLon / 2) ** 2;
   return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
-async function geocodeAddress(address, city) {
+async function searchGeocodingSuggestions(address, city, limit = 1) {
   const normalizedAddress = String(address || "").trim();
   const normalizedCity = String(city || "").trim();
-  if (!normalizedAddress && !normalizedCity) return { latitude: null, longitude: null, geocoded_at: null, geocoding_status: "Pendiente" };
+  if (!normalizedAddress && !normalizedCity) return [];
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 6000);
   try {
     const query = encodeURIComponent([normalizedAddress, normalizedCity, "España"].filter(Boolean).join(", "));
-    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${query}`, {
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&countrycodes=es&limit=${Math.max(1, Math.min(5, Number(limit) || 1))}&q=${query}`, {
       signal: controller.signal,
       headers: { Accept: "application/json", "User-Agent": "ExclusivasInteligentesCRM/2.0 (+https://crm.desarrolladormadrid.com)" },
     });
     if (!response.ok) throw new Error(`Servicio de geocodificación no disponible (${response.status})`);
     const result = await response.json();
-    const latitude = Number(result?.[0]?.lat);
-    const longitude = Number(result?.[0]?.lon);
-    if (Number.isFinite(latitude) && Number.isFinite(longitude)) return { latitude, longitude, geocoded_at: new Date().toISOString(), geocoding_status: "Geolocalizada" };
-  } catch {}
+    return Array.isArray(result) ? result.slice(0, Math.max(1, Math.min(5, Number(limit) || 1))) : [];
+  } catch {
+    return [];
+  }
   finally { clearTimeout(timeout); }
+}
+async function geocodeAddress(address, city) {
+  const result = await searchGeocodingSuggestions(address, city, 1);
+  const latitude = Number(result?.[0]?.lat);
+  const longitude = Number(result?.[0]?.lon);
+  if (Number.isFinite(latitude) && Number.isFinite(longitude)) return { latitude, longitude, geocoded_at: new Date().toISOString(), geocoding_status: "Geolocalizada" };
   return { latitude: null, longitude: null, geocoded_at: null, geocoding_status: "Pendiente" };
 }
 function resolveShipmentStop(shipment) {
@@ -1754,8 +1811,8 @@ function normalizeReturnDisposition(input = {}) {
   };
 }
 const lookupFields = {
-  clients: ["id", "name", "city", "address", "billing_address", "billing_city", "opening_time", "closing_time", "weekly_closed_day", "invoice_delivery_method", "latitude", "longitude", "geocoding_status", "phone", "email", "active", "external_code"],
-  suppliers: ["id", "name", "tax_id", "contact", "phone", "email", "address", "city", "latitude", "longitude", "geocoding_status", "active", "minimum_order", "transport_cost", "lead_time_days", "reliability_percent", "rappel_percent", "external_code"],
+  clients: ["id", "name", "city", "address", "billing_address", "billing_city", "opening_time", "closing_time", "weekly_closed_day", "invoice_delivery_method", "equivalence_surcharge_enabled", "latitude", "longitude", "geocoding_status", "phone", "email", "active", "external_code"],
+  suppliers: ["id", "name", "tax_id", "contact", "phone", "email", "address", "city", "latitude", "longitude", "geocoding_status", "active", "minimum_order", "transport_cost", "lead_time_days", "reliability_percent", "rappel_percent", "external_code", "source_system", "source_warehouse_code", "source_balance", "source_overdue_balance", "source_payments", "source_dataverse_matched"],
   warehouses: ["id", "name", "address"],
   collection_points: ["id", "code", "name", "client_id", "address", "city", "contact", "phone", "email", "opening_hours", "opening_time", "closing_time", "geocoding_status", "latitude", "longitude"],
   // Listado compacto: la tabla no necesita descargar todos los metadatos ni
@@ -1765,7 +1822,7 @@ const lookupFields = {
   orders: ["id", "code", "client_id", "status", "amount", "created_at", "updated_at", "delivery_date", "preparation_date", "shipping_date", "address", "delivery_city", "collection_point_id", "urgent", "stock_alert", "loading_notes", "driver_notes"],
   shipments: ["id", "code", "order_id", "client_id", "collection_point_id", "status", "expected_delivery_at", "preparation_date", "address", "delivery_city", "delivery_window_start", "delivery_window_end", "carrier", "packages", "incidents", "notes", "driver_notes", "invoice_delivery_method", "prepared_at", "prepared_by", "preparation_closed_at", "preparation_closed_by", "shipped_at", "shipped_by", "departure_at", "delivered_at", "delivered_by", "delivery_signature_status", "delivery_recipient_name", "delivery_signature_at", "delivery_signature_by", "delivery_signature_note", "payment_received_status", "payment_received_amount", "payment_received_method", "payment_received_reference", "payment_received_note", "payment_received_at", "payment_received_by", "public_tracking_token"],
   order_lines: ["id", "order_id", "product_id", "quantity", "quantity_requested", "quantity_unit", "prepared", "prepared_quantity", "preparation_status", "incident_resolution"],
-  invoices: ["id", "code", "order_id", "client_id", "amount", "status", "created_at", "issue_date", "due_date", "client_name_snapshot", "client_legal_name_snapshot", "client_tax_id_snapshot", "client_billing_address_snapshot", "client_billing_city_snapshot", "client_delivery_address_snapshot", "client_delivery_city_snapshot"],
+  invoices: ["id", "code", "order_id", "client_id", "amount", "base_amount", "vat_amount", "equivalence_surcharge_enabled", "equivalence_surcharge_amount", "equivalence_surcharge_breakdown", "status", "created_at", "issue_date", "due_date", "client_name_snapshot", "client_legal_name_snapshot", "client_tax_id_snapshot", "client_billing_address_snapshot", "client_billing_city_snapshot", "client_delivery_address_snapshot", "client_delivery_city_snapshot"],
   purchase_orders: ["id", "code", "supplier_id", "status", "order_date", "expected_date", "amount", "validation_status", "supplier_invoice_code", "invoice_date", "payment_terms_snapshot", "payment_due_date", "payment_status", "payment_paid_at", "payment_reference"],
   goods_receipts: ["id", "code", "counterparty_type", "client_id", "supplier_id", "purchase_order_id", "purchase_invoice_id", "warehouse_id", "receipt_date", "status", "validation_status", "validated_by", "validated_at", "stock_applied", "stock_applied_at", "stock_applied_by", "line_count", "incident_count", "received_by", "notes"],
   goods_receipt_lines: ["id", "receipt_id", "product_id", "product_name_snapshot", "expected_quantity", "received_quantity", "quantity_unit", "damaged_quantity", "substituted_quantity", "substitute_product_id", "unit_cost", "expected_value", "received_value", "economic_difference", "status", "lot_id", "lot_code", "expiry_date", "notes", "location_verified_status", "location_verified_code", "location_verified_reason", "location_verified_by", "location_verified_at"],
@@ -2234,6 +2291,11 @@ export async function crmApiHandler(req, res) {
     try {
       if (p[1] === "version" && req.method === "GET") {
         return send(res, 200, { ok: true, version: APP_VERSION, environment: process.env.NODE_ENV || "production", database: databaseSource() });
+      }
+      if (p[1] === "geocode" && req.method === "GET") {
+        const requestUrl = new URL(req.url, "http://local");
+        const results = await searchGeocodingSuggestions(requestUrl.searchParams.get("address"), requestUrl.searchParams.get("city"), 5);
+        return send(res, 200, results.map((item) => ({ place_id: item.place_id, display_name: item.display_name, lat: item.lat, lon: item.lon, address: item.address || {} })));
       }
       if (p[1] === "runtime" && p[2] === "database" && req.method === "GET") {
         return send(res, 200, {
@@ -3959,9 +4021,17 @@ export async function crmApiHandler(req, res) {
             suggestion = { id: Number(created.lastInsertRowid) };
             pendingSuggestions.set(Number(row.product_id), suggestion);
           }
-          const comparisons = (offersByProduct.get(Number(row.product_id)) || []).map((offer) => ({ ...offer, supplier_name: suppliersById.get(Number(offer.supplier_id))?.name || `Proveedor #${offer.supplier_id}`, real_cost: Number(offer.unit_cost || 0) + Number(offer.transport_cost || 0) / Math.max(1, Number(offer.minimum_order || 1)) - (Number(offer.unit_cost || 0) * Number(offer.rappel_percent || 0) / 100) })).sort((a,b) => Number(a.real_cost) - Number(b.real_cost));
           const defaultSupplier = suppliersById.get(Number(row.primary_supplier_id || row.supplier_id));
-          return { ...row, suggestion_id: suggestion.id, available_stock: available, suggested_quantity: quantity, reason: `Stock disponible ${available} por debajo del mínimo ${row.stock_min || row.min_stock || 0}`, recommended_supplier: comparisons[0] || (defaultSupplier ? { supplier_id: defaultSupplier.id, supplier_name: defaultSupplier.name, real_cost: Number(row.real_cost || row.cost_price || 0), lead_time_days: defaultSupplier.lead_time_days || 0, reliability_percent: defaultSupplier.reliability_percent || 0 } : null), comparisons };
+          const pricedComparisons = (offersByProduct.get(Number(row.product_id)) || []).map((offer) => ({ ...offer, supplier_name: suppliersById.get(Number(offer.supplier_id))?.name || `Proveedor #${offer.supplier_id}`, real_cost: Number(offer.unit_cost || 0) + Number(offer.transport_cost || 0) / Math.max(1, Number(offer.minimum_order || 1)) - (Number(offer.unit_cost || 0) * Number(offer.rappel_percent || 0) / 100), has_price: Number(offer.unit_cost || 0) > 0, source: "Precio registrado" }));
+          if (defaultSupplier && !pricedComparisons.some((offer) => Number(offer.supplier_id) === Number(defaultSupplier.id))) {
+            const defaultCost = Number(row.real_cost || row.cost_price || 0);
+            pricedComparisons.push({ id: `primary-${row.product_id}-${defaultSupplier.id}`, supplier_id: defaultSupplier.id, supplier_name: defaultSupplier.name, real_cost: defaultCost > 0 ? defaultCost : null, lead_time_days: defaultSupplier.lead_time_days || 0, reliability_percent: defaultSupplier.reliability_percent || 0, has_price: defaultCost > 0, source: "Proveedor principal" });
+          }
+          const knownSupplierIds = new Set(pricedComparisons.map((offer) => Number(offer.supplier_id)));
+          const candidateComparisons = suppliers.filter((supplier) => !knownSupplierIds.has(Number(supplier.id))).map((supplier) => ({ id: `candidate-${row.product_id}-${supplier.id}`, supplier_id: supplier.id, supplier_name: supplier.name, real_cost: null, lead_time_days: supplier.lead_time_days || 0, reliability_percent: supplier.reliability_percent || 0, has_price: false, source: "Sin precio registrado" }));
+          const comparisons = [...pricedComparisons, ...candidateComparisons].sort((a, b) => (a.real_cost === null ? 1 : b.real_cost === null ? -1 : Number(a.real_cost) - Number(b.real_cost)) || String(a.supplier_name).localeCompare(String(b.supplier_name), "es"));
+          const recommendedSupplier = pricedComparisons.filter((offer) => offer.has_price).sort((a, b) => Number(a.real_cost) - Number(b.real_cost))[0] || null;
+          return { ...row, suggestion_id: suggestion.id, available_stock: available, suggested_quantity: quantity, reason: `Stock disponible ${available} por debajo del mínimo ${row.stock_min || row.min_stock || 0}`, recommended_supplier: recommendedSupplier, comparisons };
         });
         return send(res, 200, result);
       }
@@ -4003,7 +4073,7 @@ export async function crmApiHandler(req, res) {
         const snapshot = invoiceSnapshotData({ clientId: orders[0].client_id, orders });
         if (!remoteMode) db.exec("BEGIN");
         try {
-          const created = db.prepare("INSERT INTO invoices(code,order_id,client_id,amount,status,issue_date,created_at,updated_at,client_name_snapshot,client_legal_name_snapshot,client_tax_id_snapshot,client_billing_address_snapshot,client_billing_city_snapshot,client_delivery_address_snapshot,client_delivery_city_snapshot,client_email_snapshot,client_phone_snapshot,customer_snapshot_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(code, ids[0], orders[0].client_id, total, "Pendiente", new Date().toISOString().slice(0, 10), new Date().toISOString(), new Date().toISOString(), snapshot.client_name_snapshot, snapshot.client_legal_name_snapshot, snapshot.client_tax_id_snapshot, snapshot.client_billing_address_snapshot, snapshot.client_billing_city_snapshot, snapshot.client_delivery_address_snapshot, snapshot.client_delivery_city_snapshot, snapshot.client_email_snapshot, snapshot.client_phone_snapshot, snapshot.customer_snapshot_json);
+          const created = db.prepare("INSERT INTO invoices(code,order_id,client_id,amount,status,issue_date,created_at,updated_at,client_name_snapshot,client_legal_name_snapshot,client_tax_id_snapshot,client_billing_address_snapshot,client_billing_city_snapshot,client_delivery_address_snapshot,client_delivery_city_snapshot,client_email_snapshot,client_phone_snapshot,equivalence_surcharge_enabled,customer_snapshot_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(code, ids[0], orders[0].client_id, total, "Pendiente", new Date().toISOString().slice(0, 10), new Date().toISOString(), new Date().toISOString(), snapshot.client_name_snapshot, snapshot.client_legal_name_snapshot, snapshot.client_tax_id_snapshot, snapshot.client_billing_address_snapshot, snapshot.client_billing_city_snapshot, snapshot.client_delivery_address_snapshot, snapshot.client_delivery_city_snapshot, snapshot.client_email_snapshot, snapshot.client_phone_snapshot, snapshot.equivalence_surcharge_enabled, snapshot.customer_snapshot_json);
           const invoiceId = Number(created.lastInsertRowid);
           const line = db.prepare("INSERT INTO invoice_lines(invoice_id,product_id,quantity,unit_price,discount,vat,amount) SELECT ?,product_id,quantity,unit_price,discount,vat,amount FROM order_lines WHERE order_id=?");
           const relation = db.prepare("INSERT INTO invoice_orders(invoice_id,order_id) VALUES(?,?)");
@@ -4015,14 +4085,16 @@ export async function crmApiHandler(req, res) {
               const legacy = orders.find((row) => Number(row.id) === Number(id));
               if (legacy?.product_id && Number(legacy.quantity || 0) > 0) db.prepare("INSERT INTO invoice_lines(invoice_id,product_id,quantity,unit_price,discount,vat,amount) VALUES(?,?,?,?,?,?,?)").run(invoiceId, legacy.product_id, Number(legacy.quantity), Number(legacy.unit_price || 0), Number(legacy.discount || 0), Number(legacy.vat || 21), Number(legacy.amount || 0));
             }
+            appendGtrInvoiceLine(invoiceId);
             db.prepare("UPDATE orders SET status='Facturado',updated_at=? WHERE id=?").run(new Date().toISOString(), id);
           }
+          const taxTotals = recalculateInvoiceTax(invoiceId, actor);
           if (!remoteMode) db.exec("COMMIT");
           invalidateReadCache("invoice_lines");
           invalidateReadCache("orders");
           let pdf = null;
           try { pdf = await ensureInvoicePdf(invoiceId, actor); } catch (error) { pdf = { pdf_status: "Pendiente · PDF no generado", pdf_error: error?.message || "No se pudo generar el PDF" }; }
-          return send(res, 201, { id: invoiceId, code, amount: total, client_id: orders[0].client_id, order_ids: ids, status: "Pendiente", pdf_status: pdf.pdf_status, pdf_generated_at: pdf.pdf_generated_at || null, share_url: pdf.share_token ? invoiceShareUrl(req, pdf.share_token) : null, pdf_error: pdf.pdf_error || null });
+          return send(res, 201, { id: invoiceId, code, amount: Number(taxTotals?.total_amount ?? total), base_amount: Number(taxTotals?.base_amount ?? total), vat_amount: Number(taxTotals?.vat_amount || 0), equivalence_surcharge_amount: Number(taxTotals?.equivalence_surcharge_amount || 0), client_id: orders[0].client_id, order_ids: ids, status: "Pendiente", pdf_status: pdf.pdf_status, pdf_generated_at: pdf.pdf_generated_at || null, share_url: pdf.share_token ? invoiceShareUrl(req, pdf.share_token) : null, pdf_error: pdf.pdf_error || null });
         } catch (error) { if (!remoteMode) { try { db.exec("ROLLBACK"); } catch {} } return send(res, 500, { error: error?.message || "No se pudo crear la factura" }); }
       }
       if (
@@ -4052,12 +4124,12 @@ export async function crmApiHandler(req, res) {
           String(Date.now()).slice(-5);
         const fields = delivery
           ? "code,order_id,client_id,status"
-          : "code,order_id,client_id,amount,status,issue_date,created_at,updated_at,client_name_snapshot,client_legal_name_snapshot,client_tax_id_snapshot,client_billing_address_snapshot,client_billing_city_snapshot,client_delivery_address_snapshot,client_delivery_city_snapshot,client_email_snapshot,client_phone_snapshot,customer_snapshot_json";
+          : "code,order_id,client_id,amount,status,issue_date,created_at,updated_at,client_name_snapshot,client_legal_name_snapshot,client_tax_id_snapshot,client_billing_address_snapshot,client_billing_city_snapshot,client_delivery_address_snapshot,client_delivery_city_snapshot,client_email_snapshot,client_phone_snapshot,equivalence_surcharge_enabled,customer_snapshot_json";
         const invoiceSnapshot = delivery ? null : invoiceSnapshotData({ clientId: order.client_id, order });
         const now = new Date().toISOString();
         const values = delivery
           ? [code, order.id, order.client_id, "Pendiente"]
-          : [code, order.id, order.client_id, order.amount || 0, "Pendiente", now.slice(0, 10), now, now, invoiceSnapshot.client_name_snapshot, invoiceSnapshot.client_legal_name_snapshot, invoiceSnapshot.client_tax_id_snapshot, invoiceSnapshot.client_billing_address_snapshot, invoiceSnapshot.client_billing_city_snapshot, invoiceSnapshot.client_delivery_address_snapshot, invoiceSnapshot.client_delivery_city_snapshot, invoiceSnapshot.client_email_snapshot, invoiceSnapshot.client_phone_snapshot, invoiceSnapshot.customer_snapshot_json];
+          : [code, order.id, order.client_id, order.amount || 0, "Pendiente", now.slice(0, 10), now, now, invoiceSnapshot.client_name_snapshot, invoiceSnapshot.client_legal_name_snapshot, invoiceSnapshot.client_tax_id_snapshot, invoiceSnapshot.client_billing_address_snapshot, invoiceSnapshot.client_billing_city_snapshot, invoiceSnapshot.client_delivery_address_snapshot, invoiceSnapshot.client_delivery_city_snapshot, invoiceSnapshot.client_email_snapshot, invoiceSnapshot.client_phone_snapshot, invoiceSnapshot.equivalence_surcharge_enabled, invoiceSnapshot.customer_snapshot_json];
         const created = db
           .prepare(`INSERT INTO ${table} (${fields}) VALUES (${values.map(() => "?").join(",")})`)
           .run(...values);
@@ -4070,6 +4142,9 @@ export async function crmApiHandler(req, res) {
           db.prepare(
             "INSERT INTO invoice_lines(invoice_id,product_id,quantity,unit_price,discount,vat,amount) SELECT ?,product_id,quantity,unit_price,discount,vat,amount FROM order_lines WHERE order_id=?",
           ).run(newId, order.id);
+        if (delivery) appendGtrDeliveryLine(newId);
+        else appendGtrInvoiceLine(newId);
+        const taxTotals = delivery ? null : recalculateInvoiceTax(newId, actor);
         if (!delivery) db.prepare("INSERT INTO invoice_orders(invoice_id,order_id) VALUES(?,?)").run(newId, order.id);
         db.prepare("UPDATE orders SET status=? WHERE id=?").run(
           delivery ? "Preparado" : "Facturado",
@@ -4090,7 +4165,10 @@ export async function crmApiHandler(req, res) {
           code,
           order_id: order.id,
           client_id: order.client_id,
-          amount: order.amount || 0,
+          amount: Number(taxTotals?.total_amount ?? order.amount ?? 0),
+          base_amount: Number(taxTotals?.base_amount ?? order.amount ?? 0),
+          vat_amount: Number(taxTotals?.vat_amount || 0),
+          equivalence_surcharge_amount: Number(taxTotals?.equivalence_surcharge_amount || 0),
           status: "Pendiente",
           pdf_status: pdf?.pdf_status || null,
           pdf_generated_at: pdf?.pdf_generated_at || null,
@@ -4111,20 +4189,22 @@ export async function crmApiHandler(req, res) {
         ).get(delivery.id, delivery.order_id || 0, delivery.order_id || 0);
         if (existing) return send(res, 409, { error: `La factura ${existing.code} ya existe`, ...existing });
         const code = `FAC-${new Date().getFullYear()}-${String(Date.now()).slice(-5)}`;
+        const snapshot = invoiceSnapshotData({ clientId: delivery.client_id, order });
         const created = db.prepare(
-          "INSERT INTO invoices(code,order_id,delivery_note_id,client_id,amount,status) VALUES(?,?,?,?,?,?)",
-        ).run(code, delivery.order_id || null, delivery.id, delivery.client_id, order?.amount || 0, "Pendiente");
+          "INSERT INTO invoices(code,order_id,delivery_note_id,client_id,amount,status,issue_date,created_at,updated_at,client_name_snapshot,client_legal_name_snapshot,client_tax_id_snapshot,client_billing_address_snapshot,client_billing_city_snapshot,client_delivery_address_snapshot,client_delivery_city_snapshot,client_email_snapshot,client_phone_snapshot,equivalence_surcharge_enabled,customer_snapshot_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ).run(code, delivery.order_id || null, delivery.id, delivery.client_id, order?.amount || 0, "Pendiente", new Date().toISOString().slice(0, 10), new Date().toISOString(), new Date().toISOString(), snapshot.client_name_snapshot, snapshot.client_legal_name_snapshot, snapshot.client_tax_id_snapshot, snapshot.client_billing_address_snapshot, snapshot.client_billing_city_snapshot, snapshot.client_delivery_address_snapshot, snapshot.client_delivery_city_snapshot, snapshot.client_email_snapshot, snapshot.client_phone_snapshot, snapshot.equivalence_surcharge_enabled, snapshot.customer_snapshot_json);
         const invoiceId = Number(created.lastInsertRowid);
         db.prepare(
-          "INSERT INTO invoice_lines(invoice_id,product_id,quantity,unit_price,discount,vat,amount) SELECT ?,d.product_id,d.quantity,COALESCE(o.unit_price,0),COALESCE(o.discount,0),COALESCE(o.vat,21),COALESCE(o.amount,d.quantity*COALESCE(o.unit_price,0)) FROM delivery_note_lines d LEFT JOIN order_lines o ON o.order_id=? AND o.product_id=d.product_id WHERE d.delivery_note_id=?",
+          "INSERT INTO invoice_lines(invoice_id,product_id,quantity,unit_price,discount,vat,amount,description,line_type,accounting_account) SELECT ?,d.product_id,d.quantity,COALESCE(d.unit_price,o.unit_price,0),COALESCE(o.discount,0),COALESCE(d.vat,o.vat,21),COALESCE(d.amount,o.amount,d.quantity*COALESCE(d.unit_price,o.unit_price,0)),d.description,d.line_type,d.accounting_account FROM delivery_note_lines d LEFT JOIN order_lines o ON o.order_id=? AND o.product_id=d.product_id WHERE d.delivery_note_id=?",
         ).run(invoiceId, delivery.order_id || 0, delivery.id);
+        const taxTotals = recalculateInvoiceTax(invoiceId, actor);
         if (delivery.order_id) db.prepare("INSERT INTO invoice_orders(invoice_id,order_id) VALUES(?,?)").run(invoiceId, delivery.order_id);
         if (delivery.order_id) db.prepare("UPDATE orders SET status='Facturado',updated_at=? WHERE id=?").run(new Date().toISOString(), delivery.order_id);
         invalidateReadCache("invoice_lines");
         invalidateReadCache("orders");
         let pdf = null;
         try { pdf = await ensureInvoicePdf(invoiceId, actor); } catch (error) { pdf = { pdf_status: "Pendiente · PDF no generado", pdf_error: error?.message || "No se pudo generar el PDF" }; }
-        return send(res, 201, { id: invoiceId, code, order_id: delivery.order_id || null, delivery_note_id: delivery.id, client_id: delivery.client_id, amount: order?.amount || 0, status: "Pendiente", pdf_status: pdf.pdf_status, pdf_generated_at: pdf.pdf_generated_at || null, share_url: pdf.share_token ? invoiceShareUrl(req, pdf.share_token) : null, pdf_error: pdf.pdf_error || null });
+        return send(res, 201, { id: invoiceId, code, order_id: delivery.order_id || null, delivery_note_id: delivery.id, client_id: delivery.client_id, amount: Number(taxTotals?.total_amount ?? order?.amount ?? 0), base_amount: Number(taxTotals?.base_amount ?? order?.amount ?? 0), vat_amount: Number(taxTotals?.vat_amount || 0), equivalence_surcharge_amount: Number(taxTotals?.equivalence_surcharge_amount || 0), status: "Pendiente", pdf_status: pdf.pdf_status, pdf_generated_at: pdf.pdf_generated_at || null, share_url: pdf.share_token ? invoiceShareUrl(req, pdf.share_token) : null, pdf_error: pdf.pdf_error || null });
       }
       if (t === "summary" && req.method === "GET") {
         const query = new URL(req.url, "http://local").searchParams;
@@ -4150,7 +4230,6 @@ export async function crmApiHandler(req, res) {
           { sql: "SELECT COUNT(*) total FROM payments WHERE CAST(COALESCE(deleted,0) AS INTEGER)=0" },
           { sql: "SELECT COUNT(*) total FROM suppliers WHERE CAST(COALESCE(deleted,0) AS INTEGER)=0 AND CAST(COALESCE(active,1) AS INTEGER)=1" },
           { sql: `SELECT o.id order_id,o.code order_code,o.client_id,c.name client_name,o.delivery_date,o.status,o.urgent FROM orders o LEFT JOIN clients c ON c.id=o.client_id LEFT JOIN shipments s ON s.order_id=o.id AND CAST(COALESCE(s.deleted,0) AS INTEGER)=0 WHERE CAST(COALESCE(o.deleted,0) AS INTEGER)=0 AND LOWER(COALESCE(o.code,'')) NOT GLOB '__test*' AND o.status NOT IN ('Entregado','Cancelado') AND (s.id IS NULL OR s.status IN ('Preparando','Preparado con incidencia')) ORDER BY CASE WHEN o.urgent=1 THEN 0 ELSE 1 END,o.delivery_date,o.id LIMIT 8` },
-          { sql: `SELECT grl.id line_id,gr.code receipt_code,gr.supplier_id,s.name supplier_name,gr.receipt_date,grl.product_name_snapshot FROM goods_receipt_lines grl JOIN goods_receipts gr ON gr.id=grl.receipt_id LEFT JOIN suppliers s ON s.id=gr.supplier_id WHERE CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 AND CAST(COALESCE(grl.deleted,0) AS INTEGER)=0 AND COALESCE(grl.location_verified_status,'Pendiente')='Pendiente' AND COALESCE(gr.status,'') NOT IN ('Cancelada','Anulada') ORDER BY gr.receipt_date DESC,grl.id DESC LIMIT 8` },
           { sql: `SELECT i.id invoice_id,i.code invoice_code,i.client_id,c.name client_name,i.amount,i.due_date,i.status FROM invoices i LEFT JOIN clients c ON c.id=i.client_id WHERE CAST(COALESCE(i.deleted,0) AS INTEGER)=0 AND COALESCE(i.status,'Pendiente') NOT IN ('Cobrada','Pagada','Anulada') AND date(COALESCE(i.due_date,i.issue_date,i.created_at)) < date(?) ORDER BY date(COALESCE(i.due_date,i.issue_date,i.created_at)) ASC,i.id ASC LIMIT 8`, args: [today] },
           { sql: `SELECT id,company_name,contact_name,email,created_at,status FROM web_registrations WHERE COALESCE(status,'Pendiente de validar')='Pendiente de validar' ORDER BY id DESC LIMIT 8` },
         ];
@@ -4163,9 +4242,8 @@ export async function crmApiHandler(req, res) {
         const importantNotes = rowsAt(3);
         const alerts = [
           ...rowsAt(14).map((row) => ({ type: "preparation", severity: Number(row.urgent || 0) === 1 ? "critical" : "warning", title: Number(row.urgent || 0) === 1 ? "Pedido urgente sin cerrar" : "Preparación pendiente", detail: `${row.order_code || "Pedido"} · ${row.client_name || "Cliente sin asignar"}${row.delivery_date ? ` · entrega ${row.delivery_date}` : ""}`, module: "Pedidos", record_id: row.order_id, order_id: row.order_id, order_code: row.order_code })),
-          ...rowsAt(15).map((row) => ({ type: "location", severity: "warning", title: "Entrada sin ubicación verificada", detail: `${row.receipt_code || "Entrada"} · ${row.product_name_snapshot || "Producto pendiente"}${row.supplier_name ? ` · ${row.supplier_name}` : ""}`, module: "Entradas", record_id: row.line_id })),
-          ...rowsAt(16).map((row) => ({ type: "invoice", severity: "critical", title: "Factura vencida", detail: `${row.invoice_code || "Factura"} · ${row.client_name || "Cliente sin asignar"} · ${Number(row.amount || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}`, module: "Facturas", record_id: row.invoice_id })),
-          ...rowsAt(17).map((row) => ({ type: "web-client", severity: "info", title: "Nuevo cliente web por revisar", detail: `${row.company_name} · ${row.contact_name || row.email}`, module: "Clientes", record_id: row.id })),
+          ...rowsAt(15).map((row) => ({ type: "invoice", severity: "critical", title: "Factura vencida", detail: `${row.invoice_code || "Factura"} · ${row.client_name || "Cliente sin asignar"} · ${Number(row.amount || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}`, module: "Facturas", record_id: row.invoice_id })),
+          ...rowsAt(16).map((row) => ({ type: "web-client", severity: "info", title: "Nuevo cliente web por revisar", detail: `${row.company_name} · ${row.contact_name || row.email}`, module: "Clientes", record_id: row.id })),
         ];
         return send(res, 200, {
           summary: {
@@ -4446,41 +4524,53 @@ export async function crmApiHandler(req, res) {
           delete d.lines;
         }
         if (t === "purchase_orders") {
-          if (!String(d.code || "").trim() || !d.supplier_id || !String(d.order_date || "").trim()) {
-            return send(res, 400, { error: "La compra debe indicar código, proveedor y fecha" });
-          }
-          const supplier = db.prepare("SELECT payment_terms FROM suppliers WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(d.supplier_id));
-          if (!supplier) return send(res, 400, { error: "El proveedor de la compra no existe" });
-          const invoiceDate = String(d.invoice_date || d.order_date).slice(0, 10);
-          const paymentTermsSnapshot = String(d.payment_terms_snapshot || supplier.payment_terms || "30 días").trim() || "30 días";
-          d.invoice_date = invoiceDate;
-          d.payment_terms_snapshot = paymentTermsSnapshot;
-          d.payment_due_date = String(d.payment_due_date || "").slice(0, 10) || addCalendarDays(invoiceDate, paymentTermsDays(paymentTermsSnapshot));
-          d.payment_status = String(d.payment_status || "Pendiente").trim() || "Pendiente";
+          d.code = String(d.code || `COM-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`).trim();
           d.status = String(d.status || "Borrador").trim();
           if (!["Borrador", "Enviado", "En tránsito", "Parcialmente recibido", "Recibido", "Recibido con incidencia", "Cancelado"].includes(d.status)) return send(res, 400, { error: "El estado del pedido de compra no es válido" });
+          const isDraft = d.status === "Borrador";
+          const supplierId = Number(d.supplier_id || 0);
+          if (!isDraft && (!supplierId || !String(d.order_date || "").trim())) return send(res, 400, { error: "Para confirmar la compra debes indicar proveedor y fecha" });
+          const supplier = supplierId ? db.prepare("SELECT payment_terms FROM suppliers WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(supplierId) : null;
+          if (supplierId && !supplier) return send(res, 400, { error: "El proveedor de la compra no existe" });
+          d.supplier_id = supplierId || null;
+          const invoiceDate = String(d.invoice_date || d.order_date || "").slice(0, 10);
+          const paymentTermsSnapshot = String(d.payment_terms_snapshot || supplier?.payment_terms || "30 días").trim() || "30 días";
+          if (invoiceDate) d.invoice_date = invoiceDate;
+          if (supplier || d.payment_terms_snapshot) d.payment_terms_snapshot = paymentTermsSnapshot;
+          if (invoiceDate && (supplier || d.payment_due_date)) d.payment_due_date = String(d.payment_due_date || "").slice(0, 10) || addCalendarDays(invoiceDate, paymentTermsDays(paymentTermsSnapshot));
+          d.payment_status = String(d.payment_status || "Pendiente").trim() || "Pendiente";
           if (!Array.isArray(d.lines) || !d.lines.length) {
+            if (isDraft) {
+              purchaseOrderLines = [];
+              d.amount = 0;
+              delete d.lines;
+            } else {
             return send(res, 400, { error: "Añade al menos una línea de producto a la compra" });
+            }
+          } else {
+            purchaseOrderLines = d.lines.map((line) => {
+              const productId = Number(line.product_id);
+              const quantity = Number(line.quantity || 0);
+              const unitCost = Number(line.unit_cost ?? line.unit_price ?? 0);
+              return {
+                productId,
+                quantity,
+                unitCost,
+                amount: Number(line.amount ?? quantity * unitCost),
+                quantityUnit: String(line.quantity_unit || "unidad").trim().slice(0, 40) || "unidad",
+                supplierProductName: String(line.supplier_product_name || line.alias_name || "").trim().slice(0, 180),
+                supplierRef: String(line.supplier_ref || "").trim().slice(0, 120),
+                supplierAliasId: Number(line.supplier_alias_id || 0) || null,
+                sourceText: String(line.source_text || "").trim().slice(0, 500),
+              };
+            }).filter((line) => line.productId && line.quantity > 0 && Number.isFinite(line.unitCost) && line.unitCost >= 0);
+            if (!purchaseOrderLines.length) {
+              if (!isDraft) return send(res, 400, { error: "Cada línea debe indicar un producto y una cantidad mayor que cero" });
+              purchaseOrderLines = [];
+            }
+            d.amount = purchaseOrderLines.reduce((total, line) => total + line.amount, 0);
+            delete d.lines;
           }
-          purchaseOrderLines = d.lines.map((line) => {
-            const productId = Number(line.product_id);
-            const quantity = Number(line.quantity || 0);
-            const unitCost = Number(line.unit_cost ?? line.unit_price ?? 0);
-            return {
-              productId,
-              quantity,
-              unitCost,
-              amount: Number(line.amount ?? quantity * unitCost),
-              quantityUnit: String(line.quantity_unit || "unidad").trim().slice(0, 40) || "unidad",
-              supplierProductName: String(line.supplier_product_name || line.alias_name || "").trim().slice(0, 180),
-              supplierRef: String(line.supplier_ref || "").trim().slice(0, 120),
-              supplierAliasId: Number(line.supplier_alias_id || 0) || null,
-              sourceText: String(line.source_text || "").trim().slice(0, 500),
-            };
-          }).filter((line) => line.productId && line.quantity > 0 && Number.isFinite(line.unitCost) && line.unitCost >= 0);
-          if (!purchaseOrderLines.length) return send(res, 400, { error: "Cada línea debe indicar un producto y una cantidad mayor que cero" });
-          d.amount = purchaseOrderLines.reduce((total, line) => total + line.amount, 0);
-          delete d.lines;
         }
         if (t === "payments") {
           const amount = Number(d.amount);
@@ -4691,7 +4781,7 @@ export async function crmApiHandler(req, res) {
           const names = stockAlerts.map((item) => db.prepare("SELECT name FROM products WHERE id=?").get(item.product_id)?.name || `Producto #${item.product_id}`);
           db.prepare("INSERT INTO notes(title,content,priority,module,record_id,important,completed,created_at) VALUES(?,?,?,?,?,?,?,?)").run(`Revisar stock · ${d.code || "Nuevo pedido"}`, `El pedido queda reservado, pero ${names.join(", ")} quedará por debajo del stock mínimo o sin unidades suficientes. Revisa reposición antes de preparar.`, stockShortages.length ? "Urgente" : "Alta", "Stock", Number(r.lastInsertRowid), 1, 0, now);
         }
-        if (t === "invoice_lines" && d.invoice_id) markInvoicePdfStale(d.invoice_id);
+        if (t === "invoice_lines" && d.invoice_id) { recalculateInvoiceTax(d.invoice_id, actor); markInvoicePdfStale(d.invoice_id); }
         if (t === "order_lines" && d.order_id) markCommercialDocumentPdfStale("order", d.order_id);
         if (t === "quote_lines" && d.quote_id) markCommercialDocumentPdfStale("quote", d.quote_id);
         const createdRecord = t === "purchase_orders"
@@ -4754,7 +4844,7 @@ export async function crmApiHandler(req, res) {
         if (!result.changes) return send(res, 404, { error: "Registro no encontrado" });
         if (t === "invoice_lines") {
           const line = db.prepare("SELECT invoice_id FROM invoice_lines WHERE id=?").get(Number(p[2]));
-          if (line?.invoice_id) markInvoicePdfStale(line.invoice_id);
+          if (line?.invoice_id) { recalculateInvoiceTax(line.invoice_id, actor); markInvoicePdfStale(line.invoice_id); }
         }
         if (t === "order_lines") {
           const line = db.prepare("SELECT order_id FROM order_lines WHERE id=?").get(Number(p[2]));
@@ -4786,11 +4876,14 @@ export async function crmApiHandler(req, res) {
         if (t === "purchase_orders") {
           const supplierId = Number(d.supplier_id ?? currentPurchase?.supplier_id ?? 0);
           const supplier = supplierId ? db.prepare("SELECT payment_terms FROM suppliers WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(supplierId) : null;
-          if (!supplier) return send(res, 400, { error: "El proveedor de la compra no existe" });
-          const paymentTermsSnapshot = String(d.payment_terms_snapshot ?? currentPurchase?.payment_terms_snapshot ?? supplier.payment_terms ?? "30 días").trim() || "30 días";
+          const nextStatus = String(d.status ?? currentPurchase?.status ?? "Borrador").trim() || "Borrador";
+          const isDraft = nextStatus === "Borrador";
+          if (!supplier && !isDraft) return send(res, 400, { error: "Para confirmar la compra debes indicar un proveedor" });
+          if (d.supplier_id !== undefined) d.supplier_id = supplierId || null;
+          const paymentTermsSnapshot = String(d.payment_terms_snapshot ?? currentPurchase?.payment_terms_snapshot ?? supplier?.payment_terms ?? "30 días").trim() || "30 días";
           const invoiceDate = String(d.invoice_date ?? currentPurchase?.invoice_date ?? d.order_date ?? currentPurchase?.order_date ?? "").slice(0, 10);
           const paymentFieldsChanged = ["supplier_id", "invoice_date", "order_date", "payment_terms_snapshot", "payment_due_date"].some((field) => d[field] !== undefined);
-          if (paymentFieldsChanged) {
+          if (paymentFieldsChanged && invoiceDate) {
             d.invoice_date = invoiceDate;
             d.payment_terms_snapshot = paymentTermsSnapshot;
             d.payment_due_date = String(d.payment_due_date || "").slice(0, 10) || addCalendarDays(invoiceDate, paymentTermsDays(paymentTermsSnapshot));
@@ -4821,7 +4914,7 @@ export async function crmApiHandler(req, res) {
               supplierAliasId: Number(line.supplier_alias_id || 0) || null,
               sourceText: String(line.source_text || "").trim().slice(0, 500),
             })).filter((line) => line.productId && line.quantity > 0 && Number.isFinite(line.unitCost) && line.unitCost >= 0);
-            if (!purchaseOrderLinesToReplace.length) return send(res, 400, { error: "El pedido debe conservar al menos un producto con cantidad válida" });
+            if (!purchaseOrderLinesToReplace.length && !isDraft) return send(res, 400, { error: "El pedido debe conservar al menos un producto con cantidad válida" });
             d.amount = purchaseOrderLinesToReplace.reduce((sum, line) => sum + line.quantity * line.unitCost, 0);
             delete d.lines;
           }
@@ -5112,7 +5205,7 @@ export async function crmApiHandler(req, res) {
         }
         if (t === "invoice_lines") {
           const line = db.prepare("SELECT invoice_id FROM invoice_lines WHERE id=?").get(Number(p[2]));
-          if (line?.invoice_id) markInvoicePdfStale(line.invoice_id);
+          if (line?.invoice_id) { recalculateInvoiceTax(line.invoice_id, actor); markInvoicePdfStale(line.invoice_id); }
         }
         if (t === "invoices") markInvoicePdfStale(Number(p[2]));
         if (t === "order_lines") {
