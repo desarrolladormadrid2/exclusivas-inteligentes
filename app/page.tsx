@@ -5,6 +5,7 @@ import QRCode from "qrcode";
 // @ts-ignore Tipos incluidos por la librería.
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
+import SupplierPurchasingManager from "./SupplierPurchasingManager";
 import { APP_VERSION } from "./version";
 
 declare global {
@@ -4132,7 +4133,7 @@ function GoodsReceiptForm({ lookups, actor, onCreated }: { lookups: any; actor: 
   const clients = lookups.clients || [];
   const suppliers = lookups.suppliers || [];
   const warehouses = lookups.warehouses || [];
-  const purchaseOrders = (lookups.purchase_orders || []).filter((item: any) => !header.supplier_id || Number(item.supplier_id) === Number(header.supplier_id));
+  const purchaseOrders = (lookups.purchase_orders || []).filter((item: any) => !["Recibido", "Recibida", "Cancelado", "Cancelada"].includes(String(item.status || "")) && (!header.supplier_id || Number(item.supplier_id) === Number(header.supplier_id)));
   const matchingProducts = productSearch.trim()
     ? products.filter((item: any) => `${item.name || ""} ${item.sku || ""} ${item.brand || ""} ${item.category || ""}`.toLowerCase().includes(productSearch.trim().toLowerCase())).slice(0, 8)
     : [];
@@ -4144,6 +4145,24 @@ function GoodsReceiptForm({ lookups, actor, onCreated }: { lookups: any; actor: 
   }
   function updateLine(index: number, field: string, value: any) {
     setLines((current) => current.map((line, lineIndex) => lineIndex === index ? { ...line, [field]: value } : line));
+  }
+  async function loadPurchaseOrder(purchaseOrderId: string) {
+    setHeader((current) => ({ ...current, purchase_order_id: purchaseOrderId }));
+    if (!purchaseOrderId) { setLines([]); return; }
+    setMessage("Cargando las líneas previstas del pedido…");
+    try {
+      const response = await fetch(`/api/purchase_orders/${purchaseOrderId}/detail`);
+      const purchase = await response.json();
+      if (!response.ok) throw new Error(purchase.error || "No se pudo cargar el pedido vinculado.");
+      setHeader((current) => ({ ...current, supplier_id: String(purchase.supplier_id || current.supplier_id), purchase_order_id: purchaseOrderId }));
+      const remainingLines = (purchase.lines || []).filter((line: any) => Number(line.remaining_quantity ?? line.quantity) > 0);
+      if (!remainingLines.length) { setLines([]); setMessage(`${purchase.code}: no quedan cantidades pendientes de recibir.`); return; }
+      setLines(remainingLines.map((line: any) => {
+        const expected = Number(line.remaining_quantity ?? line.quantity ?? 0);
+        return { product_id: String(line.product_id), product_name: line.product_name || "Producto", sku: line.sku || "", expected_quantity: String(expected), received_quantity: String(expected), quantity_unit: line.quantity_unit || "unidad", damaged_quantity: "0", substituted_quantity: "0", substitute_product_id: "", lot_code: "", expiry_date: "", unit_cost: String(Number(line.unit_cost || 0)), status: "Correcta", notes: "", incident_description: "", attachments: [] };
+      }));
+      setMessage(`${purchase.code}: ${remainingLines.length} líneas pendientes cargadas. Ajusta las cantidades recibidas y registra diferencias antes de guardar.`);
+    } catch (error: any) { setMessage(error?.message || "No se pudieron cargar las líneas del pedido."); }
   }
   async function attachLinePhotos(index: number, files: FileList | null) {
     const selected = Array.from(files || []);
@@ -4195,7 +4214,7 @@ function GoodsReceiptForm({ lookups, actor, onCreated }: { lookups: any; actor: 
       <label>Código de entrada<input value={header.code} onChange={(event) => setHeader({ ...header, code: event.target.value })} /></label>
       <label>Origen de la entrada *<select required value={header.counterparty_type} onChange={(event) => setHeader({ ...header, counterparty_type: event.target.value, client_id: "", supplier_id: "", purchase_order_id: "", purchase_invoice_id: "" })}><option value="Proveedor">Proveedor</option><option value="Cliente">Cliente</option></select></label>
       {header.counterparty_type === "Cliente" ? <label>Cliente *<select required value={header.client_id} onChange={(event) => setHeader({ ...header, client_id: event.target.value })}><option value="">Seleccionar cliente…</option>{clients.map((item: any) => <option key={item.id} value={item.id}>{item.name}{item.city ? ` · ${item.city}` : ""}</option>)}</select></label> : <label>Proveedor *<select required value={header.supplier_id} onChange={(event) => setHeader({ ...header, supplier_id: event.target.value, purchase_order_id: "" })}><option value="">Seleccionar proveedor…</option>{suppliers.map((item: any) => <option key={item.id} value={item.id}>{item.name}{item.external_code ? ` · ${item.external_code}` : ""}</option>)}</select></label>}
-      {header.counterparty_type === "Proveedor" && <label>Pedido de compra relacionado<select value={header.purchase_order_id} onChange={(event) => setHeader({ ...header, purchase_order_id: event.target.value })}><option value="">Sin pedido de compra</option>{purchaseOrders.map((item: any) => <option key={item.id} value={item.id}>{item.code} · {item.status}</option>)}</select></label>}
+      {header.counterparty_type === "Proveedor" && <label>Pedido de compra relacionado<select value={header.purchase_order_id} onChange={(event) => void loadPurchaseOrder(event.target.value)}><option value="">Sin pedido de compra</option>{purchaseOrders.map((item: any) => <option key={item.id} value={item.id}>{item.code} · {item.status}</option>)}</select></label>}
       {header.counterparty_type === "Proveedor" && <label>Factura de compra relacionada<select value={header.purchase_invoice_id} onChange={(event) => setHeader({ ...header, purchase_invoice_id: event.target.value })}><option value="">Sin factura vinculada</option>{(lookups.invoices || []).map((item: any) => <option key={item.id} value={item.id}>{item.code} · {item.status || "Pendiente"}</option>)}</select></label>}
       <label>Almacén de destino *<select required value={header.warehouse_id} onChange={(event) => setHeader({ ...header, warehouse_id: event.target.value })}><option value="">Seleccionar almacén…</option>{warehouses.map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       <label>Fecha de recepción *<input required type="date" value={header.receipt_date} onChange={(event) => setHeader({ ...header, receipt_date: event.target.value })} /></label>
@@ -13629,6 +13648,8 @@ function CrmHome({ routeMode = "crm" }: { routeMode?: keyof typeof routeModuleSc
             <PublicPromotionsManager user={currentUser} />
           ) : active === "Altas web" ? (
             <WebRegistrationsManager user={currentUser} />
+          ) : active === "Compras" ? (
+            <SupplierPurchasingManager user={currentUser} onNavigate={setActive} />
           ) : active === "OCR inteligente" ? (
             <OcrIntelligent user={currentUser} />
           ) : active === "Balance" ? (

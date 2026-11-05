@@ -226,6 +226,50 @@ function createInvoicePdf(invoice) {
   pdf += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogId} 0 R >>\nstartxref\n${xref}\n%%EOF`;
   return Buffer.from(pdf, "binary");
 }
+function createPurchaseOrderPdf(order, lines) {
+  const content = [
+    "EXCLUSIVAS INTELIGENTES · PEDIDO A PROVEEDOR",
+    `Pedido: ${order.code || `#${order.id}`}`,
+    `Proveedor: ${order.supplier_name || "Proveedor"}`,
+    `Fecha: ${order.order_date || "—"} · Entrega prevista: ${order.expected_date || "—"}`,
+    `Estado: ${order.status || "Borrador"}`,
+    "",
+    "PRODUCTOS",
+    ...lines.map((line) => `${line.product_name || `Producto #${line.product_id}`} · ${line.supplier_product_name || line.supplier_ref || ""} · ${line.quantity} ${line.quantity_unit || "unidad"} · ${(Number(line.amount || 0)).toFixed(2)} EUR`),
+    "",
+    `TOTAL: ${Number(order.amount || 0).toFixed(2)} EUR`,
+    ...(order.notes ? ["", `Observaciones: ${order.notes}`] : []),
+    "Documento generado por Exclusivas Inteligentes.",
+  ];
+  const wrapped = content.flatMap((line) => {
+    const text = pdfSafeText(line);
+    return text ? Array.from({ length: Math.ceil(text.length / 92) }, (_, index) => text.slice(index * 92, (index + 1) * 92)) : [""];
+  });
+  const pages = [];
+  for (let offset = 0; offset < wrapped.length; offset += 38) pages.push(wrapped.slice(offset, offset + 38));
+  const objects = [];
+  const addObject = (value) => { objects.push(value); return objects.length; };
+  const catalogId = addObject(""), pagesId = addObject(""), fontId = addObject("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"), pageIds = [];
+  for (const pageLines of pages) {
+    const commands = ["BT", "/F1 10 Tf", "50 790 Td"];
+    pageLines.forEach((line, index) => { if (index) commands.push("0 -18 Td"); commands.push(`${pdfLiteral(line)} Tj`); });
+    commands.push("ET");
+    const contentId = addObject(`<< /Length ${Buffer.byteLength(commands.join("\n"), "ascii")} >>\nstream\n${commands.join("\n")}\nendstream`);
+    const pageId = addObject("");
+    objects[pageId - 1] = `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 ${fontId} 0 R >> >> /Contents ${contentId} 0 R >>`;
+    pageIds.push(pageId);
+  }
+  objects[catalogId - 1] = `<< /Type /Catalog /Pages ${pagesId} 0 R >>`;
+  objects[pagesId - 1] = `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pageIds.length} >>`;
+  let pdf = "%PDF-1.4\n%âãÏÓ\n";
+  const offsets = [0];
+  objects.forEach((object, index) => { offsets.push(Buffer.byteLength(pdf, "binary")); pdf += `${index + 1} 0 obj\n${object}\nendobj\n`; });
+  const xref = Buffer.byteLength(pdf, "binary");
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  offsets.slice(1).forEach((offset) => { pdf += `${String(offset).padStart(10, "0")} 00000 n \n`; });
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogId} 0 R >>\nstartxref\n${xref}\n%%EOF`;
+  return Buffer.from(pdf, "binary");
+}
 function invoiceRouteAssignments(invoice) {
   const orderIds = [...new Set([
     Number(invoice?.order_id || 0),
@@ -631,10 +675,18 @@ function selectDatabaseMode(mode) {
 // Ajustes de SQLite para el uso local habitual: lecturas ágiles, escrituras
 // concurrentes sin bloquear la aplicación y menos trabajo de disco.
 db.exec(`CREATE TABLE IF NOT EXISTS purchase_orders(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,supplier_id INTEGER,status TEXT DEFAULT 'Borrador',order_date TEXT DEFAULT CURRENT_DATE,expected_date TEXT,amount REAL DEFAULT 0,notes TEXT);`);
-for (const column of ["updated_at TEXT", "stock_applied_at TEXT", "stock_applied_by TEXT", "supplier_invoice_code TEXT", "invoice_date TEXT", "payment_terms_snapshot TEXT", "payment_due_date TEXT", "payment_status TEXT DEFAULT 'Pendiente'", "payment_paid_at TEXT", "payment_reference TEXT"]) {
+for (const column of ["updated_at TEXT", "stock_applied_at TEXT", "stock_applied_by TEXT", "supplier_invoice_code TEXT", "invoice_date TEXT", "payment_terms_snapshot TEXT", "payment_due_date TEXT", "payment_status TEXT DEFAULT 'Pendiente'", "payment_paid_at TEXT", "payment_reference TEXT", "ocr_file_name TEXT", "ocr_extracted_text TEXT"] ) {
   try { db.exec(`ALTER TABLE purchase_orders ADD COLUMN ${column}`); } catch {}
 }
 db.exec(`CREATE TABLE IF NOT EXISTS purchase_order_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,purchase_order_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity REAL DEFAULT 0,unit_cost REAL DEFAULT 0,amount REAL DEFAULT 0);`);
+for (const column of ["quantity_unit TEXT DEFAULT 'unidad'", "supplier_product_name TEXT", "supplier_ref TEXT", "supplier_alias_id INTEGER", "source_text TEXT", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]) {
+  try { db.exec(`ALTER TABLE purchase_order_lines ADD COLUMN ${column}`); } catch {}
+}
+db.exec(`CREATE TABLE IF NOT EXISTS supplier_product_aliases(id INTEGER PRIMARY KEY AUTOINCREMENT,supplier_id INTEGER NOT NULL,product_id INTEGER NOT NULL,alias_name TEXT NOT NULL,normalized_alias TEXT NOT NULL,supplier_ref TEXT,quantity_unit TEXT DEFAULT 'unidad',units_per_order REAL DEFAULT 1,source TEXT DEFAULT 'Manual',active INTEGER DEFAULT 1,created_by TEXT,created_at TEXT,updated_at TEXT);`);
+db.exec(`CREATE TABLE IF NOT EXISTS supplier_recurrent_items(id INTEGER PRIMARY KEY AUTOINCREMENT,supplier_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity REAL DEFAULT 1,quantity_unit TEXT DEFAULT 'unidad',unit_cost REAL DEFAULT 0,supplier_alias_id INTEGER,active INTEGER DEFAULT 1,created_by TEXT,created_at TEXT,updated_at TEXT);`);
+db.exec(`CREATE TABLE IF NOT EXISTS purchase_order_observations(id INTEGER PRIMARY KEY AUTOINCREMENT,purchase_order_id INTEGER NOT NULL,observation TEXT NOT NULL,created_by TEXT,created_at TEXT);`);
+try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_supplier_alias_normalized ON supplier_product_aliases(supplier_id,normalized_alias)"); } catch {}
+try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_supplier_recurrent_product ON supplier_recurrent_items(supplier_id,product_id)"); } catch {}
 db.exec(`CREATE TABLE IF NOT EXISTS goods_receipts(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,supplier_id INTEGER NOT NULL,purchase_order_id INTEGER,purchase_invoice_id INTEGER,warehouse_id INTEGER,receipt_date TEXT NOT NULL,status TEXT DEFAULT 'Borrador',validation_status TEXT DEFAULT 'Pendiente',validated_by TEXT,validated_at TEXT,notes TEXT,created_by TEXT,received_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
 for (const column of ["purchase_invoice_id INTEGER", "validation_status TEXT DEFAULT 'Pendiente'", "validated_by TEXT", "validated_at TEXT", "client_id INTEGER", "counterparty_type TEXT DEFAULT 'Proveedor'", "stock_applied INTEGER DEFAULT 1", "stock_applied_at TEXT", "stock_applied_by TEXT"]) {
   try { db.exec(`ALTER TABLE goods_receipts ADD COLUMN ${column}`); } catch {}
@@ -826,7 +878,7 @@ for (const [table, columns] of [
   ["suppliers", ["tax_id TEXT", "contact TEXT", "payment_terms TEXT", "city TEXT", "latitude REAL", "longitude REAL", "geocoding_status TEXT DEFAULT 'Pendiente'", "minimum_order REAL DEFAULT 0", "transport_cost REAL DEFAULT 0", "lead_time_days INTEGER DEFAULT 0", "reliability_percent REAL DEFAULT 0", "promotions TEXT", "rappel_percent REAL DEFAULT 0", "active INTEGER DEFAULT 1", "external_code TEXT", "source_system TEXT", "source_warehouse_code TEXT", "source_created_at TEXT", "source_closed_at TEXT", "source_balance REAL DEFAULT 0", "source_overdue_balance REAL DEFAULT 0", "source_payments REAL DEFAULT 0"]],
   ["clients", ["city TEXT", "tax_id TEXT", "external_code TEXT", "source_system TEXT", "active INTEGER DEFAULT 1", "billing_address TEXT", "billing_city TEXT", "opening_time TEXT", "closing_time TEXT", "weekly_closed_day TEXT", "invoice_delivery_method TEXT", "latitude REAL", "longitude REAL", "geocoded_at TEXT", "geocoding_status TEXT DEFAULT 'Pendiente'", "payment_method_code TEXT", "payment_terms_code TEXT", "source_warehouse_code TEXT", "source_created_at TEXT", "source_closed_at TEXT", "source_balance REAL DEFAULT 0", "source_overdue_balance REAL DEFAULT 0", "source_sales REAL DEFAULT 0", "source_payments REAL DEFAULT 0"]],
   ["products", ["external_code TEXT", "source_system TEXT", "active INTEGER DEFAULT 1", "source_type TEXT", "source_substitute TEXT", "assembly_item INTEGER DEFAULT 0", "cost_adjusted INTEGER DEFAULT 0", "default_split_template TEXT", "source_supplier_code TEXT", "source_created_at TEXT", "source_closed_at TEXT"]],
-  ["purchase_orders", ["validation_status TEXT DEFAULT 'Pendiente de validar'", "request_id INTEGER", "supplier_ids TEXT", "comparison TEXT", "supplier_invoice_code TEXT", "invoice_date TEXT", "payment_terms_snapshot TEXT", "payment_due_date TEXT", "payment_status TEXT DEFAULT 'Pendiente'", "payment_paid_at TEXT", "payment_reference TEXT"]],
+  ["purchase_orders", ["validation_status TEXT DEFAULT 'Pendiente de validar'", "request_id INTEGER", "supplier_ids TEXT", "comparison TEXT", "supplier_invoice_code TEXT", "invoice_date TEXT", "payment_terms_snapshot TEXT", "payment_due_date TEXT", "payment_status TEXT DEFAULT 'Pendiente'", "payment_paid_at TEXT", "payment_reference TEXT", "ocr_file_name TEXT", "ocr_extracted_text TEXT"]],
 ]) for (const column of columns) { try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${column}`); } catch {} }
 // Horarios independientes de la dirección para planificar futuras rutas.
 for (const [table, columns] of [["clients", ["opening_time TEXT", "closing_time TEXT", "weekly_closed_day TEXT", "invoice_delivery_method TEXT"]], ["collection_points", ["opening_time TEXT", "closing_time TEXT"]]]) {
@@ -1114,6 +1166,9 @@ const tables = new Set([
   "suppliers",
   "purchase_orders",
   "purchase_order_lines",
+  "supplier_product_aliases",
+  "supplier_recurrent_items",
+  "purchase_order_observations",
   "goods_receipts",
   "goods_receipt_lines",
   "goods_receipt_incidents",
@@ -2183,6 +2238,72 @@ export async function crmApiHandler(req, res) {
         catch (error) { return send(res, 409, { error: error?.message || "No se pudo cambiar la base de datos." }); }
       }
       const actor = req.headers["x-actor"] || "Usuario local";
+      if (p[1] === "supplier_product_aliases" && req.method === "POST") {
+        const body = await read(req);
+        const supplierId = Number(body.supplier_id || 0), productId = Number(body.product_id || 0);
+        const aliasName = String(body.alias_name || "").trim().slice(0, 180);
+        const normalizedAlias = aliasName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("es-ES").replace(/[^a-z0-9]+/g, " ").trim();
+        if (!supplierId || !productId || !normalizedAlias) return send(res, 400, { error: "Selecciona proveedor, producto y escribe el alias" });
+        if (!db.prepare("SELECT id FROM suppliers WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(supplierId)) return send(res, 400, { error: "El proveedor seleccionado no existe" });
+        if (!db.prepare("SELECT id FROM products WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(productId)) return send(res, 400, { error: "El producto seleccionado no existe" });
+        const now = new Date().toISOString();
+        try {
+          const created = db.prepare("INSERT INTO supplier_product_aliases(supplier_id,product_id,alias_name,normalized_alias,supplier_ref,quantity_unit,units_per_order,source,active,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,1,?,?,?)").run(supplierId, productId, aliasName, normalizedAlias, String(body.supplier_ref || "").trim().slice(0, 120) || null, String(body.quantity_unit || "unidad").trim().slice(0, 40) || "unidad", Math.max(0.0001, Number(body.units_per_order || 1)), String(body.source || "Manual").trim().slice(0, 30), actor, now, now);
+          recordAudit(actor, "POST", `supplier_product_aliases/${Number(created.lastInsertRowid)}`, "Crear equivalencia de producto", JSON.stringify({ supplier_id: supplierId, product_id: productId, alias_name: aliasName, source: body.source || "Manual" }));
+          invalidateReadCache("supplier_product_aliases");
+          return send(res, 201, { id: Number(created.lastInsertRowid), supplier_id: supplierId, product_id: productId, alias_name: aliasName, normalized_alias: normalizedAlias, supplier_ref: String(body.supplier_ref || "").trim() || null, quantity_unit: body.quantity_unit || "unidad", units_per_order: Number(body.units_per_order || 1), source: body.source || "Manual", active: 1, created_by: actor, created_at: now });
+        } catch (error) {
+          if (String(error?.message || "").includes("UNIQUE")) return send(res, 409, { error: "Este alias ya está registrado para el proveedor" });
+          throw error;
+        }
+      }
+      if (p[1] === "purchase_orders" && p[2] && p[3] === "detail" && req.method === "GET") {
+        const order = db.prepare("SELECT po.*,s.name supplier_name,s.email supplier_email,s.address supplier_address,s.city supplier_city FROM purchase_orders po LEFT JOIN suppliers s ON s.id=po.supplier_id WHERE po.id=? AND CAST(COALESCE(po.deleted,0) AS INTEGER)=0").get(Number(p[2]));
+        if (!order) return send(res, 404, { error: "Pedido de compra no encontrado" });
+        const lines = db.prepare("SELECT pol.*,p.name product_name,p.sku,MAX(0,pol.quantity-COALESCE((SELECT SUM(gl.received_quantity) FROM goods_receipt_lines gl JOIN goods_receipts gr ON gr.id=gl.receipt_id WHERE gr.purchase_order_id=pol.purchase_order_id AND gl.product_id=pol.product_id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 AND CAST(COALESCE(gl.deleted,0) AS INTEGER)=0),0)) remaining_quantity FROM purchase_order_lines pol LEFT JOIN products p ON p.id=pol.product_id WHERE pol.purchase_order_id=? AND CAST(COALESCE(pol.deleted,0) AS INTEGER)=0 ORDER BY pol.id").all(Number(p[2]));
+        const observations = db.prepare("SELECT * FROM purchase_order_observations WHERE purchase_order_id=? ORDER BY id DESC LIMIT 100").all(Number(p[2]));
+        return send(res, 200, { ...enrichPurchaseOrder(order), lines, observations });
+      }
+      if (p[1] === "purchase_orders" && p[2] && p[3] === "pdf" && req.method === "GET") {
+        const order = db.prepare("SELECT po.*,s.name supplier_name FROM purchase_orders po LEFT JOIN suppliers s ON s.id=po.supplier_id WHERE po.id=? AND CAST(COALESCE(po.deleted,0) AS INTEGER)=0").get(Number(p[2]));
+        if (!order) return send(res, 404, { error: "Pedido de compra no encontrado" });
+        const lines = db.prepare("SELECT pol.*,p.name product_name FROM purchase_order_lines pol LEFT JOIN products p ON p.id=pol.product_id WHERE pol.purchase_order_id=? AND CAST(COALESCE(pol.deleted,0) AS INTEGER)=0 ORDER BY pol.id").all(Number(p[2]));
+        return sendPdf(res, createPurchaseOrderPdf(order, lines), `${String(order.code || "pedido-compra").replace(/[^a-zA-Z0-9_-]/g, "_")}.pdf`, "attachment");
+      }
+      if (p[1] === "purchase_orders" && p[2] && p[3] === "observations" && req.method === "POST") {
+        const order = db.prepare("SELECT id FROM purchase_orders WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(p[2]));
+        if (!order) return send(res, 404, { error: "Pedido de compra no encontrado" });
+        const body = await read(req);
+        const observation = String(body.observation || "").trim().slice(0, 4000);
+        if (!observation) return send(res, 400, { error: "Escribe una observación antes de guardarla" });
+        const now = new Date().toISOString();
+        const created = db.prepare("INSERT INTO purchase_order_observations(purchase_order_id,observation,created_by,created_at) VALUES(?,?,?,?)").run(Number(p[2]), observation, actor, now);
+        db.prepare("UPDATE purchase_orders SET updated_at=? WHERE id=?").run(now, Number(p[2]));
+        recordAudit(actor, "POST", `purchase_orders/${Number(p[2])}/observations`, "Añadir observación al pedido", observation);
+        invalidateRelatedReadCaches("purchase_orders");
+        return send(res, 201, { id: Number(created.lastInsertRowid), purchase_order_id: Number(p[2]), observation, created_by: actor, created_at: now });
+      }
+      if (p[1] === "purchase_orders" && p[2] && p[3] === "email" && req.method === "POST") {
+        const order = db.prepare("SELECT po.*,s.name supplier_name,s.email supplier_email FROM purchase_orders po LEFT JOIN suppliers s ON s.id=po.supplier_id WHERE po.id=? AND CAST(COALESCE(po.deleted,0) AS INTEGER)=0").get(Number(p[2]));
+        if (!order) return send(res, 404, { error: "Pedido de compra no encontrado" });
+        const to = String(order.supplier_email || "").trim();
+        if (!to || !to.includes("@")) return send(res, 400, { error: "Añade un email válido a la ficha del proveedor" });
+        const subject = `Pedido ${order.code} · Exclusivas Inteligentes`;
+        const body = `Buenos días,\n\nAdjuntamos el pedido ${order.code} de Exclusivas Inteligentes.\n\nEntrega prevista: ${order.expected_date || "por confirmar"}.\n\nUn saludo.`;
+        const apiKey = String(process.env.RESEND_API_KEY || "").trim();
+        const from = String(process.env.RESEND_FROM_EMAIL || "").trim();
+        if (!apiKey || !from) return send(res, 200, { mode: "mailto", to, subject, body });
+        const lines = db.prepare("SELECT pol.*,p.name product_name FROM purchase_order_lines pol LEFT JOIN products p ON p.id=pol.product_id WHERE pol.purchase_order_id=? AND CAST(COALESCE(pol.deleted,0) AS INTEGER)=0 ORDER BY pol.id").all(Number(p[2]));
+        const pdf = createPurchaseOrderPdf(order, lines);
+        const response = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ from, to: [to], subject, html: `<p>Buenos días,</p><p>Adjuntamos el pedido <strong>${pdfSafeText(order.code)}</strong> de Exclusivas Inteligentes.</p><p>Entrega prevista: ${pdfSafeText(order.expected_date || "por confirmar")}.</p><p>Un saludo.</p>`, attachments: [{ filename: `${order.code}.pdf`, content: pdf.toString("base64") }] }) });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) return send(res, 502, { error: result?.message || result?.error || "El proveedor de correo rechazó el envío" });
+        const now = new Date().toISOString();
+        db.prepare("UPDATE purchase_orders SET status='Enviado',updated_at=? WHERE id=? AND status='Borrador'").run(now, Number(p[2]));
+        recordAudit(actor, "POST", `purchase_orders/${Number(p[2])}/email`, "Enviar pedido al proveedor", JSON.stringify({ to, provider_id: result.id || null }));
+        invalidateRelatedReadCaches("purchase_orders");
+        return send(res, 200, { mode: "resend", to, subject, provider_id: result.id || null, sent_at: now });
+      }
       if (p[1] === "public" && p[2] === "shipments" && p[3] && req.method === "GET") {
         const trackingToken = decodeURIComponent(String(p[3]));
         const shipment = db.prepare(`
@@ -3668,7 +3789,13 @@ export async function crmApiHandler(req, res) {
               incidents.push({ id: Number(incidentResult.lastInsertRowid), product_name: line.product.name, description });
             }
           }
-          if (purchaseOrderId) db.prepare("UPDATE purchase_orders SET status=?,updated_at=? WHERE id=?").run(hasIncident ? "Recibida con incidencia" : "Recibida", now, purchaseOrderId);
+          if (purchaseOrderId) {
+            const ordered = new Map(db.prepare("SELECT product_id,SUM(quantity) quantity FROM purchase_order_lines WHERE purchase_order_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 GROUP BY product_id").all(purchaseOrderId).map((line) => [Number(line.product_id), Number(line.quantity || 0)]));
+            const alreadyReceived = new Map(db.prepare("SELECT gl.product_id,SUM(gl.received_quantity) quantity FROM goods_receipt_lines gl JOIN goods_receipts gr ON gr.id=gl.receipt_id WHERE gr.purchase_order_id=? AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 AND CAST(COALESCE(gl.deleted,0) AS INTEGER)=0 GROUP BY gl.product_id").all(purchaseOrderId).map((line) => [Number(line.product_id), Number(line.quantity || 0)]));
+            const partial = [...ordered.entries()].some(([productId, quantity]) => Number(alreadyReceived.get(productId) || 0) + 0.0001 < quantity);
+            const nextStatus = hasIncident ? "Recibido con incidencia" : partial ? "Parcialmente recibido" : "Recibido";
+            db.prepare("UPDATE purchase_orders SET status=?,updated_at=? WHERE id=?").run(nextStatus, now, purchaseOrderId);
+          }
           if (incidents.length) db.prepare("INSERT INTO notes(title,content,priority,module,record_id,important,completed,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)").run(`Incidencia en entrada · ${code}`, `La entrada ${code} de ${counterpartyType.toLowerCase()} ${client?.name || supplier?.name || "sin nombre"} tiene ${incidents.length} incidencia${incidents.length === 1 ? "" : "s"}. Revisa las diferencias, productos equivocados o daños y sus fotografías desde Entradas.`, "Alta", "Entradas", receiptId, 1, 0, actor, now, now);
           recordAudit(actor, "POST", `goods_receipts/${receiptId}`, "Recepción de mercancía", JSON.stringify({ receipt_id: receiptId, code, counterparty_type: counterpartyType, supplier_id: supplierId || null, client_id: clientId || null, warehouse_id: warehouseId, purchase_order_id: purchaseOrderId, purchase_invoice_id: purchaseInvoiceId, stock_applied: stockApplied, validation_status: validationStatus, lines: lines.length, incidents: incidents.length, economic_difference: lines.reduce((sum, line) => sum + Number(line.economicDifference || 0), 0) }));
           if (!remoteMode) db.exec("COMMIT");
@@ -4307,6 +4434,8 @@ export async function crmApiHandler(req, res) {
           d.payment_terms_snapshot = paymentTermsSnapshot;
           d.payment_due_date = String(d.payment_due_date || "").slice(0, 10) || addCalendarDays(invoiceDate, paymentTermsDays(paymentTermsSnapshot));
           d.payment_status = String(d.payment_status || "Pendiente").trim() || "Pendiente";
+          d.status = String(d.status || "Borrador").trim();
+          if (!["Borrador", "Enviado", "Parcialmente recibido", "Recibido", "Recibido con incidencia", "Cancelado"].includes(d.status)) return send(res, 400, { error: "El estado del pedido de compra no es válido" });
           if (!Array.isArray(d.lines) || !d.lines.length) {
             return send(res, 400, { error: "Añade al menos una línea de producto a la compra" });
           }
@@ -4319,6 +4448,11 @@ export async function crmApiHandler(req, res) {
               quantity,
               unitCost,
               amount: Number(line.amount ?? quantity * unitCost),
+              quantityUnit: String(line.quantity_unit || "unidad").trim().slice(0, 40) || "unidad",
+              supplierProductName: String(line.supplier_product_name || line.alias_name || "").trim().slice(0, 180),
+              supplierRef: String(line.supplier_ref || "").trim().slice(0, 120),
+              supplierAliasId: Number(line.supplier_alias_id || 0) || null,
+              sourceText: String(line.source_text || "").trim().slice(0, 500),
             };
           }).filter((line) => line.productId && line.quantity > 0 && Number.isFinite(line.unitCost) && line.unitCost >= 0);
           if (!purchaseOrderLines.length) return send(res, 400, { error: "Cada línea debe indicar un producto y una cantidad mayor que cero" });
@@ -4507,7 +4641,7 @@ export async function crmApiHandler(req, res) {
         }
         if (t === "purchase_orders" && purchaseOrderLines) {
           for (const line of purchaseOrderLines) {
-            db.prepare("INSERT INTO purchase_order_lines(purchase_order_id,product_id,quantity,unit_cost,amount) VALUES(?,?,?,?,?)").run(Number(r.lastInsertRowid), line.productId, line.quantity, line.unitCost, line.amount);
+            db.prepare("INSERT INTO purchase_order_lines(purchase_order_id,product_id,quantity,unit_cost,amount,quantity_unit,supplier_product_name,supplier_ref,supplier_alias_id,source_text,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").run(Number(r.lastInsertRowid), line.productId, line.quantity, line.unitCost, line.amount, line.quantityUnit, line.supplierProductName || null, line.supplierRef || null, line.supplierAliasId, line.sourceText || null, now, now);
           }
         }
         if (t === "orders") {
@@ -4625,6 +4759,7 @@ export async function crmApiHandler(req, res) {
           }
         }
         const currentPurchase = t === "purchase_orders" ? db.prepare("SELECT * FROM purchase_orders WHERE id=?").get(Number(p[2])) : null;
+        let purchaseOrderLinesToReplace = null;
         if (t === "purchase_orders") {
           const supplierId = Number(d.supplier_id ?? currentPurchase?.supplier_id ?? 0);
           const supplier = supplierId ? db.prepare("SELECT payment_terms FROM suppliers WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(supplierId) : null;
@@ -4643,6 +4778,28 @@ export async function crmApiHandler(req, res) {
             d.payment_status = paymentStatus;
             if (paymentStatus === "Pagada" && !currentPurchase?.payment_paid_at && !d.payment_paid_at) d.payment_paid_at = new Date().toISOString();
             if (paymentStatus !== "Pagada" && d.payment_paid_at === undefined && currentPurchase?.payment_status === "Pagada") d.payment_paid_at = null;
+          }
+          if (d.status !== undefined) {
+            const nextStatus = String(d.status || "").trim();
+            if (!["Borrador", "Enviado", "Parcialmente recibido", "Recibido", "Recibido con incidencia", "Cancelado"].includes(nextStatus)) return send(res, 400, { error: "El estado del pedido de compra no es válido" });
+            if (["Recibido", "Recibido con incidencia", "Parcialmente recibido"].includes(nextStatus)) return send(res, 409, { error: "Registra la mercancía desde Entradas para validar cantidades y actualizar el stock" });
+          }
+          if (Array.isArray(d.lines)) {
+            if (String(currentPurchase?.status || "Borrador") !== "Borrador") return send(res, 409, { error: "Solo se pueden modificar las líneas de un pedido en borrador" });
+            if (db.prepare("SELECT id FROM goods_receipts WHERE purchase_order_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 LIMIT 1").get(Number(p[2]))) return send(res, 409, { error: "El pedido ya tiene una entrada vinculada y no se pueden cambiar sus líneas" });
+            purchaseOrderLinesToReplace = d.lines.map((line) => ({
+              productId: Number(line.product_id),
+              quantity: Number(line.quantity || 0),
+              unitCost: Number(line.unit_cost || 0),
+              quantityUnit: String(line.quantity_unit || "unidad").trim().slice(0, 40) || "unidad",
+              supplierProductName: String(line.supplier_product_name || "").trim().slice(0, 180),
+              supplierRef: String(line.supplier_ref || "").trim().slice(0, 120),
+              supplierAliasId: Number(line.supplier_alias_id || 0) || null,
+              sourceText: String(line.source_text || "").trim().slice(0, 500),
+            })).filter((line) => line.productId && line.quantity > 0 && Number.isFinite(line.unitCost) && line.unitCost >= 0);
+            if (!purchaseOrderLinesToReplace.length) return send(res, 400, { error: "El pedido debe conservar al menos un producto con cantidad válida" });
+            d.amount = purchaseOrderLinesToReplace.reduce((sum, line) => sum + line.quantity * line.unitCost, 0);
+            delete d.lines;
           }
         }
         let normalizedLotAllocations = null;
@@ -4762,18 +4919,6 @@ export async function crmApiHandler(req, res) {
             d.stock_released_at = new Date().toISOString();
             d.stock_released_by = actor;
             db.prepare("UPDATE orders SET status=?,updated_at=? WHERE id=?").run(movingOut ? (d.status === "Entregado" ? "Entregado" : "Enviado") : "Cancelado", new Date().toISOString(), Number(oldShipment.order_id));
-          }
-        }
-        if (t === "purchase_orders" && d.status === "Recibida") {
-          const oldPurchase = db.prepare("SELECT * FROM purchase_orders WHERE id=?").get(p[2]);
-          if (oldPurchase && oldPurchase.status !== "Recibida" && !oldPurchase.stock_applied_at) {
-            const lines = db.prepare("SELECT * FROM purchase_order_lines WHERE purchase_order_id=?").all(p[2]);
-            for (const line of lines) {
-              db.prepare("INSERT INTO inventory_movements(product_id,movement_type,quantity,reference,notes) VALUES(?,?,?,?,?)").run(line.product_id, "Entrada", line.quantity, oldPurchase.code, "Recepción de compra");
-              db.prepare("UPDATE products SET stock=COALESCE(stock,0)+?,cost_price=? WHERE id=?").run(Number(line.quantity), Number(line.unit_cost || 0), line.product_id);
-            }
-            d.stock_applied_at = new Date().toISOString();
-            d.stock_applied_by = actor;
           }
         }
         if (t === "orders" && d.status) {
@@ -4916,6 +5061,13 @@ export async function crmApiHandler(req, res) {
         db.prepare(
           `UPDATE ${t} SET ${keys.map((k) => k + "=?").join(",")} WHERE id=?`,
         ).run(...keys.map((k) => d[k]), p[2]);
+        if (t === "purchase_orders" && purchaseOrderLinesToReplace) {
+          const now = new Date().toISOString();
+          db.prepare("UPDATE purchase_order_lines SET deleted=1,updated_at=? WHERE purchase_order_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").run(now, Number(p[2]));
+          const insertLine = db.prepare("INSERT INTO purchase_order_lines(purchase_order_id,product_id,quantity,unit_cost,amount,quantity_unit,supplier_product_name,supplier_ref,supplier_alias_id,source_text,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)");
+          for (const line of purchaseOrderLinesToReplace) insertLine.run(Number(p[2]), line.productId, line.quantity, line.unitCost, line.quantity * line.unitCost, line.quantityUnit, line.supplierProductName || null, line.supplierRef || null, line.supplierAliasId, line.sourceText || null, now, now);
+          recordAudit(actor, "PUT", `purchase_orders/${Number(p[2])}`, "Editar líneas de pedido a proveedor", JSON.stringify({ lines: purchaseOrderLinesToReplace.length, amount: d.amount }));
+        }
         if (t === "payments" && currentRecord.invoice_id) recalculateInvoicePaymentStatus(currentRecord.invoice_id, actor);
         if (t === "invoices" && String(d.status || "") !== "Anulada") recalculateInvoicePaymentStatus(Number(p[2]), actor);
         if (t === "order_lines" && normalizedLotAllocations) {

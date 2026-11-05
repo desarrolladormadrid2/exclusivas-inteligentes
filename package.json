@@ -1,6 +1,6 @@
 {
   "name": "site-creator-vinext-starter",
-  "version": "2.0.288",
+  "version": "2.0.289",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -27,11 +27,13 @@
     "@libsql/client": "^0.17.4",
     "drizzle-orm": "0.45.2",
     "jsbarcode": "^3.12.3",
+    "pdfjs-dist": "^6.5.438",
     "pngjs": "^7.0.0",
     "qrcode": "^1.5.4",
     "react": "19.2.6",
     "react-dom": "19.2.6",
-    "react-loading-skeleton": "3.5.0"
+    "react-loading-skeleton": "3.5.0",
+    "tesseract.js": "^6.0.1"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.37.1",
