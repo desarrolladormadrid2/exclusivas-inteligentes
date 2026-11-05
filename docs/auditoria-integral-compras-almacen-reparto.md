@@ -233,6 +233,220 @@ Separar el registro/recepción física de la revisión/validación de mercancía
 | Q04 | Abrir listados vacíos, con un elemento, muchos elementos y relación rota. | Carga, vacío, error y resultado parcial tienen mensajes distintos; relaciones faltantes no muestran IDs como nombres. |
 | Q05 | Forzar API lenta, timeout, respuesta 500 y conexión perdida al guardar. | No desaparece lo escrito; error permite reintento seguro; no se comunica “guardado” hasta confirmar persistencia. |
 
+### R. Factura del proveedor y cuentas pendientes de pago
+
+| ID | Pasos | Resultado esperado |
+|---|---|---|
+| R01 | Vincular factura del proveedor al pedido y a una o varias entradas. | Pedido, recepción y factura quedan relacionados con el mismo proveedor; se conserva el origen y el histórico. |
+| R02 | Registrar factura con cantidad igual a la pedida y a la recibida. | Cantidades y total coinciden en pedido, entrada, factura y cuenta pendiente. |
+| R03 | Comparar una factura con recepción parcial o con producto pendiente. | Se distingue mercancía pendiente de mercancía facturada; no se marca el pedido como recibido completo. |
+| R04 | Introducir precio de factura distinto del precio pedido; probar diferencia pequeña y grande. | La diferencia se muestra por línea y total, requiere revisión según regla configurada y no cambia el coste sin confirmación. |
+| R05 | Añadir porte, descuento, impuesto o recargo reflejado en factura. | Base, impuesto, recargo y total cuadran con las líneas y se muestra qué concepto produce la diferencia. |
+| R06 | Registrar mismo número de factura dos veces para el mismo proveedor. | Se bloquea o advierte el posible duplicado sin impedir un número igual emitido por otro proveedor. |
+| R07 | Probar códigos de factura con ceros iniciales, espacios, minúsculas, guiones y largos. | La normalización y unicidad son coherentes; el número original queda legible en el documento. |
+| R08 | Usar condiciones de pago del proveedor, cambiar fecha de factura y recalcular vencimiento. | El vencimiento se explica, persiste y no se desplaza por una recarga; se distingue fecha de pedido, factura y pago. |
+| R09 | Registrar pago parcial, completar saldo y volver a consultar deuda. | Pagado, pendiente, estado y fecha de último pago cuadran; un reintento no duplica el importe. |
+| R10 | Anular un pago de proveedor o corregir una factura ya contabilizada. | Se conserva la operación original, su motivo y auditoría; el saldo se recalcula sin borrar historia. |
+| R11 | Filtrar facturas pendientes, vencidas, pagadas y por proveedor/periodo. | Contadores, total y filas coinciden; el filtro por vencidas respeta la fecha local y no cuenta anuladas. |
+| R12 | Abrir el documento de proveedor desde pedido, entrada y listado de facturas. | Cada acceso muestra el mismo documento y relación; nunca se abre la factura de otro proveedor por una búsqueda repetida. |
+| R13 | Probar factura sin pedido, sin entrada, sin código externo o sin fecha de vencimiento. | El caso independiente queda identificado; faltan datos se señalan y no se rellenan con cero/fecha inventados. |
+
+### S. Reclamaciones al proveedor y calidad de mercancía
+
+| ID | Pasos | Resultado esperado |
+|---|---|---|
+| S01 | Crear incidencia por faltante, exceso, daño, sustitución y producto equivocado. | Tipo, líneas, unidades, diferencia económica, proveedor y entrada de origen son coherentes. |
+| S02 | Adjuntar una o varias fotos a la reclamación y abrirlas desde el detalle. | Fotos corresponden a la línea correcta, conservan nombre y fecha y siguen disponibles tras recarga. |
+| S03 | Abrir reclamación desde la entrada, aviso, nota y ficha de proveedor. | Todos los accesos llegan a la misma incidencia con su contexto y permiten volver al origen. |
+| S04 | Marcar reclamo pendiente, comunicado, aceptado, rechazado y compensado (solo estados disponibles). | La cronología no salta estados sin acción; usuario, fecha y respuesta quedan guardados. |
+| S05 | Registrar reposición del faltante en una segunda entrada. | La reposición se vincula a la incidencia/pedido original y no duplica el recibido anterior. |
+| S06 | Registrar abono/descuento del proveedor derivado del daño. | Se liga a factura/entrada y el saldo por pagar se ajusta una vez; el stock dañado no se vuelve apto automáticamente. |
+| S07 | Intentar resolver sin motivo, usuario o respuesta requerida. | Validación señala qué falta; no se cierra una incidencia abierta por guardar el pedido. |
+| S08 | Reabrir un reclamo cerrado o registrar nueva evidencia. | Se conserva el cierre anterior y se añade nuevo evento; los avisos y contadores vuelven al estado correspondiente. |
+
+### T. Devoluciones y movimientos inversos
+
+| ID | Pasos | Resultado esperado |
+|---|---|---|
+| T01 | Iniciar devolución de cliente desde un pedido entregado y desde la ficha del cliente. | Pedido, envío, cliente, producto y unidades se precargan correctamente; devolución independiente pide contexto. |
+| T02 | Devolver todas las unidades, una parte y una cantidad fraccionaria permitida. | No se pueden devolver más unidades vendidas/entregadas; las fracciones respetan unidad y precisión del producto. |
+| T03 | Registrar devolución apta para stock, dañada o pendiente de inspección. | Apta suma al destino configurado; dañada se descuenta o queda en cuarentena; pendiente no aumenta stock disponible. |
+| T04 | Elegir almacén, ubicación y lote de retorno. | Movimiento y lote apuntan al destino real; no cambia otro lote con el mismo nombre en otro almacén. |
+| T05 | Probar motivo obligatorio, motivo largo, adjunto y falta de evidencia. | El motivo queda legible y auditable; campos obligatorios se validan sin perder lo escrito. |
+| T06 | Autorizar, rechazar, corregir cantidad y cerrar la devolución. | El permiso del rol se respeta; el stock aplicado coincide con la decisión final y solo se actualiza una vez. |
+| T07 | Crear nota de crédito/reembolso asociado a la devolución. | Reembolso, pago/factura, cliente y cantidad se relacionan; la factura no aparece cobrada si el saldo se revirtió. |
+| T08 | Reintentar la autorización y eliminar lógicamente una devolución ya aplicada. | No se duplican entradas de stock; una operación con impacto aplicado requiere reversión trazable y no borrado simple. |
+| T09 | Devolver producto sustituido, lote caducado o artículo que ya no existe en catálogo activo. | Snapshot conserva nombre y referencia; el movimiento no se imputa a un producto parecido. |
+| T10 | Comparar historial de stock antes/después, devolución y saldo del cliente. | Movimiento de salida/devolución, saldo y documento coinciden en unidades, importe, fechas y almacén. |
+| T11 | Filtrar devoluciones pendientes, autorizadas, rechazadas y por cliente/fecha. | El contador no incluye registros borrados ni estados incompatibles; el detalle abre la fila seleccionada. |
+
+### U. Portal de clientes y entrada comercial del pedido
+
+| ID | Pasos | Resultado esperado |
+|---|---|---|
+| U01 | Entrar como cliente con credenciales válidas y probar credenciales incorrectas. | Solo se muestran datos de ese cliente; el fallo no revela si otra cuenta existe ni deja sesión parcial. |
+| U02 | Consultar catálogo, disponibilidad, precio y formatos desde el portal. | Los datos son los publicados para el cliente y no exponen coste interno, proveedor ni datos de otros clientes. |
+| U03 | Crear pedido con una, varias y cero líneas; enviar dos veces. | Validación evita pedidos vacíos y el doble envío crea un solo pedido con código y confirmación claros. |
+| U04 | Seleccionar ubicación habitual, otra dirección y añadir una nueva dirección. | Direcciones fiscales y de entrega no se pisan; la nueva ubicación conserva geolocalización y horarios disponibles. |
+| U05 | Enviar pedido con producto descatalogado, stock insuficiente o cantidad superior al máximo permitido. | Se informa del problema y opciones; no se presenta como confirmado algo que requiere aprobación comercial. |
+| U06 | Editar o cancelar una solicitud mientras está pendiente y después de aceptada (según flujo disponible). | La política se comunica; el cambio se refleja en CRM y portal con actor y hora. |
+| U07 | Abrir seguimiento del pedido y de la factura con enlace válido, caducado y token manipulado. | El enlace solo revela el documento/envío asociado; token inválido o vencido no expone información ni da error ambiguo. |
+| U08 | Probar formularios de registro de cliente con nombre fiscal/comercial, CIF y dirección duplicados. | Validaciones ayudan a corregir datos; no duplican cliente por reenvío ni sobrescriben un cliente real. |
+| U09 | Revisar emails de confirmación/preparación en modo simulado. | Texto, cliente, código, importe y enlace corresponden al registro; el CRM no indica “enviado” si el envío falló. |
+| U10 | Usar portal desde móvil, recargar y volver con sesión caducada. | Acciones táctiles accesibles; formulario conserva el contenido recuperable y la sesión expirada vuelve a login de forma segura. |
+
+### V. Precios, impuestos y cierre de documentos de cliente
+
+| ID | Pasos | Resultado esperado |
+|---|---|---|
+| V01 | Crear pedido con productos a precio normal, descuento y precios distintos por cliente. | Cada línea aplica la tarifa correcta; el descuento no modifica el precio maestro por accidente. |
+| V02 | Probar producto con IVA normal, exento, tipo distinto y recargo de equivalencia habilitado/deshabilitado. | Base, IVA, recargo y total se calculan y redondean por línea/documento conforme a configuración. |
+| V03 | Cambiar datos fiscales del cliente después de emitir una factura. | El snapshot histórico de razón social, CIF y domicilio de factura permanece igual en el documento emitido. |
+| V04 | Emitir factura para pedido con servicio/coste adicional, sustitución o devolución parcial. | Líneas adicionales aparecen con descripción e impuestos correctos; ninguna cantidad se factura dos veces. |
+| V05 | Emitir facturas individuales y agrupadas de varios pedidos del mismo cliente. | Relación pedido-factura cubre cada pedido; la prevención de duplicados detecta factura existente también en agrupadas. |
+| V06 | Cancelar pedido con factura existente o cancelar factura emitida. | El sistema exige el flujo de anulación/abono permitido; nunca desaparece la factura emitida ni se deja pedido como sin facturar sin auditoría. |
+| V07 | Comparar presupuesto, pedido convertido, albarán, factura, pago y saldo de cliente. | Los datos históricos y totales coinciden; conversión conserva cliente, líneas, notas relevantes y dirección. |
+| V08 | Probar importes cero, muy pequeños, grandes, céntimos límite y descuentos por porcentaje/importe. | Redondeo estable y sin `NaN`; límites inválidos se bloquean y el total mostrado coincide con el guardado. |
+| V09 | Descargar/imprimir PDF de documento con muchas líneas y nombres largos. | Paginación, cabecera repetida, pie, numeración, totales y datos fiscales no quedan cortados ni fuera del papel. |
+| V10 | Probar enlace compartible desde sesión cerrada y reenvío del mismo enlace. | El documento permitido se ve sin abrir acceso a CRM; tokens se pueden invalidar si el sistema lo ofrece y no mezclan destinatarios. |
+| V11 | Recalcular estado de factura con pago activo, parcial, anulado y cobro legado. | Estado se deriva de pagos válidos y saldo real; conciliación no cuenta anulados y conserva históricos. |
+
+### W. Excepciones de ruta y servicio
+
+| ID | Pasos | Resultado esperado |
+|---|---|---|
+| W01 | Crear ruta sin paradas, con una parada y con varias paradas repetidas. | No se inicia una ruta vacía; paradas duplicadas se bloquean o se explican. |
+| W02 | Seleccionar envío sin coordenadas, con dirección parcial y con coordenada incorrecta. | Se indica el motivo; no se coloca una parada en un mapa genérico ni se oculta del tablero. |
+| W03 | Ordenar ruta con horario de apertura/cierre, servicio urgente y distancia similar. | Prioridades visibles determinan el orden y tiempos; si se rompe una franja, se advierte antes de salir. |
+| W04 | Probar dos paradas del mismo cliente, varios pedidos en una dirección y varias ubicaciones de entrega del cliente. | Agrupación conserva todos los pedidos y sus líneas; no se fusionan entregas con horarios/direcciones diferentes. |
+| W05 | Cambiar camión/conductor después de planificar y antes de iniciar. | Asignación se actualiza en todas las vistas; se detecta incompatibilidad o doble uso del vehículo. |
+| W06 | Intentar cambiar vehículo, conductor u orden una vez iniciada/cerrada la ruta. | Se bloquea o abre una operación correctiva auditada; no reescribe la ruta histórica. |
+| W07 | Poner ruta en pausa, reanudar, abandonar parada y retomar tras recargar. | Estado de ruta y parada persiste; tiempos no se reinician ni se crean rutas duplicadas. |
+| W08 | Registrar entrega parcial y continuar el resto en otra fecha/ruta. | Cantidad pendiente y nuevo envío/visita quedan explícitos; la parada original no se marca completa. |
+| W09 | Marcar cliente cerrado, rechazo, ausencia, dirección incorrecta y pedido no cargado. | Cada causa tiene opción distinta y seguimiento útil; una parada con incidencia no cuenta como entregada. |
+| W10 | Reordenar paradas manualmente y luego recalcular automáticamente. | Acción automática respeta restricciones declaradas; cambios manuales se confirman antes de ser reemplazados. |
+| W11 | Abrir Google Maps en móvil y escritorio con tres o más paradas. | URL conserva el orden/destino y codifica bien direcciones con tildes, `#`, comas y espacios. |
+| W12 | Probar ruta larga, nombres repetidos y ventanas de entrega con cambio de día. | Se distinguen fechas y ciudades; horario de la parada no se convierte accidentalmente a otra zona horaria. |
+| W13 | Intentar cerrar ruta con entrega pendiente, incidencia abierta o cobro pendiente (si la política lo requiere). | La regla de cierre se explica; no se pierde dinero/documentación ni se bloquea una entrega que la política permita cerrar. |
+
+### X. Cierre diario, caja y costes de flota
+
+| ID | Pasos | Resultado esperado |
+|---|---|---|
+| X01 | Cerrar ruta con varios cobros en efectivo, tarjeta, transferencia y sin cobro. | Resumen separa métodos, pendiente y total; coincide con pagos ligados a factura. |
+| X02 | Comparar efectivo registrado por repartidor con caja/arqueo manual de prueba. | Diferencia se muestra y admite observación; no se autoajusta ni se oculta un descuadre. |
+| X03 | Registrar pago en ruta y repetir desde Cobros para la misma factura. | Detecta doble cobro o lo suma como segundo parcial con confirmación y saldo actualizado. |
+| X04 | Registrar kilometraje inicial/final, repostaje, litros, precio, estación y foto de ticket. | Kilómetros no retroceden sin permiso; litros y coste son coherentes con el vehículo y se guardan una sola vez. |
+| X05 | Probar kilometraje ausente, negativo, menor que el anterior y salto improbable. | Se advierte o bloquea según la regla; se puede dejar incidencia con motivo auditado. |
+| X06 | Registrar mantenimiento preventivo, reparación y próxima fecha/kilometraje. | La alerta aparece en el vehículo y afecta la disponibilidad de forma coherente; datos históricos no se sustituyen. |
+| X07 | Cerrar día dos veces y modificar una parada ya cerrada. | El cierre no se duplica; cualquier reapertura requiere actor y motivo, y recalcula correctamente. |
+| X08 | Comparar resumen diario, ruta, vehículo, repartidor y contabilidad de cobros. | Totales, fecha y responsables coinciden; no se mezclan importes de otro día o vehículo. |
+| X09 | Revisar cierre sin rutas, con ruta cancelada y con vehículo compartido por turnos. | El resumen diferencia sin actividad de dato faltante; el gasto se asigna al turno correcto. |
+
+### Y. Inicio, informes y análisis operativo
+
+| ID | Pasos | Resultado esperado |
+|---|---|---|
+| Y01 | Comparar tarjetas del inicio con pedidos, facturas vencidas, stock crítico y alertas. | Cada indicador coincide con su listado de detalle al aplicar el mismo periodo/estado. |
+| Y02 | Cambiar día, semana, mes, trimestre y año; probar zona horaria y cambio de mes/año. | Rangos inclusivos y etiquetas son correctos; no aparecen datos del día vecino. |
+| Y03 | Abrir una alerta de pedido, stock, factura o entrada. | Abre el registro concreto en detalle/modal y mantiene el filtro/contexto anterior. |
+| Y04 | Marcar notificación como leída, completar aviso y marcar todas. | Contador baja, historial permanece, el aviso completado no reaparece y el vínculo abre el registro correcto. |
+| Y05 | Comparar informes por cliente, producto, vendedor, proveedor y fecha con listados fuente. | Sumas y filas tienen la misma definición; datos anulados y cancelados se excluyen de forma explícita. |
+| Y06 | Probar informe sin filas, con valores nulos y un nombre de cliente/proveedor largo. | Estado vacío es correcto; no muestra `[object Object]`, cero engañoso ni etiquetas cortadas. |
+| Y07 | Exportar/descargar informe y abrirlo fuera del CRM. | El archivo contiene mismo periodo, filtros, unidades y totales que la pantalla y tiene nombre comprensible. |
+| Y08 | Comparar pedido pendiente de facturar en Pedidos con módulo Facturas y cierre mensual. | Un pedido facturado individual o agrupadamente deja de aparecer como pendiente sin duplicar factura. |
+| Y09 | Filtrar informe con registros eliminados lógicamente y restaurados. | Los eliminados no contaminan actividad normal; al restaurar reaparecen una sola vez con sus relaciones. |
+
+### Z. Portal público, seguimiento y promociones
+
+| ID | Pasos | Resultado esperado |
+|---|---|---|
+| Z01 | Abrir seguimiento público de envío antes de salir, en ruta, entregado y con incidencia. | El cliente solo ve la información pública definida y el estado se actualiza correctamente. |
+| Z02 | Abrir token de seguimiento expirado, revocado, aleatorio y de otro pedido. | No revela nombre/dirección de otra persona; mensaje no confunde enlace inválido con “todavía no hay datos”. |
+| Z03 | Publicar, pausar y reactivar promoción con fechas y productos activos/inactivos. | Solo aparece en web durante vigencia; catálogo y precio publicados concuerdan con CRM. |
+| Z04 | Probar promoción sin imagen, con imagen rota y con archivo no admitido. | Fallback visible, sin icono roto; error de imagen no bloquea el resto de la web. |
+| Z05 | Registrar cliente potencial desde formulario público con campos válidos e inválidos. | Registro llega a la bandeja correcta con hora y estado; doble envío no crea duplicado. |
+| Z06 | Aprobar, rechazar y editar registro público desde CRM. | Cambia el estado correcto, guarda razón y auditoría y el registro no accede a datos de otros clientes. |
+| Z07 | Abrir enlace público desde móvil y compartirlo con navegador sin sesión. | Página carga sin autenticación CRM y restringe datos según su token/propósito. |
+| Z08 | Probar URL con caracteres especiales, parámetros extra y HTML en texto recibido. | Texto se escapa, no ejecuta contenido y la URL no permite inyección o redirección externa no prevista. |
+
+### AA. Archivos, imágenes, correo y OCR como servicios externos
+
+| ID | Pasos | Resultado esperado |
+|---|---|---|
+| AA01 | Subir JPEG, PNG, HEIC/PDF permitido y tipo no permitido a incidencia/OCR. | Tipos permitidos se procesan; MIME real se comprueba y extensión renombrada no elude la validación. |
+| AA02 | Probar fichero vacío, corrupto, muy grande, con nombre largo y caracteres especiales. | Límite claro, error legible y datos previos conservados; nombre se muestra escapado y no rompe la descarga. |
+| AA03 | Simular caída de Cloudinary o servicio externo y usar imagen histórica Base64. | Interfaz no se bloquea; fallback sigue visible y no se borra la imagen antigua antes de verificar URL nueva. |
+| AA04 | Reintentar subida después de timeout y volver a abrir el registro en otro navegador. | No se duplican adjuntos; URL/id almacenado recupera el mismo contenido con permiso correcto. |
+| AA05 | Preparar correo de pedido, cancelación, factura y seguimiento con proveedor sin email. | Destinatario, asunto, adjunto y cuerpo son correctos; fallback permite completar sin indicar envío falso. |
+| AA06 | Simular API de correo aceptando, rechazando, tardando y devolviendo timeout. | Estado de envío distingue preparado, enviado y fallido; reintentar no duplica envíos sin advertencia. |
+| AA07 | Abrir PDF en nueva pestaña, descargarlo e imprimirlo desde una modal. | PDF no vacío, URL con código correcto, contenido imprimible y modal no queda por encima de la hoja. |
+| AA08 | Probar token de archivo inexistente, manipulado y vencido. | Se responde con error controlado sin ruta local, token o datos internos expuestos. |
+| AA09 | Subir fichero OCR con varias páginas y texto rotado/escaneado. | Página y líneas se pueden rastrear a origen; no mezcla filas de páginas distintas. |
+| AA10 | Reprocesar OCR ya interpretado tras cambiar proveedor o alias. | El texto original permanece y el resultado nuevo no duplica pedido ni pierde correcciones manuales. |
+
+### AB. Seguridad de datos y permisos
+
+| ID | Pasos | Resultado esperado |
+|---|---|---|
+| AB01 | Como reparto, intentar ver costes de compra, datos fiscales internos y facturas de otros usuarios. | Solo se expone lo permitido para el rol; ocultar botones no sustituye validación de API. |
+| AB02 | Como comercial, intentar validar entrada, cambiar stock o anular cobro. | API rechaza acciones no autorizadas aunque se invoquen directamente. |
+| AB03 | Probar usuario almacén con permisos de recepción, validación y cierre diferenciados. | Puede hacer solo las operaciones concedidas; actor registrado es el usuario efectivo. |
+| AB04 | Expirar sesión con formulario abierto y guardar después. | Se pide login, se conserva o explica el borrador y no se guarda parcialmente con un actor incorrecto. |
+| AB05 | Probar campos con HTML, SQL-like text, emojis, saltos, comillas y etiquetas en observaciones/nombres. | Contenido se guarda como texto, se muestra escapado y no rompe búsqueda, PDF ni pantalla. |
+| AB06 | Manipular IDs de factura, cliente, envío, adjunto y token en URL/API. | No hay acceso horizontal a registros ajenos ni errores que incluyan datos sensibles. |
+| AB07 | Revisar respuestas de error, logs y capturas tras fallos de autenticación. | No se filtran contraseñas, tokens, CIF completo no necesario ni cabeceras sensibles. |
+| AB08 | Hacer consulta de solo lectura con y sin cabecera de auditoría configurada. | Los cambios/consultas sensibles quedan auditados según política sin registrar contenido secreto. |
+| AB09 | Probar restaurar a papelera y recuperar pedido/proveedor con relaciones dependientes. | Restauración no rompe integridad ni resucita pagos o documentos anulados indebidamente. |
+| AB10 | Revisar cookies/sesión desde CRM, portal cliente y enlace público. | Una sesión no se comparte entre usuarios/portales; cerrar una no abre la sesión de otra persona. |
+
+### AC. Base de datos, sincronización, respaldo y recuperación
+
+| ID | Pasos | Resultado esperado |
+|---|---|---|
+| AC01 | Confirmar modo SQLite local en el servidor de prueba y separar consultas de benchmark Turso. | Escrituras de prueba van solo a la copia SQLite; Turso no se considera fuente operativa ni recibe mutaciones del recorrido. |
+| AC02 | Escribir una compra y esperar sincronización prevista; comparar local/remoto solo si sincronización está activada. | Identificadores, versiones y estados siguen el contrato de sincronización; conflictos se señalan y no sobrescriben silenciosamente. |
+| AC03 | Simular Turso inaccesible durante el flujo operativo local. | El CRM local sigue operando con SQLite; se informa de atraso de sincronización sin bloquear entradas o reparto. |
+| AC04 | Simular cierre de proceso durante operación transaccional en la copia. | Tras reinicio no hay media factura, stock duplicado ni relación a medias; la operación puede reintentarse segura. |
+| AC05 | Crear copia de seguridad de datos aislados y comprobar fecha, tamaño y tablas. | Archivo descargable y consistente incluye las relaciones necesarias; datos persistentes de prueba no se mezclan con producción. |
+| AC06 | Probar backup inválido, truncado o de versión incompatible en un entorno temporal de restauración. | Restauración se rechaza antes de sustituir datos; mensaje identifica causa y mantiene copia previa intacta. |
+| AC07 | Restaurar copia válida en base de prueba nueva y comparar pedidos, stock, pagos, firmas y adjuntos. | Relaciones y totales coinciden; acceso y auditoría se conservan según contrato. |
+| AC08 | Ejecutar migración idempotente dos veces sobre copia ya migrada. | No hay columnas/tablas duplicadas ni pérdida de datos; versión de esquema queda estable. |
+| AC09 | Probar falta de espacio, lock SQLite o error de escritura simulado. | La operación falla de forma visible, no se confirma éxito falso y se mantiene integridad transaccional. |
+| AC10 | Revisar lectura de valores históricos tras retirar/renombrar proveedor o producto. | Snapshots en pedidos, facturas y movimientos siguen legibles sin registros huérfanos confusos. |
+
+### AD. Volumen, tiempos de respuesta y concurrencia
+
+| ID | Pasos | Resultado esperado |
+|---|---|---|
+| AD01 | Abrir catálogos/listados con volumen real de productos, proveedores y pedidos de la copia. | Primer render, búsqueda y filtros no bloquean la pantalla; se consultan los campos necesarios. |
+| AD02 | Probar búsqueda con 1, 2, 4 y 8 caracteres sobre el catálogo amplio. | Resultados incrementales son consistentes y limitados; no descargan datos ilimitados en cada tecla. |
+| AD03 | Abrir compra con 1, 20 y 100 líneas de prueba dentro del límite operativo. | Edición, total, scroll y PDF siguen utilizables; no hay pérdida ni lentitud extrema. |
+| AD04 | Crear varias sesiones que consultan listados y refrescan una compra mientras otra está abierta. | Lecturas no bloquean escritura normal; caché se invalida cuando corresponde. |
+| AD05 | Dos operadores editan el mismo borrador simultáneamente. | Se detecta conflicto o regla de último cambio explícita; ninguna línea desaparece sin aviso. |
+| AD06 | Dos operadores intentan reservar el mismo producto/recurso y actualizar la misma parada. | Stock, asignación y estado no se duplican; conflictos informan resultado actual. |
+| AD07 | Pulsar repetidamente Guardar, Enviar, Recibir, Cobrar y Cerrar ruta con retardo de red. | Acciones son idempotentes o solicitan confirmar el resultado previo; no se crean duplicados. |
+| AD08 | Ejecutar pruebas con una respuesta API que tarda y luego se resuelve después del timeout. | La respuesta tardía no pisa un estado nuevo ni reabre un modal ya cerrado. |
+| AD09 | Medir mediana, máximo y tamaño de respuesta de endpoints críticos en la copia. | Se guarda baseline; regresiones visibles se investigan y no se comparan Turso/SQLite como si fueran la misma latencia. |
+| AD10 | Revisar consumo de memoria/CPU durante OCR de varios documentos y PDF grande. | Interfaz mantiene feedback y permite cancelar; no agota memoria de forma descontrolada. |
+
+### AE. Accesibilidad, compatibilidad y percepción visual ampliada
+
+| ID | Pasos | Resultado esperado |
+|---|---|---|
+| AE01 | Probar la creación completa de pedido con teclado, sin ratón. | Orden de foco, selector, sugerencias, checkboxes y botones permiten completar todo el proceso. |
+| AE02 | Usar lector de pantalla en campos, errores, loading y notificaciones. | Etiquetas y estados se anuncian con su contexto; el foco no salta al inicio tras guardar. |
+| AE03 | Verificar contraste de textos de ayuda, estado, foco, errores y botones desactivados. | Contraste suficiente y estados no dependen únicamente del color. |
+| AE04 | Probar navegador de escritorio y navegador móvil disponibles en el entorno. | Fechas, selectores nativos, descarga de PDF, cámara y firma se comportan de forma entendible en cada motor. |
+| AE05 | Cambiar orientación del móvil/tablet con modal de edición abierta. | Modal conserva registro y cambios, redimensiona y no oculta encabezado, botón guardar o cierre. |
+| AE06 | Abrir teclado virtual mientras se edita cantidad, alias, observación y dirección. | Campo activo y acciones permanecen visibles; el teclado no tapa el botón que se necesita. |
+| AE07 | Hacer zoom al 200 % en listado y modal, y revisar texto largo. | Se puede leer y completar acciones sin solapamiento, recorte o scroll horizontal de página. |
+| AE08 | Probar densidad con filas de 1, 10 y 100 registros y nombres cortos/largos. | Se ven suficientes filas sin sacrificar legibilidad; primera, intermedia y última no cambian de estructura. |
+| AE09 | Verificar modal de pedido, OCR, entrada con incidencias, entrega y documento abierto en cada resolución indicada. | Cada modal cabe en viewport, scroll es interno y contenido accionable no queda bajo cabecera flotante. |
+| AE10 | Probar estados vacíos/error, loading y éxito en ventana estrecha y con zoom. | Mensaje y siguiente paso no quedan fuera de pantalla; no hay estado en blanco confuso. |
+| AE11 | Probar targets táctiles en listas densas y botones cercanos. | No se activa una fila o acción vecina al tocar; acciones destructivas quedan claramente separadas. |
+| AE12 | Tomar captura del primer, intermedio y último registro y de la modal realmente abierta. | Evidencia muestra el contexto y viewport; cada error visual también queda capturado antes de corregirlo. |
+
 ## Auditoría visual, accesibilidad y responsive
 
 Repetir los casos críticos con los siguientes tamaños: escritorio `1440×900`, portátil `1095×800`, tablet horizontal `1024×768`, tablet vertical `768×1024`, móvil horizontal `812×375` y móvil vertical `441×820`. Comprobar especialmente formularios, listado/detalle, editor, adjuntos y modales con varias líneas.
