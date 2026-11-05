@@ -4482,11 +4482,12 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     products: ["name", "sku", "barcode", "category", "format", "unit", "unit_price", "cost_price", "stock", "stock_reserved", "min_stock", "warehouse_location", "warehouse_id", "product_status"],
     warehouses: ["code", "name", "address", "manager"],
     collection_points: ["code", "name", "address", "city", "opening_time", "closing_time", "geocoding_status"],
-    goods_receipts: ["code", "counterparty_type", "client_id", "supplier_id", "purchase_order_code", "purchase_order_status", "warehouse_id", "receipt_date", "status", "validation_status", "stock_applied", "stock_applied_by", "economic_difference", "line_count", "incident_count", "received_by", "validated_by"],
+    goods_receipts: ["code", "counterparty_name", "purchase_order_code", "receipt_date", "status", "validation_status", "stock_applied"],
     inventory_movements: ["order_id", "shipment_id", "product_id", "warehouse_id", "movement_type", "quantity", "movement_date", "client_id", "created_by", "reference"],
     returns: ["code", "client_id", "invoice_id", "product_id", "quantity", "reason", "status", "amount"],
   };
   const compactFieldLabels: Record<string, string> = {
+    counterparty_name: "Proveedor o cliente",
     purchase_order_code: "Pedido de compra",
     purchase_order_status: "Estado del pedido",
     stock_applied: "Stock sumado",
@@ -4577,7 +4578,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         return;
       }
       const compactFields = warehouseListFields[c.api];
-      const compactVersionKey = `excluvas.columns.compact-v2.${c.api}`;
+      const compactVersionKey = `excluvas.columns.compact-v3.${c.api}`;
       const saved = localStorage.getItem(`excluvas.columns.${c.api}`);
       if (compactFields) {
         if (!saved || localStorage.getItem(compactVersionKey) !== "1") {
@@ -7780,14 +7781,14 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           </button>
           {columnsOpen && (
             <div className="columns-options">
-              {c.fields.map((f: string, i: number) => (
+              {(warehouseListFields[c.api] || c.fields).map((f: string, i: number) => (
                 <label key={f}>
                   <input
                     type="checkbox"
                     checked={visibleFields.includes(f)}
                     onChange={() => toggleColumn(f)}
                   />{" "}
-                  {c.labels[i] || f}
+                  {compactFieldLabels[f] || c.labels[c.fields.indexOf(f)] || f}
                 </label>
               ))}
             </div>
@@ -7831,7 +7832,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             </div>
           )
         ) : <TopHorizontalScroll className="table-scroll">
-          <table>
+          <table className={active === "Entradas" ? "goods-receipts-table" : undefined}>
             <thead>
             <tr>
                 {isProducts && <th className="product-check-column"><span className="sr-only">Seleccionar</span></th>}
