@@ -6926,6 +6926,7 @@ body.reparto-modal-open {
 .supplier-order-edit-lines-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .supplier-order-edit-lines-head span { color: #596570; font-size: 12px; }
 .supplier-order-edit-line { display: grid; grid-template-columns: minmax(130px, 1fr) minmax(150px, 1.1fr) minmax(110px, .8fr) minmax(80px, .6fr) minmax(105px, .75fr) minmax(100px, .7fr) auto 28px; align-items: end; gap: 7px; padding: 8px; border: 1px solid #e0e4e7; }
+.supplier-order-edit-product-name { display: block; min-height: 34px; padding: 8px 9px; border: 1px solid #cbd1d6; background: #f5f6f7; color: #20262c; font-weight: 400; overflow-wrap: anywhere; }
 .supplier-order-edit-line > strong { align-self: center; white-space: nowrap; }
 .supplier-order-edit-line > button { border: 0; background: transparent; font-size: 20px; cursor: pointer; }
 .supplier-order-edit-add-line { display: grid; grid-template-columns: minmax(180px, 1.5fr) minmax(140px, 1fr) minmax(100px, .8fr) minmax(100px, .7fr) minmax(80px, .55fr) minmax(100px, .7fr) auto; align-items: end; gap: 7px; padding: 10px; border: 1px dashed #c8ced4; background: #fafbfc; }
