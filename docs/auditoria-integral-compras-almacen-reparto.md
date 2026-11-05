@@ -6,6 +6,61 @@ Este plan simula una jornada real de Exclusivas Inteligentes: revisar existencia
 
 La ejecución debe producir una matriz de resultados por caso (`Correcto`, `Fallido`, `Bloqueado` o `No aplica`), evidencia y responsable. Una pantalla que carga no equivale a un caso aprobado: se debe completar la acción, reabrir el registro y comprobar la persistencia en la interfaz y en la API/base aislada.
 
+## Dos niveles de revisión
+
+El documento contiene 261 casos de negocio/datos/errores y 18 casos transversales de capacidad de acción. Se usan dos niveles para no confundir un repaso habitual de salud con una auditoría profunda:
+
+### Revisión normal
+
+Recorrido breve de los **64 casos seleccionados** abajo. Se realiza después de un cambio agrupado que afecte Compras/Almacén/Reparto y antes de abrir el uso normal a los usuarios. Recorre el camino principal y comprueba los permisos, acciones clave, persistencia, un fallo frecuente por sección y coherencia entre módulos. Cada punto mantiene su resultado y evidencia; una revisión normal no convierte los demás casos en aprobados.
+
+`A01, A03, B01, B03, C01, D01, E01, E03, E06, E08, F02, F04, G01, G03, H01, H04, H06, H07, I01, I03, I05, I07, I09, J01, J02, K01, K03, K05, L01, L02, L03, L06, M01, M02, M04, N01, N03, N05, N06, O01, O02, O04, O05, P01, P03, Q03, Q05, R01, S01, T03, U03, V02, W03, X01, Y01, Z01, AA03, AB02, AC01, AD07, AE01, AF01, AF04, AF09`.
+
+Si la revisión normal encuentra un bloqueo de stock, cobro, documento, permiso o pérdida de datos, se detiene ese recorrido y se documenta; no se considera suficiente porque el resto de puntos seleccionados haya pasado.
+
+### Revisión exhaustiva
+
+Ejecuta **todos los casos A01–AF18**, cada variación indicada en ellos, todas las acciones de la matriz de roles, casos de límites/errores y revisión visual completa en cada tamaño. Se realiza para la auditoría integral solicitada, antes de cerrar una incidencia crítica, después de cambios amplios del flujo o antes de dar por estable el proceso. Requiere copia de SQLite aislada, inventario de saldos y conciliación final.
+
+Una funcionalidad necesaria que no exista o no pueda ejecutarse se registra como `Brecha funcional` y no como “No aplica” ni como aprobado. “No aplica” solo se usa cuando la condición está realmente ausente en el escenario y se explica por qué.
+
+## Revisión de capacidad de acción por rol
+
+En ambas modalidades, por cada tarea real se pregunta: **¿qué necesita hacer esta persona en este punto?, ¿puede hacerlo desde el bloque donde está trabajando?, y si debe ir a otro módulo, ¿la aplicación la lleva al registro correcto conservando datos y contexto?** La respuesta debe comprobarse en la interfaz con el rol real; que exista un endpoint o un botón en otra sección no demuestra que la persona pueda completar el trabajo.
+
+Para cada acción necesaria registrar: rol efectivo, objetivo de trabajo, sección/pantalla, acción esperada, permiso, estado que la habilita, ubicación del control, resultado, feedback, persistencia, siguiente paso y evidencia. Se considera fallo si la acción está ausente, oculta, deshabilitada sin motivo, permitida por API pero no por interfaz, lleva a un listado genérico, pierde cambios al navegar, no explica el requisito previo o deja al usuario en un callejón sin salida. Si la acción debe hacerse en otro bloque, el acceso debe ser evidente y conservar el ID/contexto del pedido, factura, entrada, incidencia o ruta.
+
+Comprobar explícitamente estos perfiles, limitándose a los roles y permisos que realmente estén configurados:
+
+- **Compras:** seleccionar proveedor/producto, vincular múltiples proveedores y alias, crear/editar/cancelar pedido, guardar observaciones, generar PDF, preparar email, gestionar OCR y abrir la recepción relacionada.
+- **Almacén:** registrar mercancía, revisar cada producto/unidad/lote, resolver diferencias, validar ubicación, controlar suma de stock, preparar pedido, reportar faltante y dejar trabajo listo para carga.
+- **Comercial:** localizar cliente, elegir dirección, crear/editar pedido, aclarar notas, consultar estado y saber qué acción falta para facturar.
+- **Reparto:** abrir ruta asignada, navegar, entregar total/parcial, firmar, adjuntar prueba, cobrar o registrar incidencia y continuar/cerrar la ruta.
+- **Administración/finanzas:** revisar facturas de clientes y proveedores, cobros/pagos, vencimientos, diferencias, abonos, documentos, auditoría y cierres.
+
+### AF. ¿Puede el usuario completar la acción necesaria desde el bloque actual?
+
+| ID | Pasos | Resultado esperado |
+|---|---|---|
+| AF01 | Como Compras, desde listado/detalle abrir un pedido, editarlo, anotar observación, cancelarlo y llegar a su entrada. | Las acciones permitidas están en el detalle o existe un enlace claro que lleva al pedido/entrada concretos sin perder filtro ni contexto. |
+| AF02 | Como Compras, crear manualmente una línea, guardar alias/recurrente, generar PDF y preparar el email. | La secuencia no exige conocer IDs ni duplicar datos; cada acción tiene confirmación y feedback propio. |
+| AF03 | Como Compras, desde OCR resolver línea desconocida, crear equivalencia y añadirla al borrador. | Se puede completar en ese flujo, volver al documento y revisar la línea resuelta; no hay paso técnico externo obligatorio. |
+| AF04 | Como Almacén, desde pedido recibido abrir la entrada, cambiar cantidades, indicar lote/daño y validar ubicación. | La persona encuentra todas las acciones necesarias y distingue registrar, sumar stock, revisar producto y validar ubicación. |
+| AF05 | Como Almacén, ante producto dañado o faltante, adjuntar evidencia, comunicar incidencia y saber quién debe resolverla. | El siguiente responsable y estado quedan claros; la incidencia no se pierde en una nota aislada. |
+| AF06 | Como Compras/Administración, desde incidencia solicitar reposición, reclamar abono o dejar el caso esperando respuesta. | Hay una acción disponible o un handoff con proveedor, pedido, línea y evidencia ya vinculados. |
+| AF07 | Como Compras, desde recomendación seleccionar proveedor alternativo y abrir borrador con la cantidad propuesta. | La elección y producto se conservan; al faltar proveedor/coste se explica el camino para completarlo. |
+| AF08 | Como Almacén, desde Stock abrir ubicación/producto, corregir dato permitido, ver movimientos y volver a la preparación. | Puede resolver el dato que bloquea picking; el cambio deja auditoría y vuelve a la tarea exacta. |
+| AF09 | Como Reparto, desde parada asignada abrir mapa, informar entrega, firmar, registrar cobro o incidencia y pasar a la siguiente parada. | No debe adivinar módulo ni abandonar la ruta; si una acción no aplica, el motivo se ve antes de intentar cerrar. |
+| AF10 | Como Reparto, con entrega parcial o cliente cerrado, decidir reintento, devolución o cierre según la política configurada. | La pantalla ofrece el siguiente paso válido y explica estados pendientes; no deja la parada imposible de recuperar. |
+| AF11 | Como Comercial, desde ficha de cliente crear pedido con dirección secundaria y después corregir cantidad/nota. | Puede completar el pedido desde ese bloque o regresar con selección y campos conservados; dirección fiscal no se sobrescribe. |
+| AF12 | Como Comercial/Administración, localizar pedido sin facturar, emitir factura y abrir albarán/factura desde el pedido. | El pendiente se localiza con una acción clara; no crea factura duplicada y conserva el vínculo con pedidos agrupados. |
+| AF13 | Como Administración, ante factura vencida o pago parcial, registrar/conciliar el importe restante y revisar estado. | Saldo pendiente y siguiente acción son visibles; anular no se confunde con borrar ni marcar como pagada. |
+| AF14 | Como Almacén/Reparto, consultar pedido cancelado o en incidencia desde mapa, preparación o ruta. | La aplicación explica el estado y excluye el pedido de operaciones incompatibles; no hay botón activo que pueda entregarlo. |
+| AF15 | Como usuario de consulta o de rol limitado, probar una acción que no le corresponde. | Control aparece oculto/deshabilitado con explicación o rechazo; no queda un botón que parezca operativo y falle sin feedback. |
+| AF16 | Como cualquier perfil, guardar un borrador con error de red y reintentar desde la misma pantalla. | Se conserva el trabajo y se explica el resultado; la persona sabe si guardar ocurrió antes de volver a pulsar. |
+| AF17 | Como responsable, abrir una alerta/notificación de pedido, recepción, incidencia o vencimiento. | Abre el registro y acción concreta que resuelven la alerta; marcar leída no borra la tarea pendiente. |
+| AF18 | Para cada perfil, hacer el recorrido principal solo con interfaz, sin llamadas API ni intervención técnica. | Se completa la tarea del rol de principio a fin; cualquier paso no disponible se registra como brecha funcional priorizada. |
+
 ## Seguridad y preparación de la prueba
 
 1. Registrar versión, commit, hora local, navegador, rol de la sesión, URL y tamaño de ventana.
