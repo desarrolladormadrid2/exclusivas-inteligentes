@@ -15,6 +15,7 @@ export default function SupplierPurchasingManager({ user, onNavigate }: { user?:
   const actor = String(user?.username || "Usuario local");
   const [suppliers, setSuppliers] = useState<AnyRow[]>([]);
   const [products, setProducts] = useState<AnyRow[]>([]);
+  const [purchaseSuggestions, setPurchaseSuggestions] = useState<AnyRow[]>([]);
   const [orders, setOrders] = useState<AnyRow[]>([]);
   const [aliases, setAliases] = useState<AnyRow[]>([]);
   const [recurrences, setRecurrences] = useState<AnyRow[]>([]);
@@ -65,18 +66,20 @@ export default function SupplierPurchasingManager({ user, onNavigate }: { user?:
   async function load() {
     setLoading(true); setError("");
     try {
-      const [supplierRows, productRows, orderRows, aliasRows, recurrentRows] = await Promise.all([
+      const [supplierRows, productRows, orderRows, aliasRows, recurrentRows, suggestionRows] = await Promise.all([
         fetch("/api/suppliers?view=lookup&limit=5000").then((r) => r.ok ? r.json() : []),
         fetch("/api/products?view=lookup&limit=5000").then((r) => r.ok ? r.json() : []),
         fetch(`/api/purchase_orders?refresh=${Date.now()}`, { cache: "no-store" }).then((r) => r.ok ? r.json() : []),
         fetch("/api/supplier_product_aliases?refresh=1").then((r) => r.ok ? r.json() : []),
         fetch("/api/supplier_recurrent_items?refresh=1").then((r) => r.ok ? r.json() : []),
+        fetch(`/api/purchase_suggestions?refresh=${Date.now()}`, { cache: "no-store" }).then((r) => r.ok ? r.json() : []),
       ]);
       setSuppliers(Array.isArray(supplierRows) ? supplierRows : []);
       setProducts(Array.isArray(productRows) ? productRows : []);
       setOrders(Array.isArray(orderRows) ? orderRows : []);
       setAliases(Array.isArray(aliasRows) ? aliasRows : []);
       setRecurrences(Array.isArray(recurrentRows) ? recurrentRows : []);
+      setPurchaseSuggestions(Array.isArray(suggestionRows) ? suggestionRows : []);
     } catch { setError("No se pudieron cargar compras, proveedores y productos."); }
     finally { setLoading(false); }
   }
@@ -98,7 +101,8 @@ export default function SupplierPurchasingManager({ user, onNavigate }: { user?:
     .map((product) => {
       const available = Number(product.available_stock ?? (Number(product.stock || 0) - Number(product.stock_reserved || 0)));
       const minimum = Number(product.min_stock ?? product.stock_min ?? 0);
-      return { product, available, minimum, suggested: Math.max(1, minimum - available) };
+      const suggestion = purchaseSuggestions.find((item) => Number(item.product_id) === Number(product.id));
+      return { product, available, minimum, suggested: Number(suggestion?.suggested_quantity || Math.max(1, minimum - available)), comparisons: Array.isArray(suggestion?.comparisons) ? suggestion.comparisons : [] };
     })
     .filter((item) => item.available < item.minimum)
     .sort((a, b) => a.available - b.available || String(a.product.name || "").localeCompare(String(b.product.name || ""), "es"));
@@ -414,6 +418,6 @@ export default function SupplierPurchasingManager({ user, onNavigate }: { user?:
         </>}
       </article>
     </div>}
-    {section === "recommended" && <section className="supplier-recommended-panel" aria-label="Compras recomendadas"><div className="supplier-recommended-head"><div><b>Productos bajo mínimo</b><small>Recomendaciones calculadas con el stock disponible, descontando las reservas de pedidos.</small></div><strong>{loading ? "—" : `${recommendedProducts.length} productos`}</strong></div>{loading ? <div className="data-loading" role="status">Calculando recomendaciones…</div> : recommendedProducts.length ? <div className="supplier-recommended-list">{recommendedProducts.map(({ product, available, minimum, suggested }) => <article className="supplier-recommended-row" key={product.id}><div><b>{product.name}</b><small>{product.sku || "Sin referencia"}{product.supplier_name ? ` · ${product.supplier_name}` : ""}</small></div><span><b>{available}</b><small>disponibles</small></span><span><b>{minimum}</b><small>mínimo</small></span><strong><b>{suggested}</b><small>unidades sugeridas</small></strong></article>)}</div> : <p className="empty-state">No hay productos por debajo del stock mínimo.</p>}</section>}
+    {section === "recommended" && <section className="supplier-recommended-panel" aria-label="Compras recomendadas"><div className="supplier-recommended-head"><div><b>Productos bajo mínimo</b><small>Recomendaciones calculadas con el stock disponible, descontando las reservas de pedidos.</small></div><strong>{loading ? "—" : `${recommendedProducts.length} productos`}</strong></div>{loading ? <div className="data-loading" role="status">Calculando recomendaciones…</div> : recommendedProducts.length ? <div className="supplier-recommended-list">{recommendedProducts.map(({ product, available, minimum, suggested, comparisons }) => <article className="supplier-recommended-row" key={product.id}><div><b>{product.name}</b><small>{product.sku || "Sin referencia"}</small></div><span><b>{available}</b><small>disponibles</small></span><span><b>{minimum}</b><small>mínimo</small></span><strong><b>{suggested}</b><small>unidades sugeridas</small></strong><div className="supplier-recommended-suppliers"><header><b>Proveedores y precios</b><small>Ordenados por precio registrado; los demás quedan listos para solicitar precio.</small></header>{comparisons.length ? <div className="supplier-recommended-supplier-list">{comparisons.slice(0, 6).map((offer: AnyRow) => <div className={offer.has_price ? "has-price" : "no-price"} key={String(offer.id)}><span><b>{offer.supplier_name}</b><small>{offer.source || "Sin precio registrado"}{offer.lead_time_days ? ` · ${offer.lead_time_days} días` : ""}</small></span><strong>{offer.has_price ? currency(offer.real_cost) : "Sin precio registrado"}</strong></div>)}</div> : <p>Sin proveedores disponibles para este producto.</p>}</div></article>)}</div> : <p className="empty-state">No hay productos por debajo del stock mínimo.</p>}</section>}
   </section>;
 }

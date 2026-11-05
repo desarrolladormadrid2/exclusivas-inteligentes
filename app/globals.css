@@ -6862,6 +6862,19 @@ body.reparto-modal-open {
 .supplier-recommended-row > div, .supplier-recommended-row > span, .supplier-recommended-row > strong { display: grid; gap: 3px; min-width: 0; }
 .supplier-recommended-row > div b { overflow-wrap: anywhere; color: #20262c; }
 .supplier-recommended-row > span b, .supplier-recommended-row > strong b { color: #a51419; font-size: 15px; }
+.supplier-recommended-suppliers { grid-column: 1 / -1; border-top: 1px solid #e2e5e8; padding-top: 9px; display: grid; gap: 7px; }
+.supplier-recommended-suppliers > header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.supplier-recommended-suppliers > header b { color: #20262c; }
+.supplier-recommended-suppliers > header small { color: #68747e; font-size: 11px; }
+.supplier-recommended-supplier-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 10px; }
+.supplier-recommended-supplier-list > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; padding: 7px 8px; border: 1px solid #e1e4e7; background: #fbfcfc; }
+.supplier-recommended-supplier-list > div > span { display: grid; gap: 2px; min-width: 0; }
+.supplier-recommended-supplier-list b { overflow-wrap: anywhere; color: #20262c; }
+.supplier-recommended-supplier-list small { color: #68747e; font-size: 11px; }
+.supplier-recommended-supplier-list strong { white-space: nowrap; color: #a51419; }
+.supplier-recommended-supplier-list .has-price { border-left: 3px solid #078858; }
+.supplier-recommended-supplier-list .has-price strong { color: #078858; }
+.supplier-recommended-suppliers > p { margin: 0; color: #68747e; font-size: 12px; }
 .supplier-orders-tools { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(180px, 230px) minmax(170px, 210px) auto; align-items: center; gap: 8px; margin-bottom: 10px; }
 .supplier-orders-tools input, .supplier-orders-tools select, .supplier-purchasing-page input:not([type="checkbox"]), .supplier-purchasing-page select, .supplier-purchasing-page textarea { min-width: 0; width: 100%; border: 1px solid #cbd1d6; background: #fff; padding: 8px 9px; color: #20262c; }
 .supplier-orders-tools span { justify-self: end; color: #53606b; font-size: 12px; font-weight: 700; white-space: nowrap; }
@@ -6990,6 +7003,7 @@ body.reparto-modal-open {
   .supplier-recommended-row { grid-template-columns: 1fr 1fr; }
   .supplier-recommended-row > div { grid-column: 1 / -1; }
   .supplier-recommended-row > strong { grid-column: 1 / -1; }
+  .supplier-recommended-supplier-list { grid-template-columns: 1fr; }
   .supplier-order-actions { gap: 7px 13px; }
   .supplier-order-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .supplier-order-fields .supplier-order-notes { grid-column: span 2; }
