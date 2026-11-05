@@ -4443,7 +4443,7 @@ export async function crmApiHandler(req, res) {
           d.payment_due_date = String(d.payment_due_date || "").slice(0, 10) || addCalendarDays(invoiceDate, paymentTermsDays(paymentTermsSnapshot));
           d.payment_status = String(d.payment_status || "Pendiente").trim() || "Pendiente";
           d.status = String(d.status || "Borrador").trim();
-          if (!["Borrador", "Enviado", "Parcialmente recibido", "Recibido", "Recibido con incidencia", "Cancelado"].includes(d.status)) return send(res, 400, { error: "El estado del pedido de compra no es válido" });
+          if (!["Borrador", "Enviado", "En tránsito", "Parcialmente recibido", "Recibido", "Recibido con incidencia", "Cancelado"].includes(d.status)) return send(res, 400, { error: "El estado del pedido de compra no es válido" });
           if (!Array.isArray(d.lines) || !d.lines.length) {
             return send(res, 400, { error: "Añade al menos una línea de producto a la compra" });
           }
@@ -4789,12 +4789,12 @@ export async function crmApiHandler(req, res) {
           }
           if (d.status !== undefined) {
             const nextStatus = String(d.status || "").trim();
-            if (!["Borrador", "Enviado", "Parcialmente recibido", "Recibido", "Recibido con incidencia", "Cancelado"].includes(nextStatus)) return send(res, 400, { error: "El estado del pedido de compra no es válido" });
-            if (["Recibido", "Recibido con incidencia", "Parcialmente recibido"].includes(nextStatus)) return send(res, 409, { error: "Registra la mercancía desde Entradas para validar cantidades y actualizar el stock" });
+            if (!["Borrador", "Enviado", "En tránsito", "Parcialmente recibido", "Recibido", "Recibido con incidencia", "Cancelado"].includes(nextStatus)) return send(res, 400, { error: "El estado del pedido de compra no es válido" });
+            if (["Recibido", "Recibido con incidencia", "Parcialmente recibido"].includes(nextStatus) && nextStatus !== String(currentPurchase?.status || "")) return send(res, 409, { error: "Registra la mercancía desde Entradas para validar cantidades y actualizar el stock" });
             if (nextStatus === "Cancelado" && db.prepare("SELECT id FROM goods_receipts WHERE purchase_order_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 LIMIT 1").get(Number(p[2]))) return send(res, 409, { error: "Este pedido ya tiene una entrada registrada. Completa su seguimiento desde Entradas." });
           }
           if (Array.isArray(d.lines)) {
-            if (String(currentPurchase?.status || "Borrador") !== "Borrador") return send(res, 409, { error: "Solo se pueden modificar las líneas de un pedido en borrador" });
+            if (!["Borrador", "Enviado", "En tránsito"].includes(String(currentPurchase?.status || "Borrador"))) return send(res, 409, { error: "Las líneas solo se pueden modificar antes de validar una recepción" });
             if (db.prepare("SELECT id FROM goods_receipts WHERE purchase_order_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 LIMIT 1").get(Number(p[2]))) return send(res, 409, { error: "El pedido ya tiene una entrada vinculada y no se pueden cambiar sus líneas" });
             purchaseOrderLinesToReplace = d.lines.map((line) => ({
               productId: Number(line.product_id),
