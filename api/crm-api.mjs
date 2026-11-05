@@ -2288,21 +2288,29 @@ export async function crmApiHandler(req, res) {
         if (!order) return send(res, 404, { error: "Pedido de compra no encontrado" });
         const to = String(order.supplier_email || "").trim();
         if (!to || !to.includes("@")) return send(res, 400, { error: "Añade un email válido a la ficha del proveedor" });
-        const subject = `Pedido ${order.code} · Exclusivas Inteligentes`;
-        const body = `Buenos días,\n\nAdjuntamos el pedido ${order.code} de Exclusivas Inteligentes.\n\nEntrega prevista: ${order.expected_date || "por confirmar"}.\n\nUn saludo.`;
+         const emailBody = req.method === "POST" ? await read(req) : {};
+         const cancellation = String(emailBody.purpose || "").trim() === "cancellation";
+         const reason = String(emailBody.cancellation_reason || "").trim().slice(0, 1000);
+         const subject = cancellation ? `Anulación del pedido ${order.code} · Exclusivas Inteligentes` : `Pedido ${order.code} · Exclusivas Inteligentes`;
+         const body = cancellation
+           ? `Buenos días,\n\nPor favor, considera anulado el pedido ${order.code} de Exclusivas Inteligentes.${reason ? `\n\nMotivo: ${reason}` : ""}\n\nDisculpa las molestias.\n\nUn saludo.`
+           : `Buenos días,\n\nAdjuntamos el pedido ${order.code} de Exclusivas Inteligentes.\n\nEntrega prevista: ${order.expected_date || "por confirmar"}.\n\nUn saludo.`;
         const apiKey = String(process.env.RESEND_API_KEY || "").trim();
         const from = String(process.env.RESEND_FROM_EMAIL || "").trim();
         if (!apiKey || !from) return send(res, 200, { mode: "mailto", to, subject, body });
-        const lines = db.prepare("SELECT pol.*,p.name product_name FROM purchase_order_lines pol LEFT JOIN products p ON p.id=pol.product_id WHERE pol.purchase_order_id=? AND CAST(COALESCE(pol.deleted,0) AS INTEGER)=0 ORDER BY pol.id").all(Number(p[2]));
-        const pdf = createPurchaseOrderPdf(order, lines);
-        const response = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ from, to: [to], subject, html: `<p>Buenos días,</p><p>Adjuntamos el pedido <strong>${pdfSafeText(order.code)}</strong> de Exclusivas Inteligentes.</p><p>Entrega prevista: ${pdfSafeText(order.expected_date || "por confirmar")}.</p><p>Un saludo.</p>`, attachments: [{ filename: `${order.code}.pdf`, content: pdf.toString("base64") }] }) });
+         const lines = cancellation ? [] : db.prepare("SELECT pol.*,p.name product_name FROM purchase_order_lines pol LEFT JOIN products p ON p.id=pol.product_id WHERE pol.purchase_order_id=? AND CAST(COALESCE(pol.deleted,0) AS INTEGER)=0 ORDER BY pol.id").all(Number(p[2]));
+         const pdf = cancellation ? null : createPurchaseOrderPdf(order, lines);
+         const html = cancellation
+           ? `<p>Buenos días,</p><p>Por favor, considera anulado el pedido <strong>${pdfSafeText(order.code)}</strong> de Exclusivas Inteligentes.</p>${reason ? `<p>Motivo: ${pdfSafeText(reason)}</p>` : ""}<p>Disculpa las molestias.</p><p>Un saludo.</p>`
+           : `<p>Buenos días,</p><p>Adjuntamos el pedido <strong>${pdfSafeText(order.code)}</strong> de Exclusivas Inteligentes.</p><p>Entrega prevista: ${pdfSafeText(order.expected_date || "por confirmar")}.</p><p>Un saludo.</p>`;
+         const response = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ from, to: [to], subject, html, ...(pdf ? { attachments: [{ filename: `${order.code}.pdf`, content: pdf.toString("base64") }] } : {}) }) });
         const result = await response.json().catch(() => ({}));
         if (!response.ok) return send(res, 502, { error: result?.message || result?.error || "El proveedor de correo rechazó el envío" });
         const now = new Date().toISOString();
-        db.prepare("UPDATE purchase_orders SET status='Enviado',updated_at=? WHERE id=? AND status='Borrador'").run(now, Number(p[2]));
-        recordAudit(actor, "POST", `purchase_orders/${Number(p[2])}/email`, "Enviar pedido al proveedor", JSON.stringify({ to, provider_id: result.id || null }));
+         if (!cancellation) db.prepare("UPDATE purchase_orders SET status='Enviado',updated_at=? WHERE id=? AND status='Borrador'").run(now, Number(p[2]));
+         recordAudit(actor, "POST", `purchase_orders/${Number(p[2])}/email`, cancellation ? "Enviar anulación al proveedor" : "Enviar pedido al proveedor", JSON.stringify({ to, provider_id: result.id || null, purpose: cancellation ? "cancellation" : "order" }));
         invalidateRelatedReadCaches("purchase_orders");
-        return send(res, 200, { mode: "resend", to, subject, provider_id: result.id || null, sent_at: now });
+         return send(res, 200, { mode: "resend", to, subject, purpose: cancellation ? "cancellation" : "order", provider_id: result.id || null, sent_at: now });
       }
       if (p[1] === "public" && p[2] === "shipments" && p[3] && req.method === "GET") {
         const trackingToken = decodeURIComponent(String(p[3]));

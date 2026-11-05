@@ -6898,6 +6898,10 @@ body.reparto-modal-open {
 .supplier-recurrent-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid #eaedef; }
 .supplier-ocr-panel { display: grid; gap: 10px; }
 .supplier-ocr-drop { display: grid; gap: 6px; place-items: center; min-height: 120px; padding: 15px; border: 1px dashed #9ba4ad; background: #fafbfc; text-align: center; cursor: pointer; }
+.supplier-ocr-drop:focus-within, .supplier-ocr-drop:focus, .supplier-ocr-drop.is-dragging { border-color: #c51f2a; background: #fff7f7; outline: 2px solid rgba(197,31,42,.16); outline-offset: 2px; }
+.supplier-cancellation-email { display: flex !important; grid-template-columns: none !important; align-items: center; gap: 7px; color: #9d1b24 !important; }
+.supplier-cancellation-email input { width: auto; }
+.supplier-cancellation-email-help { grid-column: 1 / -1; color: #58636e; font-size: 12px; }
 .supplier-ocr-drop input { max-width: 280px; }
 .supplier-ocr-drop small, .supplier-ocr-note { color: #58636e; font-size: 12px; }
 .supplier-ocr-text { min-height: 120px; resize: vertical; }
