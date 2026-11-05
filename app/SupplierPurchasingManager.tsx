@@ -148,8 +148,7 @@ export default function SupplierPurchasingManager({ user, onNavigate }: { user?:
     try {
       let cancellationNoteFailed = false;
       let cancellationEmailMessage = "";
-      const receiptLockedStatuses = ["Parcialmente recibido", "Recibido", "Recibido con incidencia"];
-      const mayEditLines = !selectedOrder || (!receiptLockedStatuses.includes(String(selectedOrder.status || "")) && orderStatus !== "Cancelado");
+      const mayEditLines = !selectedOrder || (!orderLineLockedStatuses.includes(String(selectedOrder.status || "")) && orderStatus !== "Cancelado");
       const payload: AnyRow = { code: selectedOrder?.code || `COM-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`, supplier_id: Number(supplierId), status: selectedOrder ? orderStatus : "Borrador", order_date: orderDate, expected_date: expectedDate || null, amount: mayEditLines ? total : Number(selectedOrder.amount || 0), notes, ocr_file_name: ocrFileName || null, ocr_extracted_text: ocrText || null };
       if (mayEditLines) payload.lines = lines;
       const response = await fetch(selectedOrder ? `/api/purchase_orders/${selectedOrder.id}` : "/api/purchase_orders", { method: selectedOrder ? "PUT" : "POST", headers: { "Content-Type": "application/json", "X-Actor": actor }, body: JSON.stringify(payload) });
