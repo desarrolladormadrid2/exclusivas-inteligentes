@@ -10,6 +10,7 @@
  * prueba para validar el flujo completo del CRM.
  */
 const baseUrl = String(process.env.BASE_URL || "https://crm.desarrolladormadrid.com").replace(/\/$/, "");
+const localAudit = process.env.AUDIT_LOCAL === "1";
 const actor = `PW-AUDIT-${Date.now()}`;
 const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 const headers = { "content-type": "application/json", "x-actor": actor };
@@ -39,6 +40,14 @@ async function call(path, options = {}, expected = null) {
   return { status: response.status, data, elapsed };
 }
 async function get(path) { return (await call(path)).data; }
+async function checkPdf(path, label) {
+  const response = await fetch(api(path));
+  const bytes = Buffer.from(await response.arrayBuffer());
+  check(response.ok, `${label}: HTTP ${response.status}`);
+  check(String(response.headers.get("content-type") || "").toLowerCase().includes("application/pdf"), `${label}: tipo de contenido no es PDF`);
+  check(bytes.length > 500 && bytes.subarray(0, 4).toString("ascii") === "%PDF", `${label}: PDF vacío o cabecera inválida (${bytes.length} bytes)`);
+  return bytes.length;
+}
 async function create(resource, data, expected = 201) {
   const result = await call(resource, { method: "POST", headers, body: JSON.stringify(data) }, expected);
   if (result.data?.id) track(resource.split("?")[0], result.data.id);
@@ -50,6 +59,10 @@ async function update(resource, id, data) {
 }
 async function remove(resource, id) {
   if (!id) return;
+  if (resource === "payments") {
+    await call(`payments/${id}`, { method: "DELETE", headers, body: JSON.stringify({ reason: "Limpieza de prueba aislada de auditoría" }) }).catch(() => undefined);
+    return;
+  }
   await call(`${resource}/${id}`, { method: "DELETE", headers }, [200, 204, 404]).catch(() => undefined);
 }
 async function test(name, fn) {
@@ -87,12 +100,13 @@ try {
   await test("salud, versión y origen de base de datos", async () => {
     const version = await get("version");
     const runtime = await get("runtime/database");
-    check(version.ok && version.environment === "production", `Versión no válida: ${JSON.stringify(version)}`);
-    check(runtime.source && ["SQLite local", "Turso remoto"].includes(version.database), `Origen no identificado: ${JSON.stringify(runtime)}`);
-    console.log(`  producción ${version.version} · ${version.database} · modo ${runtime.mode}`);
+    check(version.ok && version.environment === (localAudit ? "development" : "production"), `Versión o entorno no válidos: ${JSON.stringify(version)}`);
+    check(runtime.source && (localAudit ? version.database === "SQLite local" : ["SQLite local", "Turso remoto"].includes(version.database)), `Origen no identificado: ${JSON.stringify(runtime)}`);
+    console.log(`  ${localAudit ? "local" : "producción"} ${version.version} · ${version.database} · modo ${runtime.mode}`);
   });
 
   await test("login y roles operativos", async () => {
+    if (localAudit) return;
     const login = await call("login", { method: "POST", headers, body: JSON.stringify({ username: "Luis", password: "Temporal2026" }) });
     check(login.data?.user?.role === "admin", "El usuario de prueba no conserva el rol admin");
   });
@@ -132,8 +146,8 @@ try {
   });
 
   await test("CRUD de productos, proveedores y stock", async () => {
-    testProduct = await create("products", { name: `PW-AUDIT-PRODUCTO-A-${suffix}`, sku: `PW-AUDIT-A-${suffix}`, supplier_id: testSupplier.id, primary_supplier_id: testSupplier.id, warehouse_id: testWarehouse.id, unit_price: 12.5, cost_price: 5, stock: 100, stock_reserved: 0, stock_min: 5, category: "Auditoría", warehouse_location: "A-001" });
-    testProductB = await create("products", { name: `PW-AUDIT-PRODUCTO-B-${suffix}`, sku: `PW-AUDIT-B-${suffix}`, supplier_id: testSupplier.id, primary_supplier_id: testSupplier.id, warehouse_id: testWarehouse.id, unit_price: 7.5, cost_price: 3, stock: 100, stock_reserved: 0, stock_min: 5, category: "Auditoría", warehouse_location: "A-002" });
+    testProduct = await create("products", { name: `PW-AUDIT-PRODUCTO-A-${suffix}`, sku: `PW-AUDIT-A-${suffix}`, primary_supplier_id: testSupplier.id, warehouse_id: testWarehouse.id, unit_price: 12.5, cost_price: 5, stock: 100, stock_reserved: 0, stock_min: 5, category: "Auditoría", warehouse_location: "A-001" });
+    testProductB = await create("products", { name: `PW-AUDIT-PRODUCTO-B-${suffix}`, sku: `PW-AUDIT-B-${suffix}`, primary_supplier_id: testSupplier.id, warehouse_id: testWarehouse.id, unit_price: 7.5, cost_price: 3, stock: 100, stock_reserved: 0, stock_min: 5, category: "Auditoría", warehouse_location: "A-002" });
     const edited = await update("products", testProduct.id, { ...testProduct, unit_price: 13, warehouse_location: "B-126", description: "Producto de auditoría editable" });
     check(Number(edited.unit_price) === 13 && edited.warehouse_location === "B-126", "La edición de producto no persiste");
     const stock = await get("stock?refresh=1");
@@ -158,16 +172,28 @@ try {
   });
 
   await test("CRUD de compras y recepción de mercancía", async () => {
-    const purchase = await create("purchase_orders", { code: `PW-AUDIT-COMPRA-${suffix}`, supplier_id: testSupplier.id, order_date: new Date().toISOString().slice(0, 10), status: "Pedido", lines: [{ product_id: testProduct.id, quantity: 4, unit_cost: 5, amount: 20 }] });
+    const purchase = await create("purchase_orders", { code: `PW-AUDIT-COMPRA-${suffix}`, supplier_id: testSupplier.id, order_date: new Date().toISOString().slice(0, 10), status: "Enviado", lines: [{ product_id: testProduct.id, quantity: 4, unit_cost: 5, amount: 20 }] });
     const lines = await get("purchase_order_lines?refresh=1");
     const line = lines.find((row) => Number(row.purchase_order_id) === Number(purchase.id));
     check(line, "No se creó la línea de compra");
     track("purchase_order_lines", line.id);
     const before = Number(rowById(await get("products?refresh=1"), testProduct.id).stock);
-    const received = await update("purchase_orders", purchase.id, { code: purchase.code, supplier_id: purchase.supplier_id, order_date: purchase.order_date, status: "Recibida", amount: purchase.amount, expected_date: purchase.expected_date || "", notes: "Recepción de auditoría" });
-    check(received.status === "Recibida", "La compra no pasa a recibida");
+    const receipt = await create("goods_receipts/receive", { code: `PW-AUDIT-ENTRADA-${suffix}`, counterparty_type: "Proveedor", supplier_id: testSupplier.id, purchase_order_id: purchase.id, warehouse_id: testWarehouse.id, receipt_date: new Date().toISOString().slice(0, 10), validation_status: "Validada", validated_by: actor, stock_applied: true, notes: "Recepción y validación de auditoría", lines: [{ product_id: testProduct.id, expected_quantity: 4, received_quantity: 4, quantity_unit: "unidad", unit_cost: 5, status: "Correcta", lot_code: `PW-${suffix}` }] });
+    track("goods_receipts", receipt.id);
+    const receiptDetail = await get(`goods_receipts/detail/${receipt.id}`);
+    check(receiptDetail.validation_status === "Validada" && Number(receiptDetail.stock_applied) === 1, "La entrada no conserva la validación y el estado de stock");
+    check(receiptDetail.lines?.length === 1 && receiptDetail.lines[0].product_name === testProduct.name, "La entrada no mantiene el producto esperado");
+    track("goods_receipt_lines", receiptDetail.lines[0].id);
+    await call(`goods_receipt_lines/${receiptDetail.lines[0].id}/location`, { method: "PUT", headers, body: JSON.stringify({ mode: "manual", reason: "Ubicación revisada en auditoría" }) });
+    const locationValidated = await get(`goods_receipts/detail/${receipt.id}`);
+    check(locationValidated.lines[0].location_verified_status === "Validada manualmente", "La validación del producto/ubicación no queda registrada");
+    const movement = (await get("inventory_movements?refresh=1")).find((row) => row.reference === receipt.code && Number(row.product_id) === Number(testProduct.id));
+    check(movement, "La entrada validada no crea el movimiento de stock trazable");
+    track("inventory_movements", movement.id);
     const after = Number(rowById(await get("products?refresh=1"), testProduct.id).stock);
     check(after === before + 4, `La recepción no aumenta stock: ${before} -> ${after}`);
+    const refreshedPurchase = rowById(await get("purchase_orders?refresh=1"), purchase.id);
+    check(refreshedPurchase.status === "Recibido" && refreshedPurchase.receipt_code === receipt.code, "El pedido de proveedor no se actualiza y vincula a Entradas");
   });
 
   await test("CRUD de usuarios de rol repartidor", async () => {
@@ -221,24 +247,41 @@ try {
     workflowRoutes.forEach((route) => track("delivery_routes", route.id));
     workflowInvoices.forEach((invoiceId) => track("invoices", invoiceId));
     check(workflowRoutes.length === 2 && workflowInvoices.length === 3, `Carga/rutas/facturas inesperadas: ${workflowRoutes.length}/${workflowInvoices.length}`);
+    const deliveryNotes = [];
+    for (const order of workflowOrders) {
+      const delivery = await create(`orders/convert-delivery/${order.id}`, {});
+      track("delivery_notes", delivery.id);
+      check(delivery.id && delivery.code && Number(delivery.order_id) === Number(order.id), "No se generó un albarán vinculado al pedido");
+      const noteLines = (await get("delivery_note_lines?refresh=1")).filter((line) => Number(line.delivery_note_id) === Number(delivery.id));
+      const expectedProductId = Number(order === workflowOrders[1] ? testProductB.id : testProduct.id);
+      check(noteLines.some((line) => Number(line.product_id) === expectedProductId && Number(line.quantity) === 1), `El albarán ${delivery.code} no conserva el producto/cantidad pedidos`);
+      deliveryNotes.push(delivery);
+    }
+    check(deliveryNotes.length === workflowOrders.length, "Faltan albaranes en el flujo");
+    for (const invoiceId of workflowInvoices) {
+      const invoice = rowById(await get("invoices?refresh=1"), invoiceId);
+      const lines = (await get("invoice_lines?refresh=1")).filter((line) => Number(line.invoice_id) === Number(invoiceId));
+      check(invoice && lines.length > 0 && Number(invoice.amount) > 0, `La factura ${invoiceId} no conserva líneas e importe`);
+    }
     const stops = workflowRoutes[0].stops || [];
     if (stops.length > 1) {
       const reordered = await call(`routes/${workflowRoutes[0].id}/stops/reorder`, { method: "PUT", headers, body: JSON.stringify({ stop_ids: stops.map((stop) => stop.id).reverse() }) });
       check(Number(reordered.data.stops[0].position) === 1, "No se recalculó el orden de ruta");
     }
     await call(`routes/${workflowRoutes[0].id}/position`, { method: "POST", headers, body: JSON.stringify({ latitude: 42.006, longitude: -4.531, accuracy: 12, recorded_at: new Date().toISOString() }) });
+    const invoicesBeforeDelivery = await get("invoices?refresh=1");
     for (const shipment of workflowShipments) {
       await call(`shipments/${shipment.id}/delivery-status`, { method: "POST", headers, body: JSON.stringify({ status: "Enviado" }) });
       const confirmation = await call(`shipments/${shipment.id}/delivery-confirmation`, { method: "POST", headers, body: JSON.stringify({ signature_status: "Firmado", recipient_name: "Cliente auditoría", signature_data: "data:image/png;base64," + "A".repeat(140), note: "Entrega validada en batería", photos: [{ name: "entrega-auditoria.png", mime: "image/png", data: "data:image/png;base64," + "B".repeat(140) }] }) });
       check(confirmation.data.status === "Entregado", `El envío ${shipment.id} no quedó entregado`);
-      const invoiceId = workflowInvoices.shift();
-      const receipt = await call(`shipments/${shipment.id}/payment-receipt`, { method: "POST", headers, body: JSON.stringify({ payment_status: "Recibido", amount: Number(workflowOrders.find((order) => Number(order.id) === Number(shipment.order_id)).amount), method: "Tarjeta", reference: `PW-AUDIT-PAGO-${shipment.id}`, note: "Cobro de auditoría", attachments: [{ name: "justificante.png", mime: "image/png", data: "data:image/png;base64," + "C".repeat(140) }] }) });
+      const invoice = invoicesBeforeDelivery.find((row) => workflowInvoices.includes(Number(row.id)) && Number(row.order_id) === Number(shipment.order_id));
+      check(invoice?.id && Number(invoice.amount) > 0, `El envío ${shipment.id} no tiene una factura válida para cobrar`);
+      const receipt = await call(`shipments/${shipment.id}/payment-receipt`, { method: "POST", headers, body: JSON.stringify({ payment_status: "Recibido", amount: Number(invoice.amount), method: "Tarjeta", reference: `PW-AUDIT-PAGO-${shipment.id}`, note: "Cobro de auditoría", attachments: [{ name: "justificante.png", mime: "image/png", data: "data:image/png;base64," + "C".repeat(140) }] }) });
       check(receipt.data.payment_received_status === "Recibido", "No se registró el cobro del reparto");
       workflowPayments.push(...(await get("payments?refresh=1")).filter((payment) => String(payment.notes || "").includes(String(shipment.code))).map((payment) => Number(payment.id)));
       for (const paymentId of workflowPayments) track("payments", paymentId);
       const tracking = await get(`public/shipments/${encodeURIComponent(shipment.public_tracking_token)}`);
       check(tracking.shipment?.status === "Entregado" && tracking.shipment?.code === shipment.code, "El seguimiento público no refleja la entrega");
-      check(invoiceId || true, "Factura de flujo no identificada");
     }
     const route1 = await get(`routes/${workflowRoutes[0].id}`);
     check(route1.stops.every((stop) => ["Entregado", "Completada"].includes(String(stop.status))), "La ruta no sincroniza estados de entrega");
@@ -247,6 +290,16 @@ try {
     const invoices = await get("invoices?refresh=1");
     const flowInvoices = workflowRoutes.flatMap((route) => route.stops.map((stop) => invoices.find((invoice) => Number(invoice.order_id) === Number(workflowShipments.find((shipment) => Number(shipment.id) === Number(stop.shipment_id))?.order_id)))).filter(Boolean);
     check(flowInvoices.every((invoice) => ["Cobrada", "Pagada"].includes(String(invoice.status))), "No todas las facturas han quedado cobradas");
+    for (const delivery of deliveryNotes) {
+      const generated = await call(`documents/delivery/${delivery.id}/pdf`, { method: "POST", headers, body: JSON.stringify({ force: true }) });
+      check(Number(generated.data.pdf_bytes) > 500 && generated.data.share_token, `No se generó el PDF del albarán ${delivery.code}`);
+      await checkPdf(`documents/delivery/share/${generated.data.share_token}`, `PDF albarán ${delivery.code}`);
+    }
+    for (const invoice of flowInvoices) {
+      const generated = await call(`invoices/${invoice.id}/pdf`, { method: "POST", headers, body: JSON.stringify({ force: true }) });
+      check(Number(generated.data.pdf_bytes) > 500 && generated.data.share_token, `No se generó el PDF de la factura ${invoice.code}`);
+      await checkPdf(`invoices/share/${generated.data.share_token}`, `PDF factura ${invoice.code}`);
+    }
     console.log(`  flujo: ${workflowOrders.length} pedidos · ${workflowRoutes.length} rutas · entrega/firma/foto/cobro/seguimiento`);
   });
 
@@ -276,7 +329,8 @@ try {
   for (const trip of trips.filter((row) => String(row.code || "").includes("20991231") || String(row.created_by || "") === actor)) await remove("vehicle_trips", trip.id);
   const cleanupOrder = [
     "payments", "driver_daily_closures", "vehicle_refuels", "vehicle_maintenance", "vehicle_trips",
-    "delivery_route_positions", "invoices", "invoice_lines", "quote_lines", "quotes", "returns",
+    "delivery_route_positions", "invoices", "invoice_lines", "delivery_notes", "delivery_note_lines",
+    "goods_receipt_incidents", "goods_receipt_lines", "goods_receipts", "quote_lines", "quotes", "returns",
     "notes", "expenses", "scheduled_tasks", "purchase_orders", "purchase_order_lines", "order_lines",
     "shipments", "orders", "collection_points", "clients", "inventory_movements", "products", "warehouses",
     "suppliers", "users", "vehicles",
@@ -284,7 +338,7 @@ try {
   for (const resource of cleanupOrder) for (const id of created.get(resource) || []) await remove(resource, id);
   const activeChecks = await Promise.all(["suppliers", "products", "clients", "collection_points", "orders", "shipments", "invoices", "payments", "vehicles"].map(async (resource) => {
     const rows = await get(`${resource}?refresh=1&limit=5000`).catch(() => []);
-    return { resource, remaining: Array.isArray(rows) ? rows.filter((row) => JSON.stringify(row).includes("PW-AUDIT-") || String(row.created_by || "") === actor).length : 0 };
+    return { resource, remaining: Array.isArray(rows) ? rows.filter((row) => (resource !== "payments" || (String(row.status || "Aplicado") !== "Anulado" && !row.voided_at)) && (JSON.stringify(row).includes("PW-AUDIT-") || String(row.created_by || "") === actor)).length : 0 };
   }));
   const leaked = activeChecks.filter((row) => row.remaining);
   console.log(`SUMMARY ${JSON.stringify({ actor, total_ms: Date.now() - startedAt, passed: results.filter((row) => row.status === "PASS").length, failed: results.filter((row) => row.status === "FAIL").length, results, cleanup: activeChecks, leaked })}`);
