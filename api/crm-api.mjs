@@ -1928,8 +1928,23 @@ function purchasePaymentInfo(row) {
 function enrichPurchaseOrder(row) {
   return { ...row, ...purchasePaymentInfo(row) };
 }
+const purchaseOrderReceiptFields = `
+  (SELECT gr.id FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.id DESC LIMIT 1) AS receipt_id,
+  (SELECT gr.code FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.id DESC LIMIT 1) AS receipt_code,
+  (SELECT gr.status FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.id DESC LIMIT 1) AS receipt_status,
+  (SELECT gr.validation_status FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.id DESC LIMIT 1) AS receipt_validation_status,
+  (SELECT gr.stock_applied FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.id DESC LIMIT 1) AS receipt_stock_applied,
+  (SELECT gr.stock_applied_at FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.id DESC LIMIT 1) AS receipt_stock_applied_at,
+  (SELECT gr.stock_applied_by FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.id DESC LIMIT 1) AS receipt_stock_applied_by,
+  (SELECT gr.received_by FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.id DESC LIMIT 1) AS receipt_received_by,
+  (SELECT gr.validated_by FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.id DESC LIMIT 1) AS receipt_validated_by,
+  (SELECT gr.validated_at FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.id DESC LIMIT 1) AS receipt_validated_at,
+  (SELECT gr.receipt_date FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.id DESC LIMIT 1) AS receipt_date,
+  (SELECT COUNT(*) FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0) AS receipt_count,
+  CASE WHEN po.status IN ('Parcialmente recibido','Recibido','Recibido con incidencia') AND NOT EXISTS (SELECT 1 FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0) THEN 1 ELSE 0 END AS receipt_missing
+`;
 function getPurchaseOrderRows() {
-  return db.prepare("SELECT purchase_orders.*,suppliers.name supplier_name,suppliers.payment_terms supplier_payment_terms FROM purchase_orders LEFT JOIN suppliers ON suppliers.id=purchase_orders.supplier_id WHERE CAST(COALESCE(purchase_orders.deleted,0) AS INTEGER)=0 ORDER BY purchase_orders.order_date DESC,purchase_orders.id DESC LIMIT 500").all().map(enrichPurchaseOrder);
+  return db.prepare(`SELECT po.*,suppliers.name supplier_name,suppliers.payment_terms supplier_payment_terms,${purchaseOrderReceiptFields} FROM purchase_orders po LEFT JOIN suppliers ON suppliers.id=po.supplier_id WHERE CAST(COALESCE(po.deleted,0) AS INTEGER)=0 ORDER BY po.order_date DESC,po.id DESC LIMIT 500`).all().map(enrichPurchaseOrder);
 }
 function getVehicleWithMetrics(id) {
   const vehicle = db.prepare("SELECT * FROM vehicles WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(id));
@@ -2258,7 +2273,7 @@ export async function crmApiHandler(req, res) {
         }
       }
       if (p[1] === "purchase_orders" && p[2] && p[3] === "detail" && req.method === "GET") {
-        const order = db.prepare("SELECT po.*,s.name supplier_name,s.email supplier_email,s.address supplier_address,s.city supplier_city FROM purchase_orders po LEFT JOIN suppliers s ON s.id=po.supplier_id WHERE po.id=? AND CAST(COALESCE(po.deleted,0) AS INTEGER)=0").get(Number(p[2]));
+        const order = db.prepare(`SELECT po.*,s.name supplier_name,s.email supplier_email,s.address supplier_address,s.city supplier_city,${purchaseOrderReceiptFields} FROM purchase_orders po LEFT JOIN suppliers s ON s.id=po.supplier_id WHERE po.id=? AND CAST(COALESCE(po.deleted,0) AS INTEGER)=0`).get(Number(p[2]));
         if (!order) return send(res, 404, { error: "Pedido de compra no encontrado" });
         const lines = db.prepare("SELECT pol.*,p.name product_name,p.sku,MAX(0,pol.quantity-COALESCE((SELECT SUM(gl.received_quantity) FROM goods_receipt_lines gl JOIN goods_receipts gr ON gr.id=gl.receipt_id WHERE gr.purchase_order_id=pol.purchase_order_id AND gl.product_id=pol.product_id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 AND CAST(COALESCE(gl.deleted,0) AS INTEGER)=0),0)) remaining_quantity FROM purchase_order_lines pol LEFT JOIN products p ON p.id=pol.product_id WHERE pol.purchase_order_id=? AND CAST(COALESCE(pol.deleted,0) AS INTEGER)=0 ORDER BY pol.id").all(Number(p[2]));
         const observations = db.prepare("SELECT * FROM purchase_order_observations WHERE purchase_order_id=? ORDER BY id DESC LIMIT 100").all(Number(p[2]));
@@ -3678,7 +3693,7 @@ export async function crmApiHandler(req, res) {
         return send(res, 200, current);
       }
       if (t === "goods_receipts" && req.method === "GET" && !p[2]) {
-        const rows = db.prepare("SELECT gr.*,s.name supplier_name,c.name client_name,w.name warehouse_name,CASE WHEN COALESCE(gr.counterparty_type,'Proveedor')='Cliente' THEN c.name ELSE s.name END counterparty_name,po.code purchase_order_code,pi.code purchase_invoice_code,pi.status purchase_invoice_status,(SELECT COUNT(*) FROM goods_receipt_lines gl WHERE gl.receipt_id=gr.id AND CAST(COALESCE(gl.deleted,0) AS INTEGER)=0) line_count,(SELECT COUNT(*) FROM goods_receipt_incidents gi WHERE gi.receipt_id=gr.id AND CAST(COALESCE(gi.deleted,0) AS INTEGER)=0) incident_count,(SELECT COALESCE(SUM(gl.economic_difference),0) FROM goods_receipt_lines gl WHERE gl.receipt_id=gr.id AND CAST(COALESCE(gl.deleted,0) AS INTEGER)=0) economic_difference FROM goods_receipts gr LEFT JOIN suppliers s ON s.id=gr.supplier_id LEFT JOIN clients c ON c.id=gr.client_id LEFT JOIN warehouses w ON w.id=gr.warehouse_id LEFT JOIN purchase_orders po ON po.id=gr.purchase_order_id LEFT JOIN invoices pi ON pi.id=gr.purchase_invoice_id WHERE CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.receipt_date DESC,gr.id DESC LIMIT 500").all();
+        const rows = db.prepare("SELECT gr.*,s.name supplier_name,c.name client_name,w.name warehouse_name,CASE WHEN COALESCE(gr.counterparty_type,'Proveedor')='Cliente' THEN c.name ELSE s.name END counterparty_name,po.code purchase_order_code,po.status purchase_order_status,pi.code purchase_invoice_code,pi.status purchase_invoice_status,(SELECT COUNT(*) FROM goods_receipt_lines gl WHERE gl.receipt_id=gr.id AND CAST(COALESCE(gl.deleted,0) AS INTEGER)=0) line_count,(SELECT COUNT(*) FROM goods_receipt_incidents gi WHERE gi.receipt_id=gr.id AND CAST(COALESCE(gi.deleted,0) AS INTEGER)=0) incident_count,(SELECT COALESCE(SUM(gl.economic_difference),0) FROM goods_receipt_lines gl WHERE gl.receipt_id=gr.id AND CAST(COALESCE(gl.deleted,0) AS INTEGER)=0) economic_difference FROM goods_receipts gr LEFT JOIN suppliers s ON s.id=gr.supplier_id LEFT JOIN clients c ON c.id=gr.client_id LEFT JOIN warehouses w ON w.id=gr.warehouse_id LEFT JOIN purchase_orders po ON po.id=gr.purchase_order_id LEFT JOIN invoices pi ON pi.id=gr.purchase_invoice_id WHERE CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.receipt_date DESC,gr.id DESC LIMIT 500").all();
         return send(res, 200, rows);
       }
       if (t === "goods_receipts" && req.method === "GET" && p[2] === "detail") {
@@ -3911,8 +3926,8 @@ export async function crmApiHandler(req, res) {
             COALESCE(p.stock_target,COALESCE(p.min_stock,0)*2) stock_target,
             COALESCE(p.stock_safety,0) stock_safety,COALESCE(p.cost_price,0) cost_price,
             COALESCE(p.real_cost,COALESCE(p.cost_price,0)) real_cost,
-            COALESCE(p.primary_supplier_id,0) primary_supplier_id,
-            COALESCE(p.supplier_id,0) supplier_id
+            COALESCE(p.primary_supplier_id,(SELECT ps.supplier_id FROM product_suppliers ps WHERE ps.product_id=p.id AND CAST(COALESCE(ps.active,1) AS INTEGER)=1 ORDER BY CAST(COALESCE(ps.is_primary,0) AS INTEGER) DESC,ps.id LIMIT 1),0) primary_supplier_id,
+            COALESCE(p.primary_supplier_id,(SELECT ps.supplier_id FROM product_suppliers ps WHERE ps.product_id=p.id AND CAST(COALESCE(ps.active,1) AS INTEGER)=1 ORDER BY CAST(COALESCE(ps.is_primary,0) AS INTEGER) DESC,ps.id LIMIT 1),0) supplier_id
           FROM products p WHERE CAST(COALESCE(p.deleted,0) AS INTEGER)=0
             AND (COALESCE(p.stock,0)-COALESCE(p.stock_reserved,0)) <= COALESCE(NULLIF(p.stock_min,0),p.min_stock,0)
           ORDER BY (COALESCE(p.stock,0)-COALESCE(p.stock_reserved,0)-COALESCE(NULLIF(p.stock_min,0),p.min_stock,0)) ASC,p.name`).all();

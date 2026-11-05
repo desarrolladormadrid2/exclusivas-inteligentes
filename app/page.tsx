@@ -4482,9 +4482,16 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     products: ["name", "sku", "barcode", "category", "format", "unit", "unit_price", "cost_price", "stock", "stock_reserved", "min_stock", "warehouse_location", "warehouse_id", "product_status"],
     warehouses: ["code", "name", "address", "manager"],
     collection_points: ["code", "name", "address", "city", "opening_time", "closing_time", "geocoding_status"],
-    goods_receipts: ["code", "counterparty_type", "client_id", "supplier_id", "purchase_order_id", "warehouse_id", "receipt_date", "status", "validation_status", "stock_applied", "economic_difference", "line_count", "incident_count", "received_by"],
+    goods_receipts: ["code", "counterparty_type", "client_id", "supplier_id", "purchase_order_code", "purchase_order_status", "warehouse_id", "receipt_date", "status", "validation_status", "stock_applied", "stock_applied_by", "economic_difference", "line_count", "incident_count", "received_by", "validated_by"],
     inventory_movements: ["order_id", "shipment_id", "product_id", "warehouse_id", "movement_type", "quantity", "movement_date", "client_id", "created_by", "reference"],
     returns: ["code", "client_id", "invoice_id", "product_id", "quantity", "reason", "status", "amount"],
+  };
+  const compactFieldLabels: Record<string, string> = {
+    purchase_order_code: "Pedido de compra",
+    purchase_order_status: "Estado del pedido",
+    stock_applied: "Stock sumado",
+    stock_applied_by: "Stock incorporado por",
+    validated_by: "Validado por",
   };
   useEffect(() => {
     if (inlineEditing === null) return;
@@ -4570,7 +4577,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         return;
       }
       const compactFields = warehouseListFields[c.api];
-      const compactVersionKey = `excluvas.columns.compact-v1.${c.api}`;
+      const compactVersionKey = `excluvas.columns.compact-v2.${c.api}`;
       const saved = localStorage.getItem(`excluvas.columns.${c.api}`);
       if (compactFields) {
         if (!saved || localStorage.getItem(compactVersionKey) !== "1") {
@@ -7833,7 +7840,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                 {visibleFields.map((f: string, fieldIndex: number) => (
                   <Fragment key={f}>
                     <th className={isDateField(f) ? "sortable-date-column" : undefined}>
-                      <button type="button" className="table-sort-button" onClick={() => { setStockSort("none"); setDateSort(null); setTableSort((current) => current?.field === f ? { field: f, direction: current.direction === "asc" ? "desc" : "asc" } : { field: f, direction: "asc" }); }} aria-label={`Ordenar ${c.labels[c.fields.indexOf(f)] || f}`} title="Ordenar columna">{c.labels[c.fields.indexOf(f)] || f}<span aria-hidden="true">{tableSort?.field === f ? (tableSort.direction === "asc" ? " ↑" : " ↓") : " ↕"}</span></button>
+                      <button type="button" className="table-sort-button" onClick={() => { setStockSort("none"); setDateSort(null); setTableSort((current) => current?.field === f ? { field: f, direction: current.direction === "asc" ? "desc" : "asc" } : { field: f, direction: "asc" }); }} aria-label={`Ordenar ${compactFieldLabels[f] || c.labels[c.fields.indexOf(f)] || f}`} title="Ordenar columna">{compactFieldLabels[f] || c.labels[c.fields.indexOf(f)] || f}<span aria-hidden="true">{tableSort?.field === f ? (tableSort.direction === "asc" ? " ↑" : " ↓") : " ↕"}</span></button>
                     </th>
                     {active === "Stock" && fieldIndex === 0 && <th className="product-lots-column">LOTES</th>}
                   </Fragment>
@@ -7849,7 +7856,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                     {isProducts && renderProductLots(r)}
                     {visibleFields.map((f: string, fieldIndex: number) => (
                       <Fragment key={f}>
-                        <td data-label={c.labels[c.fields.indexOf(f)] || f} className={`${stockCellClass(r, f)}${active === "Stock" && ["stock", "stock_reserved", "available_stock", "min_stock"].includes(f) && Number(r[f]) < 0 ? " stock-negative" : ""}`}>
+                        <td data-label={compactFieldLabels[f] || c.labels[c.fields.indexOf(f)] || f} className={`${stockCellClass(r, f)}${active === "Stock" && ["stock", "stock_reserved", "available_stock", "min_stock"].includes(f) && Number(r[f]) < 0 ? " stock-negative" : ""}`}>
                           {inlineEditing === (r.id ?? r.product_id) ? (
                             renderInlineEditor(f, r)
                           ) : (
