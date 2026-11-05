@@ -101,7 +101,6 @@ const initialModules = [
   "Contactos",
   "Proveedores",
   "Compras",
-  "Compras inteligentes",
   "Almacenes",
   "Preparación de pedidos",
   "Lugares de recogida",
@@ -115,7 +114,6 @@ const initialModules = [
   "Albaranes",
   "Facturas",
   "Cobros",
-  "Gastos y tickets",
   "Balance",
   "Informes",
   "Historial",
@@ -1063,7 +1061,7 @@ const sidebarGroups = [
   },
   {
     name: "Compras y proveedores",
-    items: ["Proveedores", "Compras", "Compras inteligentes", "Gastos y tickets"],
+    items: ["Proveedores", "Compras"],
   },
   { name: "Análisis y control", items: ["Balance", "Informes"] },
   { name: "Automatización", items: ["Tareas programadas", "Notas", "OCR inteligente"] },
@@ -3544,7 +3542,6 @@ function BusinessRelatedPanels({ active, rows, lookups, onNavigate }: { active: 
     Facturas: [],
     Compras: [
       { title: "Pedidos de compra", text: "Solicitudes y compras a proveedores pendientes de validar o recibir.", value: `${rows.length} pedidos`, action: "Ver compras", target: "Compras" },
-      { title: "Facturas de compra", text: "Registra el gasto asociado a proveedores y contrástalo con los pedidos recibidos.", value: `${purchaseRows.length} compras`, action: "Ver gastos", target: "Gastos y tickets" },
       { title: "Histórico de facturas de compra", text: "Consulta el histórico de compras y sus importes para el balance.", value: money(purchaseRows.reduce((total: number, item: any) => total + Number(item.amount || 0), 0)), action: "Abrir balance", target: "Balance" },
     ],
     "Gastos y tickets": [
@@ -9389,7 +9386,7 @@ function Reports() {
               </i>
             </div>
             <div className="financial-breakdown-row">
-              <span>Gastos y tickets</span>
+              <span>Otros costes</span>
               <b>En seguimiento</b>
               <i>
                 <em style={{ width: "4%" }} />

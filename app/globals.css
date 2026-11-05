@@ -6836,7 +6836,17 @@ body.reparto-modal-open {
 .supplier-purchase-tabs, .supplier-create-modes { display: flex; gap: 6px; flex-wrap: wrap; border-bottom: 1px solid #d7dce1; }
 .supplier-purchase-tabs button, .supplier-create-modes button { border: 0; border-bottom: 2px solid transparent; background: transparent; color: #46515d; padding: 10px 14px; font-weight: 700; cursor: pointer; }
 .supplier-purchase-tabs button.is-active, .supplier-create-modes button.is-active { color: #a51419; border-color: #b91c1c; }
-.supplier-orders-panel, .supplier-order-builder, .supplier-alias-manager { min-width: 0; background: #fff; border: 1px solid #dce0e4; padding: 14px; }
+.supplier-orders-panel, .supplier-order-builder, .supplier-alias-manager, .supplier-recommended-panel { min-width: 0; background: #fff; border: 1px solid #dce0e4; padding: 14px; }
+.supplier-recommended-panel { display: grid; gap: 12px; }
+.supplier-recommended-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid #e2e5e8; }
+.supplier-recommended-head > div { display: grid; gap: 3px; }
+.supplier-recommended-head small, .supplier-recommended-row small { color: #68747e; font-size: 11px; }
+.supplier-recommended-head strong { color: #a51419; white-space: nowrap; }
+.supplier-recommended-list { display: grid; gap: 7px; }
+.supplier-recommended-row { display: grid; grid-template-columns: minmax(0, 1fr) 100px 90px 150px; align-items: center; gap: 10px; padding: 10px; border: 1px solid #e1e4e7; border-left: 3px solid #b91c1c; }
+.supplier-recommended-row > div, .supplier-recommended-row > span, .supplier-recommended-row > strong { display: grid; gap: 3px; min-width: 0; }
+.supplier-recommended-row > div b { overflow-wrap: anywhere; color: #20262c; }
+.supplier-recommended-row > span b, .supplier-recommended-row > strong b { color: #a51419; font-size: 15px; }
 .supplier-orders-tools { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(180px, 230px) minmax(170px, 210px) auto; align-items: center; gap: 8px; margin-bottom: 10px; }
 .supplier-orders-tools input, .supplier-orders-tools select, .supplier-purchasing-page input:not([type="checkbox"]), .supplier-purchasing-page select, .supplier-purchasing-page textarea { min-width: 0; width: 100%; border: 1px solid #cbd1d6; background: #fff; padding: 8px 9px; color: #20262c; }
 .supplier-orders-tools span { justify-self: end; color: #53606b; font-size: 12px; font-weight: 700; white-space: nowrap; }
@@ -6930,6 +6940,9 @@ body.reparto-modal-open {
   .supplier-order-summary { grid-template-columns: minmax(0, 1fr) auto; gap: 5px 8px; }
   .supplier-order-summary em { grid-column: 2; grid-row: 1; }
   .supplier-order-summary strong { grid-column: 1; grid-row: 2; }
+  .supplier-recommended-row { grid-template-columns: 1fr 1fr; }
+  .supplier-recommended-row > div { grid-column: 1 / -1; }
+  .supplier-recommended-row > strong { grid-column: 1 / -1; }
   .supplier-order-actions { gap: 7px 13px; }
   .supplier-order-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .supplier-order-fields .supplier-order-notes { grid-column: span 2; }
