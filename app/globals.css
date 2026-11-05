@@ -6875,6 +6875,20 @@ body.reparto-modal-open {
 .supplier-recommended-supplier-list .has-price { border-left: 3px solid #078858; }
 .supplier-recommended-supplier-list .has-price strong { color: #078858; }
 .supplier-recommended-suppliers > p { margin: 0; color: #68747e; font-size: 12px; }
+.supplier-recommended-row { grid-template-columns: minmax(230px, 1.2fr) minmax(210px, .8fr) minmax(280px, 1fr); align-items: center; }
+.supplier-recommended-product { display: grid; gap: 3px; min-width: 0; }
+.supplier-recommended-stock { display: flex !important; align-items: center; gap: 18px; }
+.supplier-recommended-stock span { display: grid; gap: 2px; }
+.supplier-recommended-choice { display: grid !important; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 7px 12px; }
+.supplier-recommended-choice > span { display: grid; gap: 2px; min-width: 0; }
+.supplier-recommended-choice > span small { color: #68747e; font-size: 11px; }
+.supplier-recommended-choice > span b { overflow-wrap: anywhere; color: #20262c; }
+.supplier-recommended-choice > span em { color: #078858; font-size: 11px; font-style: normal; }
+.supplier-recommended-choice > strong { color: #078858; white-space: nowrap; }
+.supplier-recommended-choice > button { grid-column: 1 / -1; width: 100%; }
+.supplier-recommended-more { grid-column: 1 / -1; border-top: 1px solid #e2e5e8; padding-top: 8px; }
+.supplier-recommended-more summary { color: #53606b; cursor: pointer; font-size: 12px; font-weight: 700; }
+.supplier-recommended-more .supplier-recommended-supplier-list { margin-top: 7px; }
 .supplier-orders-tools { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(180px, 230px) minmax(170px, 210px) auto; align-items: center; gap: 8px; margin-bottom: 10px; }
 .supplier-orders-tools input, .supplier-orders-tools select, .supplier-purchasing-page input:not([type="checkbox"]), .supplier-purchasing-page select, .supplier-purchasing-page textarea { min-width: 0; width: 100%; border: 1px solid #cbd1d6; background: #fff; padding: 8px 9px; color: #20262c; }
 .supplier-orders-tools span { justify-self: end; color: #53606b; font-size: 12px; font-weight: 700; white-space: nowrap; }
@@ -7003,6 +7017,9 @@ body.reparto-modal-open {
   .supplier-recommended-row { grid-template-columns: 1fr 1fr; }
   .supplier-recommended-row > div { grid-column: 1 / -1; }
   .supplier-recommended-row > strong { grid-column: 1 / -1; }
+  .supplier-recommended-row { grid-template-columns: 1fr; }
+  .supplier-recommended-stock { grid-template-columns: repeat(3, minmax(0, 1fr)); display: grid !important; gap: 8px; }
+  .supplier-recommended-choice { grid-template-columns: minmax(0, 1fr) auto; }
   .supplier-recommended-supplier-list { grid-template-columns: 1fr; }
   .supplier-order-actions { gap: 7px 13px; }
   .supplier-order-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
