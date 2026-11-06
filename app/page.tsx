@@ -4856,10 +4856,9 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     // Entradas pasó de compartir datos con movimientos a usar goods_receipts).
     // Versionar la clave evita rehidratar filas antiguas con IDs incompatibles.
     const preparationCacheDate = active === "Preparación de pedidos" ? preparationDateFilter : "";
-    // La factura conserva una copia histórica del cliente. Versionamos esta
-    // caché para que los listados guardados antes de esa migración no sigan
-    // mostrando "Cliente no disponible" aunque la API ya tenga el histórico.
-    const cacheKeyPrefix = ["invoices", "payments"].includes(c.api) ? "excluvas.listado.v4" : "excluvas.listado.v3";
+    // Los documentos conservan copias históricas de clientes y productos.
+    // Cambiamos su caché para dejar atrás listados guardados antes del snapshot.
+    const cacheKeyPrefix = ["invoices", "payments", "delivery_notes", "shipments", "returns", "order_lines", "delivery_note_lines"].includes(c.api) ? "excluvas.listado.v4" : "excluvas.listado.v3";
     const cacheKey = `${cacheKeyPrefix}.${c.api}.${preparationCacheDate || "all-dates"}.${showDeleted ? "deleted" : "active"}.${showInactive ? "all-statuses" : "active-only"}`;
     const applyList = (value: any[]) => {
       const enrichedRows = c.api === "orders"
