@@ -7297,3 +7297,86 @@ body.reparto-modal-open {
   background: #f3f6f7;
   outline: 0;
 }
+
+/* Ventas y clientes: controles densos en escritorio, manteniendo adaptación móvil. */
+.test-data-toggle { flex: 0 0 auto; min-height: 28px; padding: 4px 8px; border: 1px solid #ccd6dc; background: #fff; color: #526670; font: inherit; font-size: 10px; white-space: nowrap; cursor: pointer; }
+.test-data-toggle:hover,.test-data-toggle:focus-visible { border-color: #b91c1c; color: #b91c1c; outline: 0; }
+.compact-cobros-error { position: fixed; z-index: 50; right: 18px; bottom: 18px; max-width: min(440px,calc(100vw - 36px)); margin: 0; padding: 8px 11px; border: 1px solid #e6a4a8; border-left: 3px solid #b91c1c; box-shadow: 0 4px 16px rgba(25,50,72,.14); }
+.sales-quote-list .table-tools-primary > .supplier-test-data-note,
+.sales-order-list .table-tools-primary > .supplier-test-data-note,
+.sales-delivery-list .table-tools-primary > .supplier-test-data-note,
+.sales-invoice-list .table-tools-primary > .supplier-test-data-note,
+.sales-payment-list .table-tools-primary > .supplier-test-data-note { display: none; }
+.sales-quote-list .table-panel tbody td > div,
+.sales-quote-list .table-panel tbody td > span { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.sales-delivery-list .table-panel tbody td:not(:last-child),
+.sales-invoice-list .table-panel tbody td:not(:last-child) { max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (min-width: 1200px) {
+  .sales-customers-block .table-tools { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-start; gap: 7px; }
+  .sales-customers-block .table-tools-primary { display: flex; flex: 1 1 100%; flex-wrap: nowrap; align-items: center; min-width: 0; }
+  .sales-customers-block .table-tools-primary > input { flex: 1 1 260px; min-width: 160px; }
+  .sales-customers-block .table-tools-primary > .list-count { flex: 0 0 auto; white-space: nowrap; }
+  .sales-customers-block .table-tools-filters { display: flex; flex: 1 1 100%; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0; }
+  .sales-customers-block .table-tools-filters .list-filter-field { display: inline-flex; flex: 0 1 auto; gap: 4px; white-space: nowrap; }
+  .sales-customers-block .table-tools-filters .list-filter-field input,
+  .sales-customers-block .table-tools-filters .list-filter-field select { width: 138px; min-width: 100px; }
+  .sales-client-list .table-tools { flex-wrap: nowrap; }
+  .sales-client-list .table-tools-primary { flex: 1 1 auto; }
+  .sales-client-list .table-tools-filters { flex: 0 0 auto; width: auto; flex-wrap: nowrap; }
+  .sales-client-list .table-tools-filters > .deleted-toggle { width: auto; min-width: 138px; }
+  .sales-order-list .table-tools { display: grid; grid-template-columns: minmax(0,1fr); }
+  .sales-order-list .table-tools-primary { flex-wrap: wrap; }
+  .sales-order-list .table-tools-filters { flex-wrap: wrap; }
+  .sales-order-list .table-tools-filters .list-filter-field input,
+  .sales-order-list .table-tools-filters .list-filter-field select { width: 132px; }
+  .sales-quote-list .table-tools { display: grid; grid-template-columns: minmax(0,1fr); }
+  .sales-quote-list .table-tools-primary { flex-wrap: nowrap; }
+  .sales-quote-list .table-tools-filters { flex-wrap: nowrap; }
+  .sales-delivery-list .table-tools,
+  .sales-invoice-list .table-tools,
+  .sales-payment-list .table-tools { flex-wrap: nowrap; gap: 6px; }
+  .sales-delivery-list .table-tools-primary,
+  .sales-invoice-list .table-tools-primary,
+  .sales-payment-list .table-tools-primary,
+  .sales-delivery-list .table-tools-filters,
+  .sales-invoice-list .table-tools-filters,
+  .sales-payment-list .table-tools-filters { display: contents; }
+  .sales-delivery-list .table-tools-primary > input,
+  .sales-invoice-list .table-tools-primary > input,
+  .sales-payment-list .table-tools-primary > input { flex: 1 1 170px; min-width: 100px; }
+  .sales-delivery-list .table-tools-primary .saved-views,
+  .sales-invoice-list .table-tools-primary .saved-views,
+  .sales-payment-list .table-tools-primary .saved-views { flex: 0 1 auto; width: auto; overflow: visible; white-space: nowrap; }
+  .sales-delivery-list .table-tools-filters .list-filter-field input,
+  .sales-invoice-list .table-tools-filters .list-filter-field input,
+  .sales-payment-list .table-tools-filters .list-filter-field input { width: 112px; min-width: 92px; }
+  .sales-delivery-list .table-tools-filters .list-filter-field select,
+  .sales-invoice-list .table-tools-filters .list-filter-field select,
+  .sales-payment-list .table-tools-filters .list-filter-field select { width: 136px; min-width: 105px; }
+  .sales-delivery-list .table-tools-filters > .deleted-toggle,
+  .sales-invoice-list .table-tools-filters > .deleted-toggle,
+  .sales-payment-list .table-tools-filters > .deleted-toggle { width: auto; min-width: 126px; }
+}
+@media (max-width: 1199px) {
+  .sales-customers-block .table-tools-primary { align-items: center; }
+  .sales-customers-block .table-tools-filters { display: flex; flex-wrap: wrap; }
+  .sales-customers-block .test-data-toggle { justify-self: start; }
+}
+@media (min-width: 1200px) {
+  .sales-customers-block .table-tools-filters .list-filter-field { width: auto; }
+  .sales-order-list .table-tools-primary { display: grid; grid-template-columns: minmax(220px,1fr) auto auto; }
+  .sales-order-list .table-tools-primary .saved-views { grid-column: 1 / -1; width: 100%; }
+  .sales-order-list .table-tools-filters { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+  .sales-order-list .table-tools-filters > .billing-filter-select { width: 100%; min-width: 0; }
+  .sales-order-list .table-tools-filters .list-filter-field { width: 100%; min-width: 0; grid-template-columns: minmax(0, 1fr) minmax(74px, 1.15fr); gap: 4px; }
+  .sales-order-list .table-tools-filters .list-filter-field input,
+  .sales-order-list .table-tools-filters .list-filter-field select { width: 100%; min-width: 0; }
+  .sales-order-list .table-tools-filters > .deleted-toggle { width: 100%; min-width: 0; }
+  .sales-quote-list .table-tools-primary .saved-views { width: auto; }
+  .sales-delivery-list .table-tools-filters .list-filter-field,
+  .sales-invoice-list .table-tools-filters .list-filter-field,
+  .sales-payment-list .table-tools-filters .list-filter-field { width: auto; }
+  .sales-delivery-list .table-tools-filters > .deleted-toggle,
+  .sales-invoice-list .table-tools-filters > .deleted-toggle,
+  .sales-payment-list .table-tools-filters > .deleted-toggle { width: auto; }
+}

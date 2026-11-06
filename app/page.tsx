@@ -7583,7 +7583,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   };
   return (
     <>
-    <div className={`manager${isLoadPreparation ? " load-preparation-manager" : ""}${isCrmPreparation ? " crm-preparation-manager" : ""}`}>
+    <div className={`manager${isLoadPreparation ? " load-preparation-manager" : ""}${isCrmPreparation ? " crm-preparation-manager" : ""}${["Clientes", "Pedidos", "Presupuestos", "Albaranes", "Facturas", "Cobros"].includes(active) ? " sales-customers-block" : ""}${active === "Clientes" ? " sales-client-list" : active === "Pedidos" ? " sales-order-list" : active === "Presupuestos" ? " sales-quote-list" : active === "Albaranes" ? " sales-delivery-list" : active === "Facturas" ? " sales-invoice-list" : active === "Cobros" ? " sales-payment-list" : ""}`}>
       {!isLoadPreparation && <div className="manager-head">
         <div>
           <p className="eyebrow">GESTIÓN · {APP_ENVIRONMENT === "Producción" ? "DATOS OPERATIVOS" : "ENTORNO LOCAL"}</p>
@@ -7664,9 +7664,9 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         </div>
       </div>}
       {dbError && <div className="db-error">{dbError}</div>}
-      {error && <div className="error-message" role="alert">{error}</div>}
+      {error && <div className={`error-message${active === "Cobros" ? " compact-cobros-error" : ""}`} role="alert">{error}</div>}
       {productSaveMessage && active === "Productos" && <div className="success-message" role="status">{productSaveMessage}</div>}
-      {!isLoadPreparation && active !== "Pedidos" && active !== "Preparación de pedidos" && <BusinessRelatedPanels active={active} rows={rows} lookups={lookups} onNavigate={onNavigate} />}
+      {!isLoadPreparation && active !== "Pedidos" && active !== "Preparación de pedidos" && active !== "Cobros" && <BusinessRelatedPanels active={active} rows={rows} lookups={lookups} onNavigate={onNavigate} />}
       {active === "Compras" && <SupplierPayablesPanel rows={rows} suppliers={lookups.suppliers || []} actor={user?.username || "Usuario local"} onReload={() => setListRefreshKey((current) => current + 1)} onOpen={(row) => void openPreview(row)} />}
       {isLoadPreparation && <CollectiveLoadModal rows={preparationRows} lookups={lookups} dateFilter={preparationDateFilter} actor={user?.username || "Usuario local"} onClose={() => onNavigate?.("Carga de vehículos", preparationDateFilter)} onDateFilterChange={setPreparationDateFilter} embedded />}
       {active === "Gastos y tickets" && (
@@ -7892,7 +7892,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           <span className="list-count" role="status">
             {loading ? "Cargando registros…" : `${filteredRows.length} registros${totalPages > 1 ? ` · página ${currentPage}/${totalPages}` : ""}`}
           </span>
-          {listFilterActive && hiddenSyntheticRecordCount > 0 && <p className="supplier-test-data-note goods-receipt-test-note" role="status">{showTestEntries ? `Mostrando ${hiddenSyntheticRecordCount} ${hiddenSyntheticRecordCount === 1 ? "registro de prueba" : "registros de prueba"}.` : `${hiddenSyntheticRecordCount} ${hiddenSyntheticRecordCount === 1 ? "registro de prueba oculto" : "registros de prueba ocultos"}.`} <button type="button" className="row-action" aria-pressed={showTestEntries} onClick={() => setShowTestEntries((current) => !current)}>{showTestEntries ? "Ocultar pruebas" : "Ver pruebas"}</button></p>}
+          {listFilterActive && hiddenSyntheticRecordCount > 0 && <button type="button" className="test-data-toggle" role="status" aria-pressed={showTestEntries} onClick={() => setShowTestEntries((current) => !current)}>{showTestEntries ? `Ocultar pruebas (${hiddenSyntheticRecordCount})` : `Ver pruebas (${hiddenSyntheticRecordCount})`}</button>}
           {quickViewOptions.length > 1 && <div className="saved-views" aria-label="Vistas rápidas">
             <span className="saved-views-label">Vistas</span>
             {quickViewOptions.map((option) => <button key={option.value} type="button" className={`saved-view-button${quickView === option.value ? " is-active" : ""}`} aria-pressed={quickView === option.value} onClick={() => { setQuickView(option.value); try { localStorage.setItem(`excluvas.quick-view.${c.api}`, option.value); } catch {} }}>{option.label}</button>)}
