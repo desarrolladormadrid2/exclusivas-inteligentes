@@ -7386,3 +7386,69 @@ body.reparto-modal-open {
   .sales-invoice-list .table-tools-filters > .deleted-toggle,
   .sales-payment-list .table-tools-filters > .deleted-toggle { width: auto; }
 }
+
+/* Logística y almacén: barras compactas y paneles relacionados solo cuando aportan. */
+@media (min-width: 1200px) {
+  .logistics-products-list .table-tools { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .logistics-products-list .table-tools-primary { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; }
+  .logistics-products-list .table-tools-primary > input { flex: 1 1 300px; min-width: 180px; }
+  .logistics-products-list .table-tools-primary .saved-views { grid-column: auto; flex: 0 1 auto; width: auto; min-width: 0; overflow: visible; white-space: nowrap; }
+  .logistics-products-list .table-tools-filters { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; padding: 0; overflow: visible; }
+  .logistics-products-list .table-tools-filters > .deleted-toggle { flex: 0 0 auto; width: auto; min-width: 106px; margin: 0 !important; padding: 0 6px; }
+  .logistics-products-list .product-filters,
+  .logistics-products-list .product-bulk-toolbar { display: contents; }
+  .logistics-products-list .product-filters select { flex: 0 1 104px; width: 104px; min-width: 82px; height: 30px; padding: 0 5px; font-size: 9px; }
+  .logistics-products-list .product-filters .button { flex: 0 0 auto; min-width: 82px; height: 30px; padding: 0 6px; font-size: 9px; }
+  .logistics-products-list .product-select-all { flex: 0 0 auto; white-space: nowrap; font-size: 9px !important; }
+  .logistics-products-list .product-bulk-toolbar > span { flex: 0 1 112px; min-width: 76px; overflow: hidden; margin: 0; text-overflow: ellipsis; white-space: nowrap; }
+  .logistics-products-list .product-bulk-toolbar > button { flex: 0 0 auto; min-width: 82px; min-height: 30px; padding: 4px 6px; font-size: 9px; }
+  .logistics-products-list .product-bulk-toolbar > .product-bulk-category { flex: 0 1 112px; min-width: 92px; height: 30px; padding: 0 5px; font-size: 9px; }
+
+  .logistics-shipments-list .table-tools,
+  .logistics-stock-out-list .table-tools,
+  .logistics-returns-list .table-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 7px; }
+  .logistics-shipments-list .table-tools-primary,
+  .logistics-shipments-list .table-tools-filters,
+  .logistics-stock-out-list .table-tools-primary,
+  .logistics-stock-out-list .table-tools-filters,
+  .logistics-returns-list .table-tools-primary,
+  .logistics-returns-list .table-tools-filters { display: contents; }
+  .logistics-shipments-list .table-tools-primary > input,
+  .logistics-stock-out-list .table-tools-primary > input,
+  .logistics-returns-list .table-tools-primary > input { flex: 1 1 250px; min-width: 180px; }
+  .logistics-shipments-list .table-tools-primary .saved-views,
+  .logistics-stock-out-list .table-tools-primary .saved-views,
+  .logistics-returns-list .table-tools-primary .saved-views { flex: 0 1 auto; width: auto; overflow: visible; white-space: nowrap; }
+  .logistics-shipments-list .table-tools-filters .list-filter-field,
+  .logistics-stock-out-list .table-tools-filters .list-filter-field,
+  .logistics-returns-list .table-tools-filters .list-filter-field { display: inline-flex; flex: 0 1 auto; width: auto; gap: 4px; white-space: nowrap; }
+  .logistics-shipments-list .table-tools-filters .list-filter-field input,
+  .logistics-stock-out-list .table-tools-filters .list-filter-field input,
+  .logistics-returns-list .table-tools-filters .list-filter-field input { width: 108px; min-width: 90px; }
+  .logistics-shipments-list .table-tools-filters .list-filter-field select,
+  .logistics-stock-out-list .table-tools-filters .list-filter-field select,
+  .logistics-returns-list .table-tools-filters .list-filter-field select { width: 128px; min-width: 100px; }
+  .logistics-shipments-list .table-tools-filters > .deleted-toggle,
+  .logistics-stock-out-list .table-tools-filters > .deleted-toggle,
+  .logistics-returns-list .table-tools-filters > .deleted-toggle { flex: 0 0 auto; width: auto; min-width: 118px; margin: 0 !important; }
+
+  .logistics-warehouses-list .table-tools,
+  .logistics-collection-list .table-tools { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; }
+  .logistics-warehouses-list .table-tools-primary,
+  .logistics-warehouses-list .table-tools-filters,
+  .logistics-collection-list .table-tools-primary,
+  .logistics-collection-list .table-tools-filters { display: contents; }
+  .logistics-warehouses-list .table-tools-primary > input,
+  .logistics-collection-list .table-tools-primary > input { flex: 1 1 auto; min-width: 220px; }
+  .logistics-warehouses-list .table-tools-filters > .deleted-toggle,
+  .logistics-collection-list .table-tools-filters > .deleted-toggle { flex: 0 0 auto; width: auto; min-width: 132px; margin: 0 !important; }
+
+  .vehicle-load-toolbar { grid-template-columns: 220px minmax(220px, 1fr) auto auto auto auto; align-items: center; }
+}
+
+@media (max-width: 1199px) {
+  .logistics-products-list .product-bulk-toolbar > span { margin-right: 0; }
+  .logistics-shipments-list .table-tools,
+  .logistics-stock-out-list .table-tools,
+  .logistics-returns-list .table-tools { display: grid; gap: 7px; }
+}

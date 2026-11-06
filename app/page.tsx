@@ -7583,7 +7583,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   };
   return (
     <>
-    <div className={`manager${isLoadPreparation ? " load-preparation-manager" : ""}${isCrmPreparation ? " crm-preparation-manager" : ""}${["Clientes", "Pedidos", "Presupuestos", "Albaranes", "Facturas", "Cobros"].includes(active) ? " sales-customers-block" : ""}${active === "Clientes" ? " sales-client-list" : active === "Pedidos" ? " sales-order-list" : active === "Presupuestos" ? " sales-quote-list" : active === "Albaranes" ? " sales-delivery-list" : active === "Facturas" ? " sales-invoice-list" : active === "Cobros" ? " sales-payment-list" : ""}`}>
+    <div className={`manager${isLoadPreparation ? " load-preparation-manager" : ""}${isCrmPreparation ? " crm-preparation-manager" : ""}${["Clientes", "Pedidos", "Presupuestos", "Albaranes", "Facturas", "Cobros"].includes(active) ? " sales-customers-block" : ""}${active === "Clientes" ? " sales-client-list" : active === "Pedidos" ? " sales-order-list" : active === "Presupuestos" ? " sales-quote-list" : active === "Albaranes" ? " sales-delivery-list" : active === "Facturas" ? " sales-invoice-list" : active === "Cobros" ? " sales-payment-list" : ""}${active === "Productos" ? " logistics-products-list" : active === "Stock" ? " logistics-stock-list" : active === "Envíos" ? " logistics-shipments-list" : active === "Almacenes" ? " logistics-warehouses-list" : active === "Lugares de recogida" ? " logistics-collection-list" : active === "Entradas" ? " logistics-receipts-list" : active === "Salidas" ? " logistics-stock-out-list" : active === "Devoluciones" ? " logistics-returns-list" : ""}`}>
       {!isLoadPreparation && <div className="manager-head">
         <div>
           <p className="eyebrow">GESTIÓN · {APP_ENVIRONMENT === "Producción" ? "DATOS OPERATIVOS" : "ENTORNO LOCAL"}</p>
@@ -7666,7 +7666,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       {dbError && <div className="db-error">{dbError}</div>}
       {error && <div className={`error-message${active === "Cobros" ? " compact-cobros-error" : ""}`} role="alert">{error}</div>}
       {productSaveMessage && active === "Productos" && <div className="success-message" role="status">{productSaveMessage}</div>}
-      {!isLoadPreparation && active !== "Pedidos" && active !== "Preparación de pedidos" && active !== "Cobros" && <BusinessRelatedPanels active={active} rows={rows} lookups={lookups} onNavigate={onNavigate} />}
+      {!isLoadPreparation && !["Pedidos", "Preparación de pedidos", "Cobros", "Stock", "Entradas", "Salidas"].includes(active) && <BusinessRelatedPanels active={active} rows={rows} lookups={lookups} onNavigate={onNavigate} />}
       {active === "Compras" && <SupplierPayablesPanel rows={rows} suppliers={lookups.suppliers || []} actor={user?.username || "Usuario local"} onReload={() => setListRefreshKey((current) => current + 1)} onOpen={(row) => void openPreview(row)} />}
       {isLoadPreparation && <CollectiveLoadModal rows={preparationRows} lookups={lookups} dateFilter={preparationDateFilter} actor={user?.username || "Usuario local"} onClose={() => onNavigate?.("Carga de vehículos", preparationDateFilter)} onDateFilterChange={setPreparationDateFilter} embedded />}
       {active === "Gastos y tickets" && (
@@ -7952,26 +7952,22 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           >
             {showDeleted ? "Ocultar eliminados" : "Mostrar eliminados"}
           </button>}
-          </div>
-        </div>
-        {active === "Stock" && <div className="stock-meaning" role="note"><b>Cómo leer la cobertura:</b><span>Stock físico = existencias actuales</span><span>Necesario = unidades requeridas por pedidos abiertos</span><span>Saldo = stock físico − necesario</span><span className="stock-meaning-alert">Saldo negativo = no se pueden cubrir todos los pedidos</span></div>}
-        {isProducts && (
-          <>
+          {isProducts && <>
             <div className="product-filters" aria-label="Filtros de productos">
-              <select value={productFilters.category} onChange={(event) => updateProductFilters({ category: event.target.value })}>
+              <select aria-label="Filtrar productos por familia" value={productFilters.category} onChange={(event) => updateProductFilters({ category: event.target.value })}>
                 <option value="">Todas las familias</option>
                 {productCategories.map((value) => <option key={value}>{value}</option>)}
               </select>
-              <select value={productFilters.brand} onChange={(event) => updateProductFilters({ brand: event.target.value })}>
+              <select aria-label="Filtrar productos por marca" value={productFilters.brand} onChange={(event) => updateProductFilters({ brand: event.target.value })}>
                 <option value="">Todas las marcas</option>
                 {productBrands.map((value) => <option key={value}>{value}</option>)}
               </select>
-              <select value={productFilters.stock} onChange={(event) => updateProductFilters({ stock: event.target.value })}>
+              <select aria-label="Filtrar productos por stock" value={productFilters.stock} onChange={(event) => updateProductFilters({ stock: event.target.value })}>
                 <option value="todos">Todo el stock</option>
                 <option value="critico">Stock crítico</option>
                 <option value="normal">Stock disponible</option>
               </select>
-              <select value={productFilters.codes} onChange={(event) => updateProductFilters({ codes: event.target.value })}>
+              <select aria-label="Filtrar productos por código" value={productFilters.codes} onChange={(event) => updateProductFilters({ codes: event.target.value })}>
                 <option value="todos">Con o sin código</option>
                 <option value="sin-codigo">Sin código</option>
                 <option value="con-codigo">Con código</option>
@@ -7983,11 +7979,13 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
               <span>{selectedProductIds.length ? `${selectedProductIds.length} seleccionados` : "Selecciona productos para acciones masivas"}</span>
               <button type="button" className="row-action workflow" disabled={!selectedProductIds.length} onClick={generateCodesForSelected}>Generar códigos</button>
               <button type="button" className="row-action primary" disabled={!selectedProductIds.length} onClick={() => setBatchLabelProducts(rows.filter((row) => selectedProductIds.includes(Number(row.id))))}>Imprimir etiquetas</button>
-              <select className="product-bulk-category" defaultValue="" disabled={!selectedProductIds.length} onChange={(event) => { void changeCategoryForSelected(event.target.value); event.currentTarget.value = ""; }}><option value="">Cambiar familia…</option>{productCategories.map((value) => <option key={value}>{value}</option>)}</select>
+              <select className="product-bulk-category" aria-label="Cambiar familia de los productos seleccionados" defaultValue="" disabled={!selectedProductIds.length} onChange={(event) => { void changeCategoryForSelected(event.target.value); event.currentTarget.value = ""; }}><option value="">Cambiar familia…</option>{productCategories.map((value) => <option key={value}>{value}</option>)}</select>
               <button type="button" className="row-action danger" disabled={!selectedProductIds.length} onClick={deleteSelectedProducts}>Eliminar seleccionados</button>
             </div>
-          </>
-        )}
+          </>}
+          </div>
+        </div>
+        {active === "Stock" && <div className="stock-meaning" role="note"><b>Cómo leer la cobertura:</b><span>Stock físico = existencias actuales</span><span>Necesario = unidades requeridas por pedidos abiertos</span><span>Saldo = stock físico − necesario</span><span className="stock-meaning-alert">Saldo negativo = no se pueden cubrir todos los pedidos</span></div>}
         <div className="columns-accordion">
           <button
             type="button"
