@@ -13052,6 +13052,7 @@ function CrmHome({ routeMode = "crm" }: { routeMode?: keyof typeof routeModuleSc
   });
   const [importantNotes, setImportantNotes] = useState<any[]>([]);
   const [homeAlerts, setHomeAlerts] = useState<any[]>([]);
+  const [showHomeTestAlerts, setShowHomeTestAlerts] = useState(false);
   const [homeActivityTab, setHomeActivityTab] = useState("Pedidos");
   const [homeOrders, setHomeOrders] = useState<any[]>([]);
   const [homeShipments, setHomeShipments] = useState<any[]>([]);
@@ -13332,6 +13333,9 @@ function CrmHome({ routeMode = "crm" }: { routeMode?: keyof typeof routeModuleSc
     }
     setHomeOrderRangeEnd(today);
   }
+  const isSyntheticHomeAlert = (alert: any) => /(?:__(?:QA|TEST)(?:_|\b)|(?:QA|TEST|PRUEBA|DEMO|PW|E2E|SIM|AUDITORIA-NETLIFY)[-_ ]|Demo\s)/i.test(`${alert?.title || ""} ${alert?.detail || ""} ${alert?.code || ""}`);
+  const hiddenHomeTestAlertCount = homeAlerts.filter(isSyntheticHomeAlert).length;
+  const visibleHomeAlerts = showHomeTestAlerts ? homeAlerts : homeAlerts.filter((alert) => !isSyntheticHomeAlert(alert));
   return (
     <main className="crm-shell">
       <header className="topline">
@@ -13675,9 +13679,9 @@ function CrmHome({ routeMode = "crm" }: { routeMode?: keyof typeof routeModuleSc
               <section className="panel home-alert-center" aria-label="Centro de alertas">
                 <div className="home-alert-head">
                   <div><p className="eyebrow">PARA ACTUAR HOY</p><h2>Centro de alertas</h2><p className="muted">Las tareas que necesitan atención antes de seguir avanzando.</p></div>
-                  <strong className={homeAlerts.length ? "has-alerts" : "all-clear"}>{homeAlerts.length ? `${homeAlerts.length} pendientes` : "Todo al día"}</strong>
+                  <div className="home-alert-status"><strong className={visibleHomeAlerts.length ? "has-alerts" : "all-clear"}>{visibleHomeAlerts.length ? `${visibleHomeAlerts.length} pendientes` : "Todo al día"}</strong>{hiddenHomeTestAlertCount > 0 && <button type="button" className="row-action" aria-pressed={showHomeTestAlerts} onClick={() => setShowHomeTestAlerts((current) => !current)}>{showHomeTestAlerts ? "Ocultar pruebas" : `Ver ${hiddenHomeTestAlertCount} alertas de prueba`}</button>}</div>
                 </div>
-                {homeAlerts.length ? <div className="home-alert-grid">{homeAlerts.slice(0, 8).map((alert, index) => <button type="button" key={`${alert.type}-${alert.record_id}-${index}`} className={`home-alert-card ${alert.severity || "info"}`} onClick={() => openHomeAlert(alert)}><span className="home-alert-dot" aria-hidden="true">{alert.severity === "critical" ? "!" : alert.severity === "warning" ? "·" : "＋"}</span><span><b>{alert.title}</b><small>{alert.detail}</small></span><em>Revisar →</em></button>)}</div> : <div className="home-alert-empty"><span>✓</span><p><b>No hay alertas operativas pendientes</b><small>Cuando aparezca una preparación, una factura vencida o una entrada por verificar, la verás aquí.</small></p></div>}
+                {visibleHomeAlerts.length ? <div className="home-alert-grid">{visibleHomeAlerts.slice(0, 8).map((alert, index) => <button type="button" key={`${alert.type}-${alert.record_id}-${index}`} className={`home-alert-card ${alert.severity || "info"}`} onClick={() => openHomeAlert(alert)}><span className="home-alert-dot" aria-hidden="true">{alert.severity === "critical" ? "!" : alert.severity === "warning" ? "·" : "＋"}</span><span><b>{alert.title}</b><small>{alert.detail}</small></span><em>Revisar →</em></button>)}</div> : <div className="home-alert-empty"><span>✓</span><p><b>No hay alertas operativas pendientes</b><small>{hiddenHomeTestAlertCount && !showHomeTestAlerts ? "Los avisos de prueba están apartados; puedes consultarlos desde el botón superior." : "Cuando aparezca una preparación, una factura vencida o una entrada por verificar, la verás aquí."}</small></p></div>}
               </section>
               <section className={`panel pending-orders-panel${pendingOrdersOpen ? " open" : " collapsed"}`}>
                 <button
