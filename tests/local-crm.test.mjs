@@ -167,17 +167,27 @@ test("una entrada de almacén actualiza el stock real", async () => {
 test("recibir una compra crea entradas y aumenta el stock", async () => {
   const supplier = (await call("/suppliers", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "__TEST_PROVEEDOR_RECEPCION__" }) })).data;
   const product = (await call("/products", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "__TEST_COMPRA__", stock: 2 }) })).data;
-  const purchase = (await call("/purchase_orders", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: "__TEST_COMPRA_" + Date.now(), supplier_id: supplier.id, status: "Pedido" }) })).data;
+  const purchase = (await call("/purchase_orders", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: "__TEST_COMPRA_" + Date.now(), supplier_id: supplier.id, order_date: new Date().toISOString().slice(0, 10), status: "Borrador" }) })).data;
   assert.equal(purchase.stock_alerts, undefined);
   const line = await call("/purchase_order_lines", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ purchase_order_id: purchase.id, product_id: product.id, quantity: 5, unit_cost: 2, amount: 10 }) });
   assert.equal(line.status, 201);
   const before = (await call("/products")).data.find((x) => x.id === product.id).stock;
-  const received = await call(`/purchase_orders/${purchase.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...purchase, status: "Recibida" }) });
+  const sent = await call(`/purchase_orders/${purchase.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "Enviado" }) });
+  assert.equal(sent.status, 200);
+  const warehouse = (await call("/warehouses")).data[0];
+  assert.ok(warehouse?.id);
+  const receipt = await call("/goods_receipts/receive", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: "__TEST_ENTRADA_COMPRA_" + Date.now(), counterparty_type: "Proveedor", supplier_id: supplier.id, purchase_order_id: purchase.id, warehouse_id: warehouse.id, receipt_date: new Date().toISOString().slice(0, 10), validation_status: "Pendiente", stock_on_validation: 1, lines: [{ product_id: product.id, expected_quantity: 5, received_quantity: 5, quantity_unit: "unidad", unit_cost: 2, status: "Correcta" }] }) });
+  assert.equal(receipt.status, 201);
+  const stockBeforeValidation = (await call("/products")).data.find((x) => x.id === product.id).stock;
+  assert.equal(stockBeforeValidation, before);
+  const received = await call(`/goods_receipts/${receipt.data.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ validation_status: "Validada" }) });
   assert.equal(received.status, 200);
   const after = (await call("/products")).data.find((x) => x.id === product.id).stock;
   assert.equal(after, before + 5);
+  assert.equal(received.data.validation_status, "Validada");
   await call(`/purchase_orders/${purchase.id}`, { method: "DELETE" });
   await call(`/purchase_order_lines/${line.data.id}`, { method: "DELETE" });
+  await call(`/goods_receipts/${receipt.data.id}`, { method: "DELETE" });
   await call(`/products/${product.id}`, { method: "DELETE" });
   await call(`/suppliers/${supplier.id}`, { method: "DELETE" });
 });
@@ -194,11 +204,14 @@ test("las notas rápidas se guardan y se pueden destacar", async () => {
 });
 
 test("una devolución queda pendiente y solo aumenta stock al aceptarse", async () => {
+  const client = (await call("/clients", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: `__TEST_CLIENTE_DEVOLUCION_${Date.now()}__` }) })).data;
   const product = (await call("/products", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "__TEST_DEVOLUCION__", stock: 3 }) })).data;
   const before = (await call("/products")).data.find((x) => x.id === product.id).stock;
-  const ret = await call("/returns", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: "__TEST_DEV_" + Date.now(), product_id: product.id, quantity: 2, reason: "Producto rechazado" }) });
+  const ret = await call("/returns", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: "__TEST_DEV_" + Date.now(), client_id: client.id, product_id: product.id, quantity: 2, reason: "Producto rechazado" }) });
   assert.equal(ret.status, 201);
   assert.equal(ret.data.status, "Pendiente");
+  assert.equal(ret.data.client_name_snapshot, client.name);
+  assert.equal(ret.data.product_name_snapshot, product.name);
   let after = (await call("/products")).data.find((x) => x.id === product.id).stock;
   assert.equal(after, before);
   const accepted = await call(`/returns/${ret.data.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...ret.data, status: "Aceptada" }) });
@@ -206,11 +219,58 @@ test("una devolución queda pendiente y solo aumenta stock al aceptarse", async 
   after = (await call("/products")).data.find((x) => x.id === product.id).stock;
   assert.equal(after, before + 2);
   const acceptedAgain = await call(`/returns/${ret.data.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...accepted.data, status: "Aceptada" }) });
-  assert.equal(acceptedAgain.status, 200);
+  assert.equal(acceptedAgain.status, 409);
   const afterAgain = (await call("/products")).data.find((x) => x.id === product.id).stock;
   assert.equal(afterAgain, before + 2);
-  await call(`/returns/${ret.data.id}`, { method: "DELETE" });
+  const orphanProduct = await call("/returns", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: "__TEST_DEV_PRODUCTO_HUERFANO_" + Date.now(), product_id: 999999999, quantity: 1 }) });
+  assert.equal(orphanProduct.status, 400);
+  const orphanClient = await call("/returns", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: "__TEST_DEV_CLIENTE_HUERFANO_" + Date.now(), client_id: 999999999, product_id: product.id, quantity: 1 }) });
+  assert.equal(orphanClient.status, 400);
   await call(`/products/${product.id}`, { method: "DELETE" });
+  await call(`/clients/${client.id}`, { method: "DELETE" });
+  const historical = await call(`/returns/${ret.data.id}`);
+  assert.equal(historical.data.client_name_snapshot, client.name);
+  assert.equal(historical.data.product_name_snapshot, product.name);
+  await call(`/returns/${ret.data.id}`, { method: "DELETE" });
+  await call(`/clients/${client.id}`, { method: "DELETE" });
+  await call(`/products/${product.id}`, { method: "DELETE" });
+});
+
+test("albaranes y envíos conservan sus nombres históricos de cliente y producto", async () => {
+  const suffix = Date.now();
+  const client = (await call("/clients", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: `__TEST_SNAPSHOT_CLIENTE_${suffix}__` }) })).data;
+  const product = (await call("/products", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: `__TEST_SNAPSHOT_PRODUCTO_${suffix}__`, stock: 20 }) })).data;
+  let order, line, delivery, shipment;
+  try {
+    order = (await call("/orders", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: `__TEST_SNAPSHOT_PEDIDO_${suffix}__`, client_id: client.id, status: "Pendiente" }) })).data;
+    const lines = (await call("/shipments")).data;
+    shipment = lines.find((row) => Number(row.order_id) === Number(order.id));
+    assert.ok(shipment);
+    assert.equal(shipment.client_name_snapshot, client.name);
+    const lineResult = await call("/order_lines", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ order_id: order.id, product_id: product.id, quantity: 2, unit_price: 3 }) });
+    assert.equal(lineResult.status, 201);
+    line = lineResult.data;
+    assert.equal(line.product_name_snapshot, product.name);
+    const created = await call(`/orders/convert-delivery/${order.id}`, { method: "POST" });
+    assert.equal(created.status, 201);
+    delivery = created.data;
+    const storedDelivery = await call(`/delivery_notes/${delivery.id}`);
+    assert.equal(storedDelivery.data.client_name_snapshot, client.name);
+    const deliveryLines = (await call("/delivery_note_lines")).data;
+    assert.ok(deliveryLines.some((row) => Number(row.delivery_note_id) === Number(delivery.id) && row.product_name_snapshot === product.name));
+    await call(`/clients/${client.id}`, { method: "DELETE" });
+    await call(`/products/${product.id}`, { method: "DELETE" });
+    assert.equal((await call(`/shipments/${shipment.id}`)).data.client_name_snapshot, client.name);
+    assert.equal((await call(`/delivery_notes/${delivery.id}`)).data.client_name_snapshot, client.name);
+    assert.ok((await call("/delivery_note_lines")).data.some((row) => Number(row.delivery_note_id) === Number(delivery.id) && row.product_name_snapshot === product.name));
+  } finally {
+    if (delivery?.id) await call(`/delivery_notes/${delivery.id}`, { method: "DELETE" });
+    if (shipment?.id) await call(`/shipments/${shipment.id}`, { method: "DELETE" });
+    if (line?.id) await call(`/order_lines/${line.id}`, { method: "DELETE" });
+    if (order?.id) await call(`/orders/${order.id}`, { method: "DELETE" });
+    await call(`/products/${product.id}`, { method: "DELETE" });
+    await call(`/clients/${client.id}`, { method: "DELETE" });
+  }
 });
 
 test("un cobro inválido no altera la factura", async () => {

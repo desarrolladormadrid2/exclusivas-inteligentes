@@ -5522,10 +5522,31 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     const invoice = getOrderInvoice(row);
     if (!invoice) return "Pendiente de cobro";
     const paid = (lookups.payments || [])
-      .filter((payment: any) => Number(payment.invoice_id) === Number(invoice.id))
+      .filter((payment: any) => Number(payment.invoice_id) === Number(invoice.id) && String(payment.status || "Aplicado") !== "Anulado" && !payment.voided_at)
       .reduce((total: number, payment: any) => total + Number(payment.amount || 0), 0);
     if (["Cobrada", "Pagada"].includes(String(invoice.status || "")) || paid >= Number(invoice.amount || 0) - 0.01) return "Cobrado";
     return paid > 0 ? "Cobro parcial" : "Pendiente de cobro";
+  }
+  function getInvoiceOutstanding(invoice: any) {
+    if (["Cobrada", "Pagada", "Anulada", "Proforma"].includes(String(invoice?.status || ""))) return 0;
+    const paid = (lookups.payments || [])
+      .filter((payment: any) => Number(payment.invoice_id) === Number(invoice?.id) && String(payment.status || "Aplicado") !== "Anulado" && !payment.voided_at)
+      .reduce((total: number, payment: any) => total + Number(payment.amount || 0), 0);
+    return Math.max(0, Number(invoice?.amount || 0) - paid);
+  }
+  function openPaymentForInvoice(invoice: any) {
+    if (!invoice) {
+      setError("No hay una factura disponible para registrar el cobro.");
+      return;
+    }
+    const paid = (lookups.payments || [])
+      .filter((payment: any) => Number(payment.invoice_id) === Number(invoice.id) && String(payment.status || "Aplicado") !== "Anulado" && !payment.voided_at)
+      .reduce((total: number, payment: any) => total + Number(payment.amount || 0), 0);
+    const remaining = Math.max(0, Number(invoice.amount || 0) - paid);
+    try {
+      sessionStorage.setItem("excluvas.pending-payment", JSON.stringify({ invoice_id: invoice.id, amount: remaining.toFixed(2) }));
+    } catch { /* La navegación sigue siendo útil aunque el navegador bloquee sessionStorage. */ }
+    onNavigate?.("Cobros");
   }
   function openPaymentFromOrder(row: any) {
     const invoice = getOrderInvoice(row);
@@ -5533,14 +5554,29 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       setError("Este pedido figura como facturado, pero no tiene una factura vinculada disponible para registrar el cobro.");
       return;
     }
-    const paid = (lookups.payments || [])
-      .filter((payment: any) => Number(payment.invoice_id) === Number(invoice.id))
-      .reduce((total: number, payment: any) => total + Number(payment.amount || 0), 0);
-    const remaining = Math.max(0, Number(invoice.amount || 0) - paid);
+    openPaymentForInvoice(invoice);
+  }
+  async function setDeliveryNoteDeliveryStatus(note: any) {
+    const shipment = (lookups.shipments || []).find((item: any) => Number(item.order_id) === Number(note?.order_id));
+    if (!shipment) {
+      setError("Este albarán no tiene un envío asociado. Crea primero la nota de carga desde el pedido.");
+      return;
+    }
+    const delivered = String(note.status || "") !== "Entregado";
     try {
-      sessionStorage.setItem("excluvas.pending-payment", JSON.stringify({ invoice_id: invoice.id, amount: remaining.toFixed(2) }));
-    } catch { /* La navegación sigue siendo útil aunque el navegador bloquee sessionStorage. */ }
-    onNavigate?.("Cobros");
+      const response = await fetch(`/api/shipments/${shipment.id}/delivery-status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Usuario local" },
+        body: JSON.stringify({ status: delivered ? "Entregado" : "Enviado" }),
+      });
+      const updated = await response.json();
+      if (!response.ok) throw new Error(updated.error || "No se pudo actualizar el estado de entrega.");
+      setRows((current) => current.map((row) => Number(row.id) === Number(note.id) ? { ...row, status: delivered ? "Entregado" : "Pendiente" } : row));
+      setLookups((current: any) => ({ ...current, shipments: (current.shipments || []).map((row: any) => Number(row.id) === Number(updated.id) ? { ...row, ...updated } : row) }));
+      setError("");
+    } catch (caught: any) {
+      setError(caught?.message || "No se pudo actualizar el estado de entrega.");
+    }
   }
   async function createOrderLoadNote(row: any) {
     if (!row?.id) return;
@@ -6947,7 +6983,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     setPreviewLines((current) => [...current, created]);
     setNewLine({ product_id: "", quantity: "1", unit_price: "0" });
   }
-  function formatTableValue(field: string, value: any) {
+  function formatTableValue(field: string, value: any, row?: any) {
     if (value === null || value === undefined || value === "") return "—";
     if (["opening_time", "closing_time", "delivery_window_start", "delivery_window_end"].includes(field)) {
       const text = String(value);
@@ -6971,6 +7007,10 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                 : field === "shipment_id" ? lookups.shipments
                   : [];
     const relationField = ["client_id", "product_id", "warehouse_id", "supplier_id", "primary_supplier_id", "collection_point_id", "order_id", "purchase_order_id", "purchase_invoice_id", "invoice_id", "shipment_id"].includes(field);
+    if (relationField && value !== null && value !== undefined && value !== "") {
+      const historicalLabel = field === "client_id" ? row?.client_name_snapshot : field === "product_id" ? row?.product_name_snapshot : "";
+      if (String(historicalLabel || "").trim()) return String(historicalLabel).trim();
+    }
     if (lookupSource.length && relationField) {
       const item = lookupSource.find((entry: any) => Number(entry.id) === Number(value));
       if (item) {
@@ -7142,12 +7182,14 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const preparationRows = isLoadPreparation ? rawPreparationRows.map((row: any) => ({ ...row, preparation_progress: preparationProgressFor(row) })) : rawPreparationRows;
   const productCategories = isProducts ? Array.from(new Set(rows.map((row) => String(row.category || "").trim()).filter(Boolean))).sort() : [];
   const productBrands = isProducts ? Array.from(new Set(rows.map((row) => String(row.brand || "").trim()).filter(Boolean))).sort() : [];
-  const listFilterActive = ["Pedidos", "Facturas", "Cobros", "Devoluciones", "Presupuestos", "Albaranes", "Compras", "Entradas", "Salidas", "Gastos y tickets"].includes(active);
-  const isTestName = (value: any) => /^(?:__(?:QA|TEST)(?:_|\b)|(?:QA|TEST|PRUEBA|DEMO|PW|E2E)[-_ ])/i.test(String(value || "").trim());
+  const listFilterActive = ["Pedidos", "Facturas", "Cobros", "Devoluciones", "Presupuestos", "Albaranes", "Compras", "Entradas", "Salidas", "Envíos", "Gastos y tickets"].includes(active);
+  const isTestName = (value: any) => /^(?:__(?:QA|TEST)(?:_|\b)|(?:QA|TEST|PRUEBA|DEMO|PW|E2E|SIM|AUDITORIA-NETLIFY)[-_ ]|Demo\s)/i.test(String(value || "").trim());
+  const isSyntheticOperationalRecord = (row: any) => [row.code, row.title, row.name, row.reference, row.ticket_reference, row.fuel_reference, row.external_code, row.purchase_order_code, row.invoice_code, row.order_code, row.supplier_name, row.client_name].some(isTestName);
   const isTestEntry = (row: any) => [row.code, row.purchase_order_code].some(isTestName);
   const visibleEntrySuppliers = (lookups.suppliers || []).filter((supplier: any) => showTestEntries || !isTestName(supplier.name));
   const visibleEntryClients = (lookups.clients || []).filter((client: any) => showTestEntries || !isTestName(client.name));
   const hiddenTestEntryCount = active === "Entradas" ? rows.filter(isTestEntry).length : 0;
+  const hiddenSyntheticRecordCount = listFilterActive ? rows.filter(isSyntheticOperationalRecord).length : 0;
   const listStatusOptions = Array.from(new Set(rows.map((row: any) => String(row.status || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, "es"));
   const quickViewOptions = active === "Pedidos"
     ? [{ value: "all", label: "Todos los pedidos" }, { value: "today", label: "Pedidos de hoy" }, { value: "unbilled", label: "Sin facturar" }, { value: "not-shipped", label: "Pendientes de enviar" }, { value: "review", label: "Pendientes de revisar" }]
@@ -7199,7 +7241,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       || (quickView === "critical" && criticalStock)
       || (quickView === "review" && (reviewStatus || currentBillingStatus !== "Facturado" && active === "Pedidos"));
     if (isCrmPreparation) return matchesText && matchesQuickView && (!preparationDateFilter || rowDate === preparationDateFilter);
-    if (!isProducts && !isLoadPreparation) return (active !== "Entradas" || showTestEntries || !isTestEntry(row)) && matchesText && matchesBilling && matchesShipping && matchesQuickView && matchesOrderCreatedFrom && matchesOrderCreatedTo && (!listFilterActive || (matchesListClient && matchesListSupplier && matchesEntryCounterparty && matchesListFrom && matchesListTo && matchesListStatus));
+    if (!isProducts && !isLoadPreparation) return (!listFilterActive || showTestEntries || !isSyntheticOperationalRecord(row)) && matchesText && matchesBilling && matchesShipping && matchesQuickView && matchesOrderCreatedFrom && matchesOrderCreatedTo && (!listFilterActive || (matchesListClient && matchesListSupplier && matchesEntryCounterparty && matchesListFrom && matchesListTo && matchesListStatus));
     if (isLoadPreparation) return matchesText && matchesQuickView && (!preparationDateFilter || String(row.preparation_date || "").slice(0, 10) === preparationDateFilter);
     const matchesCategory = !productFilters.category || row.category === productFilters.category;
     const matchesBrand = !productFilters.brand || row.brand === productFilters.brand;
@@ -7455,6 +7497,12 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         <input type="checkbox" aria-label={c.labels[i]} checked={Boolean(Number(form[f] || 0))} onChange={(e) => handleFormChange(f, e.target.checked ? "1" : "0")} />
       ) : f === "payment_status" ? (
         <select aria-label={c.labels[i]} value={form[f] ?? "Pendiente"} onChange={(e) => handleFormChange(f, e.target.value)}><option>Pendiente</option><option>Pagada</option><option>Anulada</option></select>
+      ) : f === "status" && active === "Albaranes" ? (
+        <><input aria-label={c.labels[i]} value={form[f] ?? "Pendiente"} readOnly /><small>El estado se actualiza al confirmar o reabrir la entrega desde este listado o desde Reparto.</small></>
+      ) : f === "status" && active === "Facturas" ? (
+        <><select aria-label={c.labels[i]} value={form[f] ?? "Pendiente"} onChange={(e) => handleFormChange(f, e.target.value)}>{Array.from(new Set([String(form[f] || "Pendiente"), "Pendiente", "Proforma", "Anulada"])).map((status) => <option key={status}>{status}</option>)}</select><small>Parcial, cobrada y vencida se calculan desde los cobros activos y la fecha de vencimiento. Usa «Registrar cobro» para actualizar el estado real.</small></>
+      ) : f === "status" && active === "Pedidos" ? (
+        <><select aria-label={c.labels[i]} value={form[f] ?? "Nuevo"} onChange={(e) => handleFormChange(f, e.target.value)}>{Array.from(new Set([String(form[f] || "Nuevo"), "Nuevo", "Pendiente", "Confirmado"])).map((status) => <option key={status}>{status}</option>)}</select><small>Preparado, enviado y entregado se actualizan desde Almacén y Reparto para conservar stock y seguimiento.</small></>
       ) : f === "status" ? (
         <select aria-label={c.labels[i]} value={form[f] ?? (active === "Pedidos" ? "Nuevo" : "Pendiente")} onChange={(e) => handleFormChange(f, e.target.value)}>
           {(active === "Compras" ? ["Borrador", "Enviado", "En tránsito", "Parcialmente recibido", "Recibido", "Recibido con incidencia", "Cancelado"] : active === "Facturas" ? ["Proforma", "Pendiente", "Parcial", "Cobrada", "Vencida", "Anulada"] : [...(active === "Documentos" ? ["Activa", "Borrador", "Archivada"] : []), ...(active === "Pedidos" ? ["Nuevo"] : []), "Pendiente", "Confirmado", "Preparando", "Preparado", "Enviado", "Entregado", "Cancelado", "Cobrada"]).map((s) => <option key={s}>{s}</option>)}
@@ -7843,7 +7891,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           <span className="list-count" role="status">
             {loading ? "Cargando registros…" : `${filteredRows.length} registros${totalPages > 1 ? ` · página ${currentPage}/${totalPages}` : ""}`}
           </span>
-          {active === "Entradas" && hiddenTestEntryCount > 0 && <p className="supplier-test-data-note goods-receipt-test-note" role="status">{showTestEntries ? `Mostrando ${hiddenTestEntryCount} ${hiddenTestEntryCount === 1 ? "registro de prueba" : "registros de prueba"}.` : `${hiddenTestEntryCount} ${hiddenTestEntryCount === 1 ? "registro de prueba oculto" : "registros de prueba ocultos"}.`} <button type="button" className="row-action" aria-pressed={showTestEntries} onClick={() => setShowTestEntries((current) => !current)}>{showTestEntries ? "Ocultar pruebas" : "Ver pruebas"}</button></p>}
+          {listFilterActive && hiddenSyntheticRecordCount > 0 && <p className="supplier-test-data-note goods-receipt-test-note" role="status">{showTestEntries ? `Mostrando ${hiddenSyntheticRecordCount} ${hiddenSyntheticRecordCount === 1 ? "registro de prueba" : "registros de prueba"}.` : `${hiddenSyntheticRecordCount} ${hiddenSyntheticRecordCount === 1 ? "registro de prueba oculto" : "registros de prueba ocultos"}.`} <button type="button" className="row-action" aria-pressed={showTestEntries} onClick={() => setShowTestEntries((current) => !current)}>{showTestEntries ? "Ocultar pruebas" : "Ver pruebas"}</button></p>}
           {quickViewOptions.length > 1 && <div className="saved-views" aria-label="Vistas rápidas">
             <span className="saved-views-label">Vistas</span>
             {quickViewOptions.map((option) => <button key={option.value} type="button" className={`saved-view-button${quickView === option.value ? " is-active" : ""}`} aria-pressed={quickView === option.value} onClick={() => { setQuickView(option.value); try { localStorage.setItem(`excluvas.quick-view.${c.api}`, option.value); } catch {} }}>{option.label}</button>)}
@@ -8063,9 +8111,9 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                                 ? (typeof r[f] === "object"
                                   ? String(r[f].address || r[f].name || r[f].label || "—")
                                   : String(getClient(r.client_id)?.address || "—"))
-                                : formatTableValue(f, r[f]) === "[object Object]"
+                              : formatTableValue(f, r[f], r) === "[object Object]"
                                   ? "—"
-                                  : formatTableValue(f, r[f])
+                                  : formatTableValue(f, r[f], r)
                           )}
                         </td>
                         {active === "Stock" && fieldIndex === 0 && renderProductLots(r)}
@@ -8119,13 +8167,16 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                         )}
                         {active === "Facturas" && (
                           <>
+                            <button className="row-action secondary" onClick={() => void openRecordModal(r)}>Estado</button>
                             <button className="row-action workflow" onClick={() => void openInvoicePdf(r)}>Ver PDF</button>
                             <button className="row-action" onClick={() => void copyInvoiceLink(r)}>Compartir enlace</button>
                             <button className="row-action workflow" onClick={() => void sendInvoiceEmail(r)}>Enviar email</button>
+                            {getInvoiceOutstanding(r) > 0.009 && <button className="row-action primary" onClick={() => openPaymentForInvoice(r)}>Registrar cobro</button>}
                           </>
                         )}
                         {active === "Albaranes" && (
                           <>
+                            {(() => { const shipment = (lookups.shipments || []).find((item: any) => Number(item.order_id) === Number(r.order_id)); return <button type="button" className="row-action primary" disabled={!shipment} title={!shipment ? "El albarán no tiene un envío asociado" : undefined} onClick={() => void setDeliveryNoteDeliveryStatus(r)}>{!shipment ? "Sin envío" : r.status === "Entregado" ? "Reabrir entrega" : "Marcar entregado"}</button>; })()}
                             <button className="row-action workflow" onClick={() => void openCommercialDocumentPdf(r, "delivery")}>Ver PDF</button>
                             <button className="row-action" onClick={() => void copyCommercialDocumentLink(r, "delivery")}>Compartir enlace</button>
                             <button className="row-action workflow" onClick={() => convertDeliveryToInvoice(r)}>Crear factura</button>
@@ -8139,7 +8190,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                         {active === "Pedidos" && (
                           <>
                             <button type="button" className="row-action primary" onClick={() => { if (isOrderSent(r)) void openPreview(r); else void openRecordModal(r); }}>
-                              Ver detalle
+                              {isOrderSent(r) ? "Seguimiento" : "Gestionar estado"}
                             </button>
                             <button type="button" className="row-action workflow" onClick={() => void openCommercialDocumentPdf(r, "order")}>Ver PDF</button>
                             <button type="button" className="row-action" onClick={() => void copyCommercialDocumentLink(r, "order")}>Compartir enlace</button>
@@ -8213,7 +8264,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         </div>
       )}
       {!isCrmPreparation && listIsReady && !filteredRows.length && (
-        <p className="muted empty-row">{active === "Entradas" && hiddenTestEntryCount > 0 && !showTestEntries ? "Todavía no hay entradas operativas. Los registros de prueba están apartados arriba." : active === "Entradas" ? (rows.length ? "No hay entradas que coincidan con los filtros." : "Todavía no hay entradas registradas.") : rows.length ? "No hay productos que coincidan con los filtros." : "No hay registros todavía."}</p>
+        <p className="muted empty-row">{active === "Entradas" && hiddenTestEntryCount > 0 && !showTestEntries ? "Todavía no hay entradas operativas. Los registros de prueba están apartados arriba." : active !== "Entradas" && hiddenSyntheticRecordCount > 0 && !showTestEntries ? "No hay registros operativos que coincidan. Los datos de prueba están apartados arriba." : active === "Entradas" ? (rows.length ? "No hay entradas que coincidan con los filtros." : "Todavía no hay entradas registradas.") : rows.length ? "No hay productos que coincidan con los filtros." : "No hay registros todavía."}</p>
       )}
       {deletedUndo && deletedUndo.api === c.api && <div className="undo-toast" role="status"><span>Se ha enviado a la papelera: <b>{deletedUndo.label}</b></span><button type="button" className="button secondary" onClick={() => void undoDelete()}>Deshacer</button></div>}
       </div>}
@@ -8581,7 +8632,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                 Etiqueta de envío · QR y barras
               </button>}
             </div>
-            {active === "Facturas" && <div className="invoice-document-actions"><button type="button" className="button workflow" onClick={() => void openInvoicePdf(preview)}>Ver PDF generado</button><button type="button" className="button secondary" onClick={() => void copyInvoiceLink(preview)}>Copiar enlace seguro</button><button type="button" className="button workflow" onClick={() => void sendInvoiceEmail(preview)}>Enviar por email</button><button type="button" className="button secondary" onClick={() => void prepareInvoicePdf(preview, true)}>Regenerar PDF</button></div>}
+            {active === "Facturas" && <div className="invoice-document-actions"><button type="button" className="button workflow" onClick={() => void openInvoicePdf(preview)}>Ver PDF generado</button><button type="button" className="button secondary" onClick={() => void copyInvoiceLink(preview)}>Copiar enlace seguro</button><button type="button" className="button workflow" onClick={() => void sendInvoiceEmail(preview)}>Enviar por email</button><button type="button" className="button secondary" onClick={() => void prepareInvoicePdf(preview, true)}>Regenerar PDF</button>{getInvoiceOutstanding(preview) > 0.009 && <button type="button" className="button primary" onClick={() => openPaymentForInvoice(preview)}>Registrar cobro · {getInvoiceOutstanding(preview).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</button>}</div>}
             {active === "Albaranes" && <div className="invoice-document-actions"><button type="button" className="button workflow" onClick={() => void openCommercialDocumentPdf(preview, "delivery")}>Ver PDF generado</button><button type="button" className="button secondary" onClick={() => void copyCommercialDocumentLink(preview, "delivery")}>Copiar enlace seguro</button><button type="button" className="button secondary" onClick={() => void prepareCommercialDocumentPdf(preview, "delivery", true)}>Regenerar PDF</button></div>}
             {active === "Pedidos" && <><div className="document-pdf-actions"><button type="button" className="button workflow" onClick={() => void openCommercialDocumentPdf(preview, "order")}>Ver PDF generado</button><button type="button" className="button secondary" onClick={() => void copyCommercialDocumentLink(preview, "order")}>Copiar enlace seguro</button><button type="button" className="button secondary" onClick={() => void prepareCommercialDocumentPdf(preview, "order", true)}>Regenerar PDF</button></div><div className="order-preview-actions"><button type="button" className="button workflow" onClick={() => void (getOrderShipment(preview) ? openOrderLoadNote(preview) : createOrderLoadNote(preview))}>{getOrderShipment(preview) ? "Abrir nota de carga" : "Crear nota de carga"}</button>{!isOrderSent(preview) && <button type="button" className="button secondary" onClick={() => { setPreview(null); beginInline(preview); }}>Editar pedido</button>}<button type="button" className="button secondary" onClick={() => void convertOrder(preview, "delivery")}>Crear albarán</button><button type="button" className="button primary" onClick={() => void convertOrder(preview, "invoice")}>Crear factura</button></div></>}
             {active === "Presupuestos" && <><div className="document-pdf-actions"><button type="button" className="button workflow" onClick={() => void openCommercialDocumentPdf(preview, "quote")}>Ver PDF generado</button><button type="button" className="button secondary" onClick={() => void copyCommercialDocumentLink(preview, "quote")}>Copiar enlace seguro</button><button type="button" className="button secondary" onClick={() => void prepareCommercialDocumentPdf(preview, "quote", true)}>Regenerar PDF</button></div><div className="quote-preview-actions"><button type="button" className="button secondary" onClick={() => void sendQuoteToClient(preview)}>Enviar al cliente</button><button type="button" className="button primary" disabled={preview.status === "Convertido"} onClick={() => void convertQuoteToOrder(preview)}>{preview.status === "Convertido" ? "Convertido a pedido" : "Convertir a pedido"}</button></div></>}

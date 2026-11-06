@@ -512,9 +512,11 @@ function commercialPdfConfig(type) {
 }
 function commercialDocumentPdfData(type, documentId) {
   const config = commercialPdfConfig(type);
-  const document = db.prepare(`SELECT d.*,c.name client_name,c.address client_address,c.city client_city,c.email client_email,c.phone client_phone FROM ${config.table} d LEFT JOIN clients c ON c.id=d.client_id WHERE d.id=? AND CAST(COALESCE(d.deleted,0) AS INTEGER)=0`).get(Number(documentId));
+  const clientNameExpression = ["invoices", "delivery_notes", "shipments"].includes(config.table) ? "COALESCE(NULLIF(TRIM(d.client_name_snapshot),''),c.name)" : "c.name";
+  const document = db.prepare(`SELECT d.*,${clientNameExpression} client_name,c.address client_address,c.city client_city,c.email client_email,c.phone client_phone FROM ${config.table} d LEFT JOIN clients c ON c.id=d.client_id WHERE d.id=? AND CAST(COALESCE(d.deleted,0) AS INTEGER)=0`).get(Number(documentId));
   if (!document) return null;
-  const lines = db.prepare(`SELECT l.*,p.name product_name,p.sku FROM ${config.lines} l LEFT JOIN products p ON p.id=l.product_id WHERE l.${config.foreignKey}=? ORDER BY l.id`).all(Number(documentId));
+  const productNameExpression = ["delivery_note_lines", "order_lines"].includes(config.lines) ? "COALESCE(NULLIF(TRIM(l.product_name_snapshot),''),p.name)" : "p.name";
+  const lines = db.prepare(`SELECT l.*,${productNameExpression} product_name,p.sku FROM ${config.lines} l LEFT JOIN products p ON p.id=l.product_id WHERE l.${config.foreignKey}=? ORDER BY l.id`).all(Number(documentId));
   const proof = type === "delivery"
     ? db.prepare("SELECT delivery_signature_data,delivery_recipient_name,delivery_signature_status,delivery_signature_at,delivery_signature_by,delivery_signature_note FROM shipments WHERE order_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 1").get(Number(document.order_id))
     : null;
@@ -765,6 +767,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS returns(id INTEGER PRIMARY KEY AUTOINCREMENT
 for (const column of ["stock_applied_at TEXT", "stock_applied_by TEXT", "stock_applied_quantity REAL DEFAULT 0", "warehouse_id INTEGER", "order_id INTEGER", "shipment_id INTEGER", "order_line_id INTEGER", "return_date TEXT", "reviewed_by TEXT", "reviewed_at TEXT", "authorized_by TEXT", "authorized_at TEXT", "return_condition TEXT DEFAULT 'Apta para stock'", "stock_destination TEXT DEFAULT 'Stock disponible'", "quarantine_reason TEXT", "lot_id INTEGER", "lot_code_snapshot TEXT", "expiry_date_snapshot TEXT"]) {
   try { db.prepare(`ALTER TABLE returns ADD COLUMN ${column}`).run(); } catch {}
 }
+// El snapshot del cliente y producto de una devolución se obtiene al crearla.
+for (const column of ["client_name_snapshot TEXT", "product_name_snapshot TEXT"]) { try { db.prepare(`ALTER TABLE returns ADD COLUMN ${column}`).run(); } catch {} }
 db.exec(`CREATE TABLE IF NOT EXISTS collection_points(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE,name TEXT NOT NULL,client_id INTEGER,address TEXT,city TEXT,contact TEXT,phone TEXT,email TEXT,opening_hours TEXT,opening_time TEXT,closing_time TEXT,notes TEXT);`);
 try { db.exec("ALTER TABLE collection_points ADD COLUMN client_id INTEGER"); } catch {}
 try { db.exec("ALTER TABLE collection_points ADD COLUMN opening_time TEXT"); } catch {}
@@ -1033,6 +1037,37 @@ db.exec(
 for (const [table, columns] of [["delivery_note_lines", ["description TEXT", "unit_price REAL DEFAULT 0", "vat REAL DEFAULT 21", "amount REAL DEFAULT 0", "line_type TEXT", "accounting_account TEXT"]], ["invoice_lines", ["description TEXT", "line_type TEXT", "accounting_account TEXT"]]]) {
   for (const column of columns) { try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${column}`); } catch {} }
 }
+// Snapshots para que el histórico siga legible aunque sus fichas maestras se
+// archiven o eliminen; poblar primero lo que todavía puede recuperarse.
+for (const [table, columns] of [
+  ["delivery_notes", ["client_name_snapshot TEXT"]],
+  ["shipments", ["client_name_snapshot TEXT"]],
+  ["delivery_note_lines", ["product_name_snapshot TEXT"]],
+  ["order_lines", ["product_name_snapshot TEXT"]],
+]) for (const column of columns) { try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${column}`); } catch {} }
+if (remoteMode && process.env.RUN_REMOTE_MIGRATIONS === "1") {
+  for (const [table, columns] of [["delivery_notes", ["client_name_snapshot TEXT"]], ["shipments", ["client_name_snapshot TEXT"]], ["returns", ["client_name_snapshot TEXT", "product_name_snapshot TEXT"]], ["delivery_note_lines", ["product_name_snapshot TEXT"]], ["order_lines", ["product_name_snapshot TEXT"]]]) {
+    for (const column of columns) { try { db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column}`).run(); } catch {} }
+  }
+}
+try { db.exec(`
+  UPDATE delivery_notes
+     SET client_name_snapshot=COALESCE(NULLIF(TRIM(client_name_snapshot),''),(SELECT name FROM clients WHERE clients.id=delivery_notes.client_id))
+   WHERE client_name_snapshot IS NULL OR TRIM(client_name_snapshot)='';
+  UPDATE shipments
+     SET client_name_snapshot=COALESCE(NULLIF(TRIM(client_name_snapshot),''),(SELECT name FROM clients WHERE clients.id=shipments.client_id),(SELECT c.name FROM orders o JOIN clients c ON c.id=o.client_id WHERE o.id=shipments.order_id))
+   WHERE client_name_snapshot IS NULL OR TRIM(client_name_snapshot)='';
+  UPDATE returns
+     SET client_name_snapshot=COALESCE(NULLIF(TRIM(client_name_snapshot),''),(SELECT name FROM clients WHERE clients.id=returns.client_id),(SELECT i.client_name_snapshot FROM invoices i WHERE i.id=returns.invoice_id),(SELECT c.name FROM shipments s JOIN clients c ON c.id=s.client_id WHERE s.id=returns.shipment_id)),
+         product_name_snapshot=COALESCE(NULLIF(TRIM(product_name_snapshot),''),(SELECT name FROM products WHERE products.id=returns.product_id),(SELECT ol.product_name_snapshot FROM order_lines ol WHERE ol.id=returns.order_line_id))
+   WHERE client_name_snapshot IS NULL OR TRIM(client_name_snapshot)='' OR product_name_snapshot IS NULL OR TRIM(product_name_snapshot)='';
+  UPDATE delivery_note_lines
+     SET product_name_snapshot=COALESCE(NULLIF(TRIM(product_name_snapshot),''),(SELECT name FROM products WHERE products.id=delivery_note_lines.product_id))
+   WHERE product_name_snapshot IS NULL OR TRIM(product_name_snapshot)='';
+  UPDATE order_lines
+     SET product_name_snapshot=COALESCE(NULLIF(TRIM(product_name_snapshot),''),(SELECT name FROM products WHERE products.id=order_lines.product_id))
+   WHERE product_name_snapshot IS NULL OR TRIM(product_name_snapshot)='';
+`); } catch {}
 db.exec(`CREATE TABLE IF NOT EXISTS invoice_orders(id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_id INTEGER NOT NULL,order_id INTEGER NOT NULL,UNIQUE(invoice_id,order_id),UNIQUE(order_id));`);
 if (!remoteMode) {
   try { db.exec("INSERT OR IGNORE INTO invoice_orders(invoice_id,order_id) SELECT id,order_id FROM invoices WHERE order_id IS NOT NULL"); } catch {}
@@ -2043,7 +2078,8 @@ const purchaseOrderReceiptFields = `
   (SELECT gr.validated_at FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.id DESC LIMIT 1) AS receipt_validated_at,
   (SELECT gr.receipt_date FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.id DESC LIMIT 1) AS receipt_date,
   (SELECT COUNT(*) FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0) AS receipt_count,
-  CASE WHEN po.status IN ('Parcialmente recibido','Recibido','Recibido con incidencia') AND NOT EXISTS (SELECT 1 FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0) THEN 1 ELSE 0 END AS receipt_missing,
+  CASE WHEN po.status IN ('Parcialmente recibido','Recibido','Recibida','Recibido con incidencia') AND NOT EXISTS (SELECT 1 FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0) THEN 1 ELSE 0 END AS receipt_missing,
+  CASE WHEN COALESCE((SELECT SUM(MAX(0,ordered.quantity-COALESCE(received.quantity,0))) FROM (SELECT pol.product_id,SUM(pol.quantity) quantity FROM purchase_order_lines pol WHERE pol.purchase_order_id=po.id AND CAST(COALESCE(pol.deleted,0) AS INTEGER)=0 GROUP BY pol.product_id) ordered LEFT JOIN (SELECT gl.product_id,SUM(CASE WHEN gl.status='Producto equivocado' THEN 0 ELSE MAX(0,COALESCE(gl.received_quantity,0)-COALESCE(gl.damaged_quantity,0)-COALESCE(gl.substituted_quantity,0)) END) quantity FROM goods_receipt_lines gl JOIN goods_receipts gr ON gr.id=gl.receipt_id WHERE gr.purchase_order_id=po.id AND gr.validation_status='Validada' AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 AND CAST(COALESCE(gl.deleted,0) AS INTEGER)=0 GROUP BY gl.product_id) received ON received.product_id=ordered.product_id),0)>0.0001 THEN 1 ELSE 0 END AS receipt_remaining,
   (SELECT COUNT(*) FROM purchase_order_lines pol WHERE pol.purchase_order_id=po.id AND CAST(COALESCE(pol.deleted,0) AS INTEGER)=0) AS line_count,
   (SELECT GROUP_CONCAT(line_product.name,' · ') FROM (SELECT p.name FROM purchase_order_lines pol LEFT JOIN products p ON p.id=pol.product_id WHERE pol.purchase_order_id=po.id AND CAST(COALESCE(pol.deleted,0) AS INTEGER)=0 ORDER BY pol.id LIMIT 3) line_product) AS product_summary
 `;
@@ -2513,7 +2549,7 @@ export async function crmApiHandler(req, res) {
         if (!shipment) return send(res, 404, { error: "Enlace de seguimiento no válido o caducado" });
         const lines = db.prepare(`
           SELECT ol.product_id,ol.quantity,ol.quantity_requested,ol.quantity_unit,
-                 ol.id,ol.prepared_quantity,ol.preparation_status,p.name AS product_name
+                 ol.id,ol.prepared_quantity,ol.preparation_status,COALESCE(NULLIF(TRIM(ol.product_name_snapshot),''),p.name) AS product_name
           FROM order_lines ol
           LEFT JOIN products p ON p.id=ol.product_id
           WHERE ol.order_id=? ORDER BY ol.id`).all(Number(shipment.order_id || 0));
@@ -3431,13 +3467,14 @@ export async function crmApiHandler(req, res) {
         try {
           const created = db.prepare("INSERT INTO orders(code,client_id,product_id,quantity,amount,status,address,delivery_city,created_by,created_at,updated_at,stock_alert,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)").run(code, Number(client.id), firstLine.productId, firstLine.quantity, amount, "Pendiente", client.address || "", client.city || "", actor, now, now, stockShortages.length ? 1 : 0, `Pedido creado desde el presupuesto ${quote.code}.`);
           const orderId = Number(created.lastInsertRowid);
-          const insertLine = db.prepare("INSERT INTO order_lines(order_id,product_id,quantity,quantity_requested,quantity_unit,units_factor,unit_price,discount,vat,amount,prepared,prepared_quantity,preparation_status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+          const insertLine = db.prepare("INSERT INTO order_lines(order_id,product_id,product_name_snapshot,quantity,quantity_requested,quantity_unit,units_factor,unit_price,discount,vat,amount,prepared,prepared_quantity,preparation_status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
           for (const line of normalizedLines) {
-            insertLine.run(orderId, line.productId, line.quantity, line.quantityRequested, line.quantityUnit, line.unitsFactor, line.unitPrice, line.discount, line.vat, line.amount, 0, 0, "Pendiente", now, now);
+            const productName = db.prepare("SELECT name FROM products WHERE id=?").get(line.productId)?.name || null;
+            insertLine.run(orderId, line.productId, productName, line.quantity, line.quantityRequested, line.quantityUnit, line.unitsFactor, line.unitPrice, line.discount, line.vat, line.amount, 0, 0, "Pendiente", now, now);
             db.prepare("UPDATE products SET stock_reserved=COALESCE(stock_reserved,0)+? WHERE id=?").run(line.quantity, line.productId);
           }
           const shipmentCode = `ENV-${new Date().getFullYear()}-${String(Date.now()).slice(-7)}`;
-          db.prepare("INSERT INTO shipments(code,order_id,client_id,status,preparation_date,expected_delivery_at,address,packages,incidents,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").run(shipmentCode, orderId, Number(client.id), "Preparando", null, null, client.address || "", 1, "", `Preparación creada desde el presupuesto ${quote.code}.`, now, now);
+          db.prepare("INSERT INTO shipments(code,order_id,client_id,client_name_snapshot,status,preparation_date,expected_delivery_at,address,packages,incidents,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)").run(shipmentCode, orderId, Number(client.id), client.name, "Preparando", null, null, client.address || "", 1, "", `Preparación creada desde el presupuesto ${quote.code}.`, now, now);
           db.prepare("UPDATE quotes SET status='Convertido',converted_order_id=?,updated_at=? WHERE id=?").run(orderId, now, quoteId);
           recordAudit(actor, "POST", `quotes/${quoteId}/convert-order`, "Conversión a pedido", JSON.stringify({ quote_id: quoteId, quote_code: quote.code, order_id: orderId, order_code: code, lines: normalizedLines.length }));
           if (!remoteMode) db.exec("COMMIT");
@@ -3668,7 +3705,7 @@ export async function crmApiHandler(req, res) {
         if (orders.length > 1) return send(res, 409, { error: "Hay varios pedidos que coinciden", choices: orders.slice(0, 8).map((row) => ({ id: row.id, code: row.code, status: row.status })) });
         const order = orders[0];
         if (["Enviado", "En reparto", "Entregado", "Cancelado"].includes(String(order.status || ""))) return send(res, 409, { error: "Ese pedido ya no admite modificaciones" });
-        const lines = db.prepare("SELECT ol.*,p.name product_name,p.sku FROM order_lines ol LEFT JOIN products p ON p.id=ol.product_id WHERE ol.order_id=? ORDER BY ol.id").all(Number(order.id));
+        const lines = db.prepare("SELECT ol.*,COALESCE(NULLIF(TRIM(ol.product_name_snapshot),''),p.name) product_name,p.sku FROM order_lines ol LEFT JOIN products p ON p.id=ol.product_id WHERE ol.order_id=? ORDER BY ol.id").all(Number(order.id));
         const matches = productQuery
           ? lines.filter((line) => `${line.product_name || ""} ${line.sku || ""}`.toLowerCase().includes(productQuery))
           : lines;
@@ -3702,10 +3739,16 @@ export async function crmApiHandler(req, res) {
         const now = new Date().toISOString();
         db.prepare("UPDATE shipments SET status=?,delivered_at=?,delivered_by=?,updated_at=? WHERE id=?").run(nextStatus, delivered ? (shipment.delivered_at || now) : null, delivered ? actor : null, now, shipmentId);
         if (shipment.order_id) db.prepare("UPDATE orders SET status=?,updated_at=? WHERE id=?").run(nextStatus, now, Number(shipment.order_id));
+        const deliveryNote = shipment.order_id ? db.prepare("SELECT id FROM delivery_notes WHERE order_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 1").get(Number(shipment.order_id)) : null;
+        if (deliveryNote?.id) {
+          db.prepare("UPDATE delivery_notes SET status=?,updated_at=? WHERE id=?").run(delivered ? "Entregado" : "Pendiente", now, Number(deliveryNote.id));
+          markCommercialDocumentPdfStale("delivery", Number(deliveryNote.id));
+        }
         db.prepare("UPDATE delivery_route_stops SET status=?,updated_at=? WHERE shipment_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").run(delivered ? "Entregado" : "Pendiente", now, shipmentId);
         recordAudit(actor, "POST", `shipments/${shipmentId}/delivery-status`, delivered ? "Marcar entrega" : "Deshacer entrega", JSON.stringify({ shipment_id: shipmentId, status: nextStatus, order_id: shipment.order_id || null }));
         invalidateRelatedReadCaches("shipments");
         invalidateRelatedReadCaches("orders");
+        invalidateRelatedReadCaches("delivery_notes");
         return send(res, 200, db.prepare("SELECT * FROM shipments WHERE id=?").get(shipmentId));
       }
       if (t === "shipments" && req.method === "POST" && p[2] && p[3] === "delivery-confirmation") {
@@ -3751,7 +3794,10 @@ export async function crmApiHandler(req, res) {
         if (!result.changes) return send(res, 404, { error: "No se pudo confirmar la entrega" });
         if (shipment.order_id) db.prepare("UPDATE orders SET status='Entregado',updated_at=? WHERE id=?").run(now, Number(shipment.order_id));
         const deliveryNote = shipment.order_id ? db.prepare("SELECT id FROM delivery_notes WHERE order_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 1").get(Number(shipment.order_id)) : null;
-        if (deliveryNote?.id) markCommercialDocumentPdfStale("delivery", Number(deliveryNote.id));
+        if (deliveryNote?.id) {
+          db.prepare("UPDATE delivery_notes SET status='Entregado',updated_at=? WHERE id=?").run(now, Number(deliveryNote.id));
+          markCommercialDocumentPdfStale("delivery", Number(deliveryNote.id));
+        }
         // Sincroniza la parada aunque el cliente rechace firmar: la entrega
         // queda hecha, pero la ruta conserva la incidencia para seguimiento.
         const routeStopStatus = signatureStatus === "Rechazó firmar" ? "Incidencia" : "Entregado";
@@ -3759,6 +3805,7 @@ export async function crmApiHandler(req, res) {
         recordAudit(actor, "POST", `shipments/${shipmentId}/delivery-confirmation`, "Confirmar entrega", JSON.stringify({ shipment_id: shipmentId, order_id: shipment.order_id || null, signature_status: signatureStatus, recipient_name: recipientName || null, note: note || null }));
         invalidateRelatedReadCaches("shipments");
         invalidateRelatedReadCaches("orders");
+        invalidateRelatedReadCaches("delivery_notes");
         const updated = db.prepare("SELECT * FROM shipments WHERE id=?").get(shipmentId);
         return send(res, 200, updated);
       }
@@ -3894,6 +3941,10 @@ export async function crmApiHandler(req, res) {
         if (purchaseOrderId) {
           const pendingReceipt = db.prepare("SELECT id,code FROM goods_receipts WHERE purchase_order_id=? AND validation_status='Pendiente' AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 1").get(purchaseOrderId);
           if (pendingReceipt) return send(res, 409, { error: `El pedido ya tiene una entrada pendiente de validar (${pendingReceipt.code}). Abre esa entrada en “Entradas registradas” antes de registrar otra.` });
+          const purchaseOrder = db.prepare("SELECT status FROM purchase_orders WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(purchaseOrderId);
+          if (["Recibido", "Recibida"].includes(String(purchaseOrder?.status || ""))) return send(res, 409, { error: "Este pedido ya figura como recibido. No se puede registrar otra entrada." });
+          const remaining = db.prepare("SELECT COALESCE(SUM(MAX(0,ordered.quantity-COALESCE(received.quantity,0))),0) remaining FROM (SELECT pol.product_id,SUM(pol.quantity) quantity FROM purchase_order_lines pol WHERE pol.purchase_order_id=? AND CAST(COALESCE(pol.deleted,0) AS INTEGER)=0 GROUP BY pol.product_id) ordered LEFT JOIN (SELECT gl.product_id,SUM(CASE WHEN gl.status='Producto equivocado' THEN 0 ELSE MAX(0,COALESCE(gl.received_quantity,0)-COALESCE(gl.damaged_quantity,0)-COALESCE(gl.substituted_quantity,0)) END) quantity FROM goods_receipt_lines gl JOIN goods_receipts gr ON gr.id=gl.receipt_id WHERE gr.purchase_order_id=? AND gr.validation_status='Validada' AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 AND CAST(COALESCE(gl.deleted,0) AS INTEGER)=0 GROUP BY gl.product_id) received ON received.product_id=ordered.product_id").get(purchaseOrderId, purchaseOrderId);
+          if (Number(remaining?.remaining || 0) <= 0.0001) return send(res, 409, { error: "Este pedido ya se recibió por completo. No quedan cantidades pendientes de entrada." });
         }
         if (purchaseInvoiceId && !db.prepare("SELECT id FROM invoices WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(purchaseInvoiceId)) return send(res, 400, { error: "La factura de compra no existe" });
         if (!inputLines.length) return send(res, 400, { error: "Añade al menos un producto a la entrada" });
@@ -3957,6 +4008,16 @@ export async function crmApiHandler(req, res) {
             if (pendingReceipt) {
               if (!remoteMode) db.exec("ROLLBACK");
               return send(res, 409, { error: `El pedido ya tiene una entrada pendiente de validar (${pendingReceipt.code}). Abre esa entrada en “Entradas registradas” antes de registrar otra.` });
+            }
+            const linkedPurchaseOrder = db.prepare("SELECT status FROM purchase_orders WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(purchaseOrderId);
+            if (["Recibido", "Recibida"].includes(String(linkedPurchaseOrder?.status || ""))) {
+              if (!remoteMode) db.exec("ROLLBACK");
+              return send(res, 409, { error: "Este pedido ya figura como recibido. No se puede registrar otra entrada." });
+            }
+            const remaining = db.prepare("SELECT COALESCE(SUM(MAX(0,ordered.quantity-COALESCE(received.quantity,0))),0) remaining FROM (SELECT pol.product_id,SUM(pol.quantity) quantity FROM purchase_order_lines pol WHERE pol.purchase_order_id=? AND CAST(COALESCE(pol.deleted,0) AS INTEGER)=0 GROUP BY pol.product_id) ordered LEFT JOIN (SELECT gl.product_id,SUM(CASE WHEN gl.status='Producto equivocado' THEN 0 ELSE MAX(0,COALESCE(gl.received_quantity,0)-COALESCE(gl.damaged_quantity,0)-COALESCE(gl.substituted_quantity,0)) END) quantity FROM goods_receipt_lines gl JOIN goods_receipts gr ON gr.id=gl.receipt_id WHERE gr.purchase_order_id=? AND gr.validation_status='Validada' AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 AND CAST(COALESCE(gl.deleted,0) AS INTEGER)=0 GROUP BY gl.product_id) received ON received.product_id=ordered.product_id").get(purchaseOrderId, purchaseOrderId);
+            if (Number(remaining?.remaining || 0) <= 0.0001) {
+              if (!remoteMode) db.exec("ROLLBACK");
+              return send(res, 409, { error: "Este pedido ya se recibió por completo. No quedan cantidades pendientes de entrada." });
             }
           }
           const created = db.prepare("INSERT INTO goods_receipts(code,supplier_id,client_id,counterparty_type,purchase_order_id,purchase_invoice_id,warehouse_id,receipt_date,status,validation_status,validated_by,validated_at,stock_applied,stock_on_validation,stock_applied_at,stock_applied_by,notes,created_by,received_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(code, supplierId, clientId, counterpartyType, purchaseOrderId, purchaseInvoiceId, warehouseId, receiptDate, status, validationStatus, validatedBy, validatedAt, stockApplied, stockOnValidation, stockAppliedAt, stockAppliedBy, String(d.notes || "").trim(), actor, String(d.received_by || actor), now, now);
@@ -4214,10 +4275,11 @@ export async function crmApiHandler(req, res) {
       ) {
         const action = ["convert-delivery", "convert-invoice"].includes(p[2]) ? p[2] : p[3];
         const orderId = ["convert-delivery", "convert-invoice"].includes(p[2]) ? p[3] : p[2];
-        const order = db.prepare("SELECT * FROM orders WHERE id=?").get(orderId);
+        const order = db.prepare("SELECT o.*,c.name client_name FROM orders o LEFT JOIN clients c ON c.id=o.client_id WHERE o.id=?").get(orderId);
         if (!order) return send(res, 404, { error: "Pedido no encontrado" });
         const delivery = action === "convert-delivery";
         if (delivery) {
+          if (!Number(order.client_id) || !String(order.client_name || "").trim()) return send(res, 409, { error: "El pedido no tiene un cliente disponible; no se puede crear un albarán sin conservar su identidad" });
           const existingDelivery = db.prepare("SELECT id,code FROM delivery_notes WHERE order_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 1").get(order.id);
           if (existingDelivery) return send(res, 409, { error: `El pedido ${order.code} ya tiene el albarán ${existingDelivery.code}`, ...existingDelivery });
         }
@@ -4233,12 +4295,12 @@ export async function crmApiHandler(req, res) {
           "-" +
           String(Date.now()).slice(-5);
         const fields = delivery
-          ? "code,order_id,client_id,status"
+          ? "code,order_id,client_id,status,client_name_snapshot"
           : "code,order_id,client_id,amount,status,issue_date,created_at,updated_at,client_name_snapshot,client_legal_name_snapshot,client_tax_id_snapshot,client_billing_address_snapshot,client_billing_city_snapshot,client_delivery_address_snapshot,client_delivery_city_snapshot,client_email_snapshot,client_phone_snapshot,equivalence_surcharge_enabled,customer_snapshot_json";
         const invoiceSnapshot = delivery ? null : invoiceSnapshotData({ clientId: order.client_id, order });
         const now = new Date().toISOString();
         const values = delivery
-          ? [code, order.id, order.client_id, "Pendiente"]
+          ? [code, order.id, order.client_id, "Pendiente", order.client_name]
           : [code, order.id, order.client_id, order.amount || 0, "Pendiente", now.slice(0, 10), now, now, invoiceSnapshot.client_name_snapshot, invoiceSnapshot.client_legal_name_snapshot, invoiceSnapshot.client_tax_id_snapshot, invoiceSnapshot.client_billing_address_snapshot, invoiceSnapshot.client_billing_city_snapshot, invoiceSnapshot.client_delivery_address_snapshot, invoiceSnapshot.client_delivery_city_snapshot, invoiceSnapshot.client_email_snapshot, invoiceSnapshot.client_phone_snapshot, invoiceSnapshot.equivalence_surcharge_enabled, invoiceSnapshot.customer_snapshot_json];
         const created = db
           .prepare(`INSERT INTO ${table} (${fields}) VALUES (${values.map(() => "?").join(",")})`)
@@ -4246,7 +4308,7 @@ export async function crmApiHandler(req, res) {
         const newId = Number(created.lastInsertRowid);
         if (delivery)
           db.prepare(
-            "INSERT INTO delivery_note_lines(delivery_note_id,product_id,quantity) SELECT ?,product_id,quantity FROM order_lines WHERE order_id=?",
+            "INSERT INTO delivery_note_lines(delivery_note_id,product_id,quantity,product_name_snapshot) SELECT ?,ol.product_id,ol.quantity,COALESCE(NULLIF(TRIM(ol.product_name_snapshot),''),p.name) FROM order_lines ol LEFT JOIN products p ON p.id=ol.product_id WHERE ol.order_id=?",
           ).run(newId, order.id);
         else
           db.prepare(
@@ -4587,6 +4649,30 @@ export async function crmApiHandler(req, res) {
           // aunque ya no se solicita este campo al crear el pedido.
           d.delivery_date = d.delivery_date || d.shipping_date;
         }
+        if (t === "delivery_notes") {
+          const orderId = Number(d.order_id || 0);
+          const order = orderId ? db.prepare("SELECT id,client_id FROM orders WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(orderId) : null;
+          if (orderId && !order) return send(res, 400, { error: "El pedido del albarán no existe" });
+          const clientId = Number(d.client_id || order?.client_id || 0);
+          const client = clientId ? db.prepare("SELECT id,name FROM clients WHERE id=?").get(clientId) : null;
+          if (clientId && !client) return send(res, 400, { error: "El cliente del albarán no existe" });
+          if (order?.client_id && clientId && Number(order.client_id) !== clientId) return send(res, 400, { error: "El cliente del albarán no corresponde al pedido" });
+          if (!client) return send(res, 400, { error: "Selecciona un cliente para el albarán" });
+          d.client_id = clientId;
+          d.client_name_snapshot = client.name;
+        }
+        if (t === "shipments") {
+          const orderId = Number(d.order_id || 0);
+          const order = orderId ? db.prepare("SELECT id,client_id FROM orders WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(orderId) : null;
+          if (orderId && !order) return send(res, 400, { error: "El pedido del envío no existe" });
+          const clientId = Number(d.client_id || order?.client_id || 0);
+          const client = clientId ? db.prepare("SELECT id,name FROM clients WHERE id=?").get(clientId) : null;
+          if (clientId && !client) return send(res, 400, { error: "El cliente del envío no existe" });
+          if (order?.client_id && clientId && Number(order.client_id) !== clientId) return send(res, 400, { error: "El cliente del envío no corresponde al pedido" });
+          if (!client) return send(res, 400, { error: "Selecciona un cliente para el envío" });
+          d.client_id = clientId || null;
+          d.client_name_snapshot = client?.name || null;
+        }
         if (t === "scheduled_tasks") {
           const title = String(d.title || "").trim();
           const actionText = String(d.action_text || "").trim();
@@ -4622,8 +4708,9 @@ export async function crmApiHandler(req, res) {
             amount: Number(line.amount || (Number(line.quantity || 0) * Number(line.unit_price || 0))),
           })).filter((line) => line.product_id && line.quantity > 0);
           for (const line of orderLines) {
-            const product = db.prepare("SELECT stock,COALESCE(stock_reserved,0) stock_reserved FROM products WHERE id=?").get(line.product_id);
+            const product = db.prepare("SELECT name,stock,COALESCE(stock_reserved,0) stock_reserved FROM products WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(line.product_id);
             if (!product) return send(res, 400, { error: "Producto no encontrado" });
+            line.product_name_snapshot = product.name;
             const available = Number(product.stock) - Number(product.stock_reserved);
             const minimum = Number(product.stock_min ?? product.min_stock ?? 0);
             if (available < line.quantity) stockShortages.push({ product_id: line.product_id, requested: line.quantity, available });
@@ -4685,6 +4772,16 @@ export async function crmApiHandler(req, res) {
             delete d.lines;
           }
         }
+        if (["order_lines", "delivery_note_lines"].includes(t)) {
+          const productId = Number(d.product_id || 0);
+          const product = productId ? db.prepare("SELECT name FROM products WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(productId) : null;
+          if (!product) return send(res, 400, { error: "Selecciona un producto disponible para la línea" });
+          d.product_name_snapshot = product.name;
+          const parentKey = t === "order_lines" ? "order_id" : "delivery_note_id";
+          const parentTable = t === "order_lines" ? "orders" : "delivery_notes";
+          const parentId = Number(d[parentKey] || 0);
+          if (!parentId || !db.prepare(`SELECT id FROM ${parentTable} WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0`).get(parentId)) return send(res, 400, { error: "El documento relacionado no existe" });
+        }
         if (t === "payments") {
           const amount = Number(d.amount);
           if (!Number.isFinite(amount) || amount <= 0) return send(res, 400, { error: "El importe del cobro debe ser mayor que cero" });
@@ -4714,7 +4811,7 @@ export async function crmApiHandler(req, res) {
           const quantity = Number(d.quantity);
           const productId = Number(d.product_id);
           if (!productId || !Number.isFinite(quantity) || quantity <= 0) return send(res, 400, { error: "La devolución debe indicar un producto y una cantidad mayor que cero" });
-          const product = db.prepare("SELECT id FROM products WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(productId);
+          const product = db.prepare("SELECT id,name FROM products WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(productId);
           if (!product) return send(res, 400, { error: "Producto no encontrado" });
           const disposition = normalizeReturnDisposition(d);
           if (disposition.error) return send(res, 400, { error: disposition.error });
@@ -4732,10 +4829,18 @@ export async function crmApiHandler(req, res) {
           if (line && orderId && Number(line.order_id) !== orderId) return send(res, 400, { error: "La línea no pertenece al pedido indicado" });
           if (line && Number(line.product_id) !== productId) return send(res, 400, { error: "La línea no corresponde al producto devuelto" });
           if (line && Number(line.quantity || 0) > 0 && quantity > Number(line.quantity)) return send(res, 400, { error: "La devolución supera la cantidad de la línea del pedido" });
+          const parentClientId = Number(order?.client_id || shipment?.client_id || 0);
+          const suppliedClientId = Number(d.client_id || 0);
+          if (suppliedClientId && !db.prepare("SELECT id FROM clients WHERE id=?").get(suppliedClientId)) return send(res, 400, { error: "El cliente de la devolución no existe" });
+          if (suppliedClientId && parentClientId && suppliedClientId !== parentClientId) return send(res, 400, { error: "El cliente no corresponde al pedido o envío indicado" });
           d.order_id = orderId || line?.order_id || shipment?.order_id || null;
           d.shipment_id = shipmentId || null;
           d.order_line_id = orderLineId || null;
-          d.client_id = d.client_id || order?.client_id || shipment?.client_id || null;
+          d.client_id = parentClientId || suppliedClientId || null;
+          const client = d.client_id ? db.prepare("SELECT name FROM clients WHERE id=?").get(Number(d.client_id)) : null;
+          if (d.client_id && !client) return send(res, 400, { error: "El cliente de la devolución no existe" });
+          d.client_name_snapshot = client?.name || null;
+          d.product_name_snapshot = product.name;
           d.status = d.status || "Pendiente";
         }
         if (t === "inventory_movements" && d.product_id && d.quantity) {
@@ -4754,11 +4859,12 @@ export async function crmApiHandler(req, res) {
             const shipmentCode = `CAR-${shipmentNow.toISOString().slice(0, 10).replace(/-/g, "")}-${String(Date.now()).slice(-5)}`;
             const expected = sourceOrder?.delivery_date || null;
             const shipment = db.prepare(
-              "INSERT INTO shipments(code,order_id,client_id,carrier,status,prepared_at,expected_delivery_at,address,origin_address,packages,notes,prepared_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+              "INSERT INTO shipments(code,order_id,client_id,client_name_snapshot,carrier,status,prepared_at,expected_delivery_at,address,origin_address,packages,notes,prepared_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             ).run(
               shipmentCode,
               sourceOrder?.id || d.order_id || null,
               clientId,
+              client.name,
               "Repartos Exclusivas",
               "Preparando",
               shipmentNow.toISOString(),
@@ -4861,7 +4967,7 @@ export async function crmApiHandler(req, res) {
           ).run(Number(d.quantity), Number(d.product_id));
         if (t === "orders" && orderLines) {
           for (const line of orderLines) {
-            db.prepare("INSERT INTO order_lines(order_id,product_id,quantity,quantity_requested,quantity_unit,units_factor,unit_price,discount,vat,amount,prepared,prepared_quantity,preparation_status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(Number(r.lastInsertRowid), line.product_id, line.quantity, line.quantity_requested, line.quantity_unit, line.units_factor, line.unit_price, line.discount, line.vat, line.amount, 0, 0, "Pendiente", now, now);
+            db.prepare("INSERT INTO order_lines(order_id,product_id,product_name_snapshot,quantity,quantity_requested,quantity_unit,units_factor,unit_price,discount,vat,amount,prepared,prepared_quantity,preparation_status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(Number(r.lastInsertRowid), line.product_id, line.product_name_snapshot, line.quantity, line.quantity_requested, line.quantity_unit, line.units_factor, line.unit_price, line.discount, line.vat, line.amount, 0, 0, "Pendiente", now, now);
             if (line.product_id !== Number(d.product_id)) db.prepare("UPDATE products SET stock_reserved=COALESCE(stock_reserved,0)+? WHERE id=?").run(line.quantity, line.product_id);
           }
         }
@@ -4871,7 +4977,7 @@ export async function crmApiHandler(req, res) {
           }
         }
         if (t === "orders") {
-          const client = d.client_id ? db.prepare("SELECT address,opening_time,closing_time,invoice_delivery_method FROM clients WHERE id=?").get(Number(d.client_id)) : null;
+          const client = d.client_id ? db.prepare("SELECT name,address,opening_time,closing_time,invoice_delivery_method FROM clients WHERE id=?").get(Number(d.client_id)) : null;
           const shippingLocation = d.collection_point_id
             ? db.prepare("SELECT address,opening_time,closing_time FROM collection_points WHERE id=? AND (client_id=? OR client_id IS NULL)").get(Number(d.collection_point_id), Number(d.client_id || 0))
             : null;
@@ -4880,8 +4986,9 @@ export async function crmApiHandler(req, res) {
             Number(d.urgent || 0) === 1 ? "PEDIDO URGENTE · Revisar todas las líneas antes de preparar." : "",
             String(d.loading_notes || d.notes || "").trim(),
           ].filter(Boolean).join("\n") || "Preparación pendiente de revisión.";
-          const createdShipment = db.prepare("INSERT INTO shipments(code,order_id,client_id,collection_point_id,status,preparation_date,urgent,expected_delivery_at,address,packages,incidents,notes,driver_notes,invoice_delivery_method,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(shipmentCode, Number(r.lastInsertRowid), d.client_id || null, d.collection_point_id || null, "Preparando", d.preparation_date || null, Number(d.urgent || 0), d.shipping_date || d.delivery_date || null, shippingLocation?.address || d.address || client?.address || null, 1, "", loadingNotes, String(d.driver_notes || "").trim(), client?.invoice_delivery_method || "Pendiente de indicar", now, now);
+          const createdShipment = db.prepare("INSERT INTO shipments(code,order_id,client_id,client_name_snapshot,collection_point_id,status,preparation_date,urgent,expected_delivery_at,address,packages,incidents,notes,driver_notes,invoice_delivery_method,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(shipmentCode, Number(r.lastInsertRowid), d.client_id || null, client?.name || null, d.collection_point_id || null, "Preparando", d.preparation_date || null, Number(d.urgent || 0), d.shipping_date || d.delivery_date || null, shippingLocation?.address || d.address || client?.address || null, 1, "", loadingNotes, String(d.driver_notes || "").trim(), client?.invoice_delivery_method || "Pendiente de indicar", now, now);
           db.prepare("UPDATE shipments SET delivery_window_start=?,delivery_window_end=? WHERE id=?").run(d.delivery_window_start || shippingLocation?.opening_time || client?.opening_time || null, d.delivery_window_end || shippingLocation?.closing_time || client?.closing_time || null, Number(createdShipment.lastInsertRowid));
+          invalidateRelatedReadCaches("shipments");
         }
         if (t === "orders" && stockShortages.length) {
           recordAudit(actor, "POST", `orders/${Number(r.lastInsertRowid)}`, "Alerta stock", JSON.stringify(stockShortages));
@@ -4978,6 +5085,10 @@ export async function crmApiHandler(req, res) {
         invalidateRelatedReadCaches(t);
         const currentRecord = db.prepare(`SELECT * FROM ${t} WHERE id=?`).get(Number(p[2]));
         if (!currentRecord) return send(res, 404, { error: "Registro no encontrado" });
+        if (t === "invoices" && String(d.status || "") === "Anulada" && String(currentRecord.status || "") !== "Anulada") {
+          const activePayment = db.prepare("SELECT id FROM payments WHERE invoice_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 AND COALESCE(status,'Aplicado')<>'Anulado' AND voided_at IS NULL LIMIT 1").get(Number(p[2]));
+          if (activePayment) return send(res, 409, { error: "Anula primero los cobros activos desde Cobros. Así se conserva el historial y el estado de la factura." });
+        }
         if (t === "payments") {
           if (String(currentRecord.status || "Aplicado") === "Anulado" || currentRecord.voided_at) return send(res, 409, { error: "Un cobro anulado no se puede editar; registra un nuevo cobro si necesitas corregirlo" });
           for (const field of ["invoice_id", "amount", "payment_date"]) {
@@ -5232,11 +5343,12 @@ export async function crmApiHandler(req, res) {
                 .get(old.id);
               if (!existing)
                 db.prepare(
-                  "INSERT INTO shipments(code,order_id,client_id,status,prepared_at,shipped_at,expected_delivery_at,address) VALUES(?,?,?,?,?,?,?,?)",
+                  "INSERT INTO shipments(code,order_id,client_id,client_name_snapshot,status,prepared_at,shipped_at,expected_delivery_at,address) VALUES(?,?,?,?,?,?,?,?,?)",
                 ).run(
                   `ENV-${new Date().getFullYear()}-${String(Date.now()).slice(-5)}`,
                   old.id,
                   old.client_id,
+                  db.prepare("SELECT name FROM clients WHERE id=?").get(Number(old.client_id))?.name || null,
                   "Enviado",
                   old.delivery_date
                     ? new Date(old.delivery_date).toISOString()
