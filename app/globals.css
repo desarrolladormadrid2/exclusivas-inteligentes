@@ -7101,7 +7101,7 @@ body.reparto-modal-open {
   .supplier-order-fields textarea { min-height:36px; max-height:44px; }
   .supplier-catalog-link-form { grid-template-columns:minmax(120px,1.2fr) minmax(140px,1.25fr) minmax(90px,.9fr) minmax(90px,.8fr) minmax(105px,.9fr) minmax(85px,.8fr) minmax(70px,.7fr) minmax(150px,1.15fr) auto; gap:8px; }
   .supplier-catalog-link-form .supplier-catalog-picker { grid-column:auto; }
-  .supplier-catalog-link-form .supplier-primary-check { white-space:nowrap; font-size:11px; }
+  .supplier-catalog-link-form .supplier-primary-check { min-width:0; white-space:normal; font-size:11px; line-height:1.15; }
   .supplier-catalog-link-form > button { justify-self:end; white-space:nowrap; padding:0 12px; }
   .supplier-alias-manager form { grid-template-columns:minmax(180px,1.1fr) minmax(210px,1.25fr) minmax(210px,1.25fr) minmax(140px,.85fr) minmax(130px,.8fr) auto; gap:8px; }
   .supplier-alias-manager form > button { width:auto; min-width:150px; justify-self:end; white-space:nowrap; }
