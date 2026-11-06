@@ -7833,7 +7833,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         <button type="button" role="tab" aria-selected={entryListView === "received"} className={entryListView === "received" ? "is-active" : ""} onClick={() => setEntryListView("received")}>Entradas registradas</button>
       </div>}
         {active === "Entradas" && entryListView === "pending" ? <PendingSupplierReceipts refreshSignal={pendingReceiptRefresh} onReceive={beginSupplierReceipt} onValidate={reviewSupplierReceipt} /> : <div className={`panel table-panel${listIsReady ? "" : " is-loading"}`}>
-        <div className="table-tools">
+        <div className={`table-tools${active === "Proveedores" ? " supplier-table-tools" : ""}`}>
           <div className="table-tools-primary">
           <input
             placeholder={isProducts ? "Buscar por nombre, SKU, referencia o código..." : "Buscar en columnas principales..."}
