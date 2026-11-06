@@ -46,10 +46,15 @@ Estas reglas recogen las decisiones de diseño y funcionamiento acordadas con el
 - En modales largas, bloquear el scroll de la página de fondo y permitir el scroll dentro de la modal; cerrar al pulsar fuera cuando no haya cambios sin guardar.
 - Las tablas anchas de una modal solo pueden imponer un `min-width` en escritorio. En tablet y móvil deben tener una adaptación explícita (tarjetas, columnas apiladas o scroll interno justificado); nunca se debe aceptar un scroll horizontal accidental que oculte campos o acciones.
 - Una modal debe aprovechar su anchura real: no puede conservar huecos grandes, contenido desplazado fuera de la pantalla ni una zona vacía causada por reglas de escritorio heredadas. La comprobación debe hacerse con la modal abierta, no solo mirando la pantalla anterior.
+- El editor de un pedido a proveedor debe abrir una modal ancha y alta en escritorio, con cabecera legible, buscador de productos sin recortes y acciones Guardar/Cancelar accesibles durante el desplazamiento. Repetir la edición con varias líneas en `1440×900`, `768×1024`, `812×375` y `441×820`.
 - En formularios largos usar acordeones para datos generales y mostrar en la cabecera un resumen y un indicador de completitud.
 - Los pedidos, presupuestos, facturas y albaranes deben admitir líneas de productos claras, con buscador, tipo de unidad, cantidad, unidades totales y suma visible.
 - Los selectores de clientes y productos deben permitir búsqueda incremental y borrar la selección correctamente.
 - Las tablas deben ofrecer búsqueda en columnas principales, contadores de registros, columnas configurables y ordenación al pulsar en cabeceras cuando sea aplicable.
+- Unificar la estructura de los listados de toda la aplicación: primera franja para las pestañas de la sección; debajo, una única barra con búsqueda, filtros, contador y acciones. En pantallas estrechas estos grupos pueden reordenarse sin crear filas vacías ni ocultar controles.
+- Los listados con acciones colectivas deben tener una columna inicial de selección, selección individual y “seleccionar visibles”; al seleccionar registros, la cabecera debe ofrecer únicamente acciones masivas válidas para esos registros y para el rol activo. No añadir casillas si no existe una acción colectiva útil y segura.
+- Alternar de forma consistente el fondo de las filas de datos entre blanco y gris claro. El hover y la selección deben distinguirse con claridad sin eliminar el patrón cebra ni tapar estados de atención.
+- Mantener cada registro en una fila de tabla y limitar su contenido visible a dos líneas como máximo; abreviar o truncar con acceso al valor completo y al detalle. No aumentar la altura de todas las filas por una nota larga, ni esconder datos operativos esenciales.
 - Los listados deben priorizar información visible: texto de datos mínimo de 12 px, padding vertical moderado y filas compactas, manteniendo salto de línea, contraste y objetivos táctiles suficientes. La densidad debe verificarse en más de un listado representativo y en tablet.
 - La edición inline solo debe afectar a la fila seleccionada, nunca a todas las filas.
 - Al cargar datos mostrar un loading real; no mostrar “no hay registros” hasta recibir respuesta.
@@ -59,6 +64,9 @@ Estas reglas recogen las decisiones de diseño y funcionamiento acordadas con el
 ## Pedidos, almacén y stock
 
 - El pedido nuevo empieza en estado “Nuevo” y el código se autogenera.
+- Los pedidos a proveedor enviados deben aparecer en Entradas en una vista “Mercancía pendiente de recibir”, con código/título, proveedor, fechas y productos con cantidades pedidas, recibidas válidas y pendientes. Los borradores y pedidos cancelados no se presentan como mercancía esperada.
+- Desde esa vista se inicia la recepción con el pedido y sus líneas pendientes ya cargados. Una recepción sin validar no debe permitir registrar por segunda vez las mismas unidades; tras validar, los pedidos parcialmente recibidos conservan únicamente el saldo pendiente.
+- Validar una recepción suma solo unidades del producto correcto y en buen estado; las diferencias, daños y productos equivocados quedan como incidencias. Una recepción rechazada o pendiente no suma stock.
 - Los campos esenciales del pedido son cliente, lugar de envío y fechas necesarias; el usuario solicitante se rellena automáticamente con el usuario actual.
 - El lugar de envío se selecciona entre las ubicaciones del cliente y debe poder crearse una nueva ubicación desde el pedido.
 - La preparación usa hojas de carga y debe ser la fuente común de los contadores y acordeones del inicio.

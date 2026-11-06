@@ -8,7 +8,7 @@ La ejecución debe producir una matriz de resultados por caso (`Correcto`, `Fall
 
 ## Dos niveles de revisión
 
-El documento contiene 263 casos de negocio/datos/errores y 18 casos transversales de capacidad de acción (281 en total). Se usan dos niveles para no confundir un repaso habitual de salud con una auditoría profunda:
+El documento contiene 268 casos de negocio/datos/errores y 18 casos transversales de capacidad de acción (286 en total). Se usan dos niveles para no confundir un repaso habitual de salud con una auditoría profunda:
 
 ### Revisión normal
 
@@ -186,6 +186,8 @@ Separar el registro/recepción física de la revisión/validación de mercancía
 | H08 | Solicitar email de anulación con proveedor con/sin email. | Se registra la intención y motivo; no afirma que se envió si se abrió solo un correo preparado; permite volver sin perder el detalle. |
 | H09 | Probar estados/transiciones inválidas, guardar simultáneamente desde dos pestañas y reintentar tras timeout. | Transiciones no permitidas se bloquean; conflictos informan del estado actual; ninguna operación duplica líneas, notas o correos. |
 | H10 | Revisar datos faltantes, nombres largos, varios proveedores, importes altos y cero líneas en el listado/modal. | No se muestran IDs, `NaN`, `[object Object]`, fechas confusas ni resúmenes engañosos; texto salta de línea y acciones no se ocultan. |
+| H11 | Abrir “Editar pedido” para un pedido con varias líneas y buscador activo; repetir en `1440×900`, `768×1024`, `812×375` y `441×820`. | La modal aprovecha el ancho y alto disponibles, cabecera y botones quedan claros, buscador y sugerencias se pueden usar, cada campo se lee sin scroll horizontal y Guardar/Cancelar siguen accesibles al desplazarse. |
+| H12 | Revisar el listado de compras en escritorio y tablet; comprobar filtros y acciones en su franja, selección múltiple solo donde haya acciones masivas, patrón alterno blanco/gris y registros de máximo dos líneas. | Se identifica la pestaña activa y los filtros; los controles no quedan aislados; seleccionar filas habilita solo acciones válidas y seguras; las rayas no ocultan estados ni resaltados; cada fila conserva acceso al texto completo y al detalle sin crecer por notas largas. |
 
 ### I. Recepción física en Entradas
 
@@ -203,6 +205,9 @@ Separar el registro/recepción física de la revisión/validación de mercancía
 | I10 | Adjuntar foto de incidencia, probar carga inválida, lenta y sin Cloudinary. | Adjuntos tienen vista previa, nombre y recuperación; error de subida no pierde la incidencia; fallback y configuración ausente se explican. |
 | I11 | Guardar, salir, reabrir y editar una entrada con varias líneas e incidencias. | Se recuperan detalle, documentos, notas, proveedor, pedido de origen y estados; las acciones incompatibles quedan bloqueadas. |
 | I12 | Crear entrada repetida para el mismo pedido o pulsar dos veces. | Se advierte posible duplicado; la segunda operación no replica movimientos ni suma stock inadvertidamente. |
+| I13 | Abrir “Mercancía pendiente de recibir” con pedidos enviados, parciales, borradores, cancelados y varios productos. | Cada pedido abierto muestra proveedor, fechas, estado y saldo por producto; borradores/cancelados no parecen mercancía en camino; el total y el estado vacío coinciden con la API. |
+| I14 | Iniciar recepción desde un pedido pendiente, guardar la entrada sin validar y volver a la bandeja. | Proveedor, pedido y líneas quedan precargados; cantidades registradas sin validar aparecen en Entradas registradas y bloquean una segunda recepción duplicada hasta resolverlas. |
+| I15 | Validar una recepción completa y otra parcial con unidades buenas, dañadas y referencia equivocada. | Solo se suma lo correcto y apto; incidencias conservan cantidades y responsable; el pedido parcial reaparece con su saldo real y el completo desaparece de pendientes. |
 
 ### J. Stock y trazabilidad de compra
 

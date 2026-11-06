@@ -15,7 +15,7 @@ try {
     await page.getByRole('button', { name: 'Entrar', exact: true }).click();
     await page.waitForTimeout(3500);
   }
-  const adminGroup = page.getByRole('button', { name: 'Administración', exact: true }).last();
+  const adminGroup = page.getByRole('button', { name: 'Configuración', exact: true }).last();
   if (await adminGroup.count()) {
     await adminGroup.evaluate((element) => element.scrollIntoView({ block: 'center' }));
     await adminGroup.click();

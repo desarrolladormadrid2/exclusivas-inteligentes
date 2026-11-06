@@ -1067,7 +1067,7 @@ const sidebarGroups = [
   },
   { name: "Análisis y control", items: ["Balance", "Informes"] },
   { name: "Automatización", items: ["Tareas programadas", "Notas", "OCR inteligente"] },
-  { name: "Administración", items: ["Usuarios y permisos", "Altas web", "Documentos", "Copias de seguridad", "Historial", "Papelera"] },
+  { name: "Configuración", items: ["Usuarios y permisos", "Altas web", "Documentos", "Copias de seguridad", "Historial", "Papelera"] },
 ];
 
 const routeModuleScopes: Record<string, string[]> = {
@@ -1109,7 +1109,7 @@ export function Sidebar({
     "Compras y proveedores": false,
     "Análisis y control": false,
     Automatización: false,
-    Administración: false,
+    Configuración: false,
   });
   useEffect(() => {
     try {
@@ -4166,7 +4166,50 @@ function DriverRouteApp({ user }: { user: any }) {
   return <main className="driver-mobile-app"><header className="driver-mobile-header"><div className="driver-mobile-header-main">{selectedStop && <button type="button" className="driver-back-button" onClick={closeStop} aria-label="Volver a la lista de pedidos">←</button>}<span className="driver-brand-mark">E</span><div><b>Reparto</b><small>{actor}</small></div></div><div className="driver-mobile-header-actions"><span className="driver-today-label">Hoy</span><button type="button" className="driver-refresh" onClick={() => void load()} aria-label="Actualizar reparto">↻</button></div></header><section className="driver-mobile-toolbar"><label>Fecha<input aria-label="Fecha de reparto" type="date" value={routeDate} onChange={(event) => setRouteDate(event.target.value)} /></label><label>Camión<select aria-label="Camión o ruta" value={selectedRouteId} onChange={(event) => changeRoute(event.target.value)}><option value="">Selecciona una ruta</option>{routes.map((route) => <option value={route.id} key={route.id}>{route.vehicle || `Camión ${route.id}`} · {route.driver || "Sin conductor"}</option>)}</select></label></section>{loading ? <div className="driver-mobile-loading">Cargando la ruta…</div> : error ? <div className="driver-mobile-error" role="alert">{error}<button type="button" onClick={() => void load()}>Reintentar</button></div> : !activeRoute ? <div className="driver-mobile-empty"><b>No hay ruta asignada</b><span>Cuando administración guarde la carga del día aparecerá aquí.</span></div> : <><section className="driver-today-summary" aria-label="Resumen de entregas de hoy"><div><b>Entregas de hoy</b><span>{stops.length} paradas · {stops.filter((stop: any) => stop.status === "Entregado").length} entregadas · {stops.filter((stop: any) => !["Entregado", "Cancelada"].includes(String(stop.status || ""))).length} pendientes</span></div>{selectedStop && <button type="button" className="button secondary" onClick={closeStop}>← Lista de pedidos</button>}</section><section className="driver-route-summary"><div className="driver-route-summary-main"><div><b>{activeRoute.vehicle || "Camión"}</b><span>{stops.filter((stop: any) => stop.status === "Entregado").length}/{stops.length} entregas completadas · {Number(activeRoute.total_distance_km || 0).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km · {Math.floor(Number(activeRoute.estimated_minutes || 0) / 60)} h {Number(activeRoute.estimated_minutes || 0) % 60} min</span></div><strong className="driver-route-status">{activeRoute.status || "Planificada"}</strong></div><div className="driver-route-actions">{activeRoute.status !== "Completada" && <button type="button" className="button primary" onClick={gpsActive ? finishRoute : startGps}>{gpsActive ? "Finalizar ruta" : activeRoute.status === "En curso" ? "Reanudar GPS" : "Iniciar ruta y GPS"}</button>}{gpsActive && <span className="driver-gps-live">● GPS activo{location ? ` · ${Number(location.accuracy_m || 0).toFixed(0)} m` : ""}</span>}</div></section><nav className="driver-stop-list" aria-label="Pedidos de hoy">{stops.map((stop: any, index: number) => <button type="button" className={`driver-stop-card${Number(selectedStop?.id) === Number(stop.id) ? " is-selected" : ""}${stop.status === "Entregado" ? " is-complete" : ""}`} key={stop.id} aria-label={`Ver pedido de ${stop.client_name || "cliente"}`} onClick={() => openStop(Number(stop.id))}><span className="driver-stop-number">{stop.status === "Entregado" ? "✓" : index + 1}</span><span><b>{stop.client_name || "Cliente"}</b><small>{[stop.address, stop.city].filter(Boolean).join(" · ") || "Dirección pendiente"}</small><small>{stop.opening_time && stop.closing_time ? `Recepción ${String(stop.opening_time).slice(0, 5)}–${String(stop.closing_time).slice(0, 5)}` : "Horario pendiente"} · {stop.distance_km ? `${String(stop.distance_km).replace(".", ",")} km` : "Distancia pendiente"}</small></span><em>{stop.status || "Pendiente"}</em></button>)}</nav>{selectedStop && shipment && <section id="driver-stop-detail" className="driver-stop-detail"><div className="driver-detail-head"><div><p className="eyebrow">PEDIDO · PARADA {selectedStop.position || 1}</p><h2>{selectedStop.client_name}</h2><p>{[selectedStop.address, selectedStop.city].filter(Boolean).join(" · ") || "Dirección pendiente"}</p><small>{selectedStop.opening_time && selectedStop.closing_time ? `Recepción ${String(selectedStop.opening_time).slice(0, 5)}–${String(selectedStop.closing_time).slice(0, 5)}` : "Horario pendiente"}</small></div><button type="button" className="button secondary" onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent([selectedStop.address, selectedStop.city].filter(Boolean).join(", "))}`, "_blank")}>Navegar</button></div><div className="driver-detail-actions"><button type="button" className="button secondary" onClick={() => void updateStopStatus(selectedStop, "En entrega")} disabled={selectedStop.status === "Entregado"}>Estoy en el cliente</button><button type="button" className="button ghost" onClick={() => void updateStopStatus(selectedStop, "Incidencia")}>Incidencia</button></div><section className="driver-order-content"><div className="driver-section-title"><div><b>{shipment.code}</b><small>Contenido del pedido para mostrar al cliente</small></div><button type="button" className="button secondary" onClick={openInvoice}>Factura</button></div>{selectedLines.length ? selectedLines.map((line: any, index: number) => <div className="driver-order-line" key={`${line.id}-${index}`}><span>{line.quantity || line.quantity_requested || 0} {line.quantity_unit || "uds."}</span><b>{line.product_name || `Producto #${line.product_id}`}</b></div>) : <p className="driver-muted">No hay líneas detalladas disponibles.</p>}{(order?.driver_notes || shipment.driver_notes || selectedStop.driver_notes) && <div className="driver-notes"><b>Indicaciones</b><span>{order?.driver_notes || shipment.driver_notes || selectedStop.driver_notes}</span></div>}</section><DriverPaymentPanel shipment={shipment} invoice={invoice} actor={actor} onSaved={(updated) => setShipments((current) => current.map((row) => Number(row.id) === Number(updated.id) ? { ...row, ...updated } : row))} /><DeliverySignaturePanel shipment={shipment} actor={actor} client={{ name: selectedStop.client_name, address: selectedStop.address, city: selectedStop.city }} lines={selectedLines} onSaved={deliverySaved} /></section>}<DriverDailyClosingPanel route={activeRoute} stops={stops} shipments={shipments} actor={actor} /></>}{message && <p className="driver-mobile-message" role="status">{message}</p>}<footer className="driver-mobile-footer">{activeRoute ? `${activeRoute.code} · ${activeRoute.driver || actor}` : "Vista móvil de reparto"}</footer></main>;
 }
 
-function GoodsReceiptForm({ lookups, actor, onCreated }: { lookups: any; actor: string; onCreated: (receipt: any) => void }) {
+function PendingSupplierReceipts({ refreshSignal, onReceive, onValidate }: { refreshSignal: number; onReceive: (purchaseOrderId: number) => void; onValidate: (receiptId: number, receiptCode: string) => void }) {
+  const [orders, setOrders] = useState<any[]>([]);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    fetch(`/api/purchase_orders/pending-receipt?refresh=${Date.now()}`, { cache: "no-store" })
+      .then(async (response) => {
+        const body = await response.json().catch(() => []);
+        if (!response.ok) throw new Error(body.error || "No se pudo cargar la mercancía pendiente.");
+        return Array.isArray(body) ? body : [];
+      })
+      .then((body) => { if (!cancelled) setOrders(body); })
+      .catch((caught) => { if (!cancelled) setError(caught?.message || "No se pudo cargar la mercancía pendiente."); })
+      .finally(() => { if (!cancelled) { setLoading(false); setRefreshing(false); } });
+    return () => { cancelled = true; };
+  }, [refreshSignal, reloadKey]);
+  const normalizedSearch = search.trim().toLocaleLowerCase("es");
+  const visibleOrders = orders.filter((order) => !normalizedSearch || [order.code, order.title, order.supplier_name, ...(order.lines || []).flatMap((line: any) => [line.product_name, line.sku])].some((value) => String(value || "").toLocaleLowerCase("es").includes(normalizedSearch)));
+  const pendingByUnit = new Map<string, number>();
+  for (const line of visibleOrders.flatMap((order) => order.lines || [])) {
+    const unit = String(line.quantity_unit || "unidad");
+    pendingByUnit.set(unit, (pendingByUnit.get(unit) || 0) + Number(line.remaining_quantity || 0));
+  }
+  const pendingSummary = [...pendingByUnit.entries()].map(([unit, quantity]) => `${quantity.toLocaleString("es-ES")} ${quantity === 1 ? unit : unit === "unidad" ? "unidades" : unit.endsWith("z") ? `${unit.slice(0, -1)}ces` : `${unit}s`}`).join(" · ");
+  const formatDate = (value: any) => value ? formatSpanishDateValue(value, false) : "Sin fecha prevista";
+  return <section className="pending-supplier-receipts" aria-labelledby="pending-supplier-receipts-title">
+    <header className="pending-supplier-receipts-head"><div><h2 id="pending-supplier-receipts-title">Mercancía pendiente de recibir</h2><p>Pedidos enviados al proveedor con unidades aún pendientes. El stock se actualizará al validar cada recepción.</p></div><div><b>{loading ? "Cargando…" : `${visibleOrders.length} ${visibleOrders.length === 1 ? "pedido" : "pedidos"}`}</b><button type="button" className="button secondary" disabled={refreshing || loading} onClick={() => { setRefreshing(true); setReloadKey((value) => value + 1); }}>{refreshing ? "Actualizando…" : "Actualizar"}</button></div></header>
+    <div className="pending-supplier-receipts-tools"><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por pedido, proveedor o producto…" aria-label="Buscar mercancía pendiente" /><span>{pendingSummary || "Sin unidades pendientes"}</span></div>
+    {error && <p className="error-message" role="alert">{error} <button type="button" className="link-button" onClick={() => { setRefreshing(true); setReloadKey((value) => value + 1); }}>Reintentar</button></p>}
+    {loading ? <div className="data-loading" role="status">Cargando pedidos pendientes de recibir…</div> : visibleOrders.length ? <div className="pending-supplier-order-list">{visibleOrders.map((order) => <article className="pending-supplier-order" key={order.id}>
+      <header><div><b>{order.code}</b><strong>{order.title || `Pedido a ${order.supplier_name}`}</strong><small>{order.supplier_name} · Pedido {formatDate(order.order_date)} · Entrega prevista {formatDate(order.expected_date)}</small></div><div>{order.pending_receipt_id ? <><span className="supplier-order-status status-pendiente">Entrada pendiente de validar · {order.pending_receipt_code}</span><button type="button" className="button primary" onClick={() => onValidate(Number(order.pending_receipt_id), String(order.pending_receipt_code || ""))}>Validar recepción</button></> : <><span className={`supplier-order-status status-${String(order.status || "").toLowerCase().replaceAll(" ", "-")}`}>{order.status}</span><button type="button" className="button primary" onClick={() => onReceive(Number(order.id))}>Registrar recepción</button></>}</div></header>
+      {order.notes && <p className="pending-supplier-order-notes"><b>Observaciones:</b> {order.notes}</p>}
+      <div className="pending-supplier-order-lines-wrap"><table className="pending-supplier-order-lines"><thead><tr><th>Producto</th><th>Pedido</th><th>Recibido válido</th><th>Pendiente</th></tr></thead><tbody>{order.lines.map((line: any) => <tr key={`${line.product_id}-${line.quantity_unit}`}><td data-label="Producto"><b>{line.product_name}</b><small>{line.sku || "Sin referencia"} · {line.quantity_unit}</small></td><td data-label="Pedido">{Number(line.ordered_quantity || 0).toLocaleString("es-ES")}</td><td data-label="Recibido válido">{Number(line.received_good_quantity || 0).toLocaleString("es-ES")}</td><td data-label="Pendiente"><strong>{Number(line.remaining_quantity || 0).toLocaleString("es-ES")} {line.quantity_unit}</strong></td></tr>)}</tbody></table></div>
+    </article>)}</div> : <p className="pending-supplier-receipts-empty">{normalizedSearch ? "No hay pedidos pendientes que coincidan con la búsqueda." : "No hay mercancía pendiente. Los pedidos aparecerán aquí cuando se envíen al proveedor."}</p>}
+  </section>;
+}
+
+function GoodsReceiptForm({ lookups, actor, initialPurchaseOrderId = "", onInitialPurchaseOrderConsumed, onCreated }: { lookups: any; actor: string; initialPurchaseOrderId?: string; onInitialPurchaseOrderConsumed?: () => void; onCreated: (receipt: any) => void }) {
   const [header, setHeader] = useState({ code: `ENT-${new Date().getFullYear()}-${String(Date.now()).slice(-7)}`, counterparty_type: "Proveedor", client_id: "", supplier_id: "", purchase_order_id: "", purchase_invoice_id: "", warehouse_id: "", receipt_date: tabletTodayInput(), validation_status: "Pendiente", validated_by: "", stock_applied: true, notes: "" });
   const [productSearch, setProductSearch] = useState("");
   const [lines, setLines] = useState<any[]>([]);
@@ -4179,7 +4222,7 @@ function GoodsReceiptForm({ lookups, actor, onCreated }: { lookups: any; actor: 
   const clients = lookups.clients || [];
   const suppliers = lookups.suppliers || [];
   const warehouses = lookups.warehouses || [];
-  const purchaseOrders = (lookups.purchase_orders || []).filter((item: any) => !["Recibido", "Recibida", "Cancelado", "Cancelada"].includes(String(item.status || "")) && (!header.supplier_id || Number(item.supplier_id) === Number(header.supplier_id)));
+  const purchaseOrders = (lookups.purchase_orders || []).filter((item: any) => !["Recibido", "Recibida", "Cancelado", "Cancelada"].includes(String(item.status || "")) && item.receipt_validation_status !== "Pendiente" && (!header.supplier_id || Number(item.supplier_id) === Number(header.supplier_id)));
   const matchingProducts = productSearch.trim()
     ? products.filter((item: any) => `${item.name || ""} ${item.sku || ""} ${item.brand || ""} ${item.category || ""}`.toLowerCase().includes(productSearch.trim().toLowerCase())).slice(0, 8)
     : [];
@@ -4210,6 +4253,10 @@ function GoodsReceiptForm({ lookups, actor, onCreated }: { lookups: any; actor: 
       setMessage(`${purchase.code}: ${remainingLines.length} líneas pendientes cargadas. Ajusta las cantidades recibidas y registra diferencias antes de guardar.`);
     } catch (error: any) { setMessage(error?.message || "No se pudieron cargar las líneas del pedido."); }
   }
+  useEffect(() => {
+    if (!initialPurchaseOrderId) return;
+    void loadPurchaseOrder(initialPurchaseOrderId).finally(() => onInitialPurchaseOrderConsumed?.());
+  }, [initialPurchaseOrderId]);
   async function attachLinePhotos(index: number, files: FileList | null) {
     const selected = Array.from(files || []);
     if (!selected.length) return;
@@ -4438,6 +4485,10 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const [documentCreationNotice, setDocumentCreationNotice] = useState<any>(null);
   const [entryDetail, setEntryDetail] = useState<any>(null);
   const [entryEdit, setEntryEdit] = useState<any>(null);
+  const [entryListView, setEntryListView] = useState<"pending" | "received">("pending");
+  const [pendingReceiptRefresh, setPendingReceiptRefresh] = useState(0);
+  const [pendingReceiptOrderId, setPendingReceiptOrderId] = useState("");
+  const [receiptFormKey, setReceiptFormKey] = useState(0);
   const [showTestEntries, setShowTestEntries] = useState(false);
   const [entryIncidentSaving, setEntryIncidentSaving] = useState<number | null>(null);
   const [entryValidationSaving, setEntryValidationSaving] = useState(false);
@@ -4614,6 +4665,18 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     setFormDirty(false);
     setForm(value);
     setEditing(record);
+  }
+  function beginSupplierReceipt(purchaseOrderId: number) {
+    setEntryListView("received");
+    setPendingReceiptOrderId(String(purchaseOrderId));
+    setReceiptFormKey((value) => value + 1);
+    setFormOpen(true);
+    window.setTimeout(() => formAccordionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+  }
+  function reviewSupplierReceipt(receiptId: number, receiptCode: string) {
+    setEntryListView("received");
+    setFormOpen(false);
+    void openEntryDetail({ id: receiptId, code: receiptCode });
   }
   function closeForm(force = false) {
     if (!force && formDirty && !window.confirm("Hay cambios sin guardar. Si cierras ahora se perderán. ¿Quieres continuar?")) return false;
@@ -7581,10 +7644,15 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           </div>}
           {active === "Entradas" ? (
             <GoodsReceiptForm
+              key={receiptFormKey}
               lookups={lookups}
               actor={user?.username || "Usuario local"}
+              initialPurchaseOrderId={pendingReceiptOrderId}
+              onInitialPurchaseOrderConsumed={() => setPendingReceiptOrderId("")}
               onCreated={(created) => {
                 setRows((current) => [created, ...current]);
+                setPendingReceiptRefresh((current) => current + 1);
+                setEntryListView("received");
                 closeForm(true);
               }}
             />
@@ -7760,7 +7828,11 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           </div>
         </section>
       )}
-      <div className={`panel table-panel${listIsReady ? "" : " is-loading"}`}>
+      {active === "Entradas" && <div className="goods-receipt-tabs" role="tablist" aria-label="Vistas de entradas">
+        <button type="button" role="tab" aria-selected={entryListView === "pending"} className={entryListView === "pending" ? "is-active" : ""} onClick={() => { setEntryListView("pending"); setFormOpen(false); }}>Mercancía pendiente de recibir</button>
+        <button type="button" role="tab" aria-selected={entryListView === "received"} className={entryListView === "received" ? "is-active" : ""} onClick={() => setEntryListView("received")}>Entradas registradas</button>
+      </div>}
+        {active === "Entradas" && entryListView === "pending" ? <PendingSupplierReceipts refreshSignal={pendingReceiptRefresh} onReceive={beginSupplierReceipt} onValidate={reviewSupplierReceipt} /> : <div className={`panel table-panel${listIsReady ? "" : " is-loading"}`}>
         <div className="table-tools">
           <div className="table-tools-primary">
           <input
@@ -8144,7 +8216,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         <p className="muted empty-row">{active === "Entradas" && hiddenTestEntryCount > 0 && !showTestEntries ? "Todavía no hay entradas operativas. Los registros de prueba están apartados arriba." : active === "Entradas" ? (rows.length ? "No hay entradas que coincidan con los filtros." : "Todavía no hay entradas registradas.") : rows.length ? "No hay productos que coincidan con los filtros." : "No hay registros todavía."}</p>
       )}
       {deletedUndo && deletedUndo.api === c.api && <div className="undo-toast" role="status"><span>Se ha enviado a la papelera: <b>{deletedUndo.label}</b></span><button type="button" className="button secondary" onClick={() => void undoDelete()}>Deshacer</button></div>}
-      </div>
+      </div>}
       {active === "Productos" && newSupplierOpen && <div className="preview-overlay" onMouseDown={(event) => event.target === event.currentTarget && !newSupplierSaving && setNewSupplierOpen(false)}><form className="supplier-create-modal" onSubmit={saveNewSupplier}><header className="preview-header"><div><b>Crear proveedor</b><small>Completa los datos del proveedor y quedará seleccionado en el producto.</small></div><button type="button" className="preview-close" aria-label="Cerrar" onClick={() => !newSupplierSaving && setNewSupplierOpen(false)}>×</button></header><div className="supplier-create-grid"><label>Nombre *<input required autoFocus value={newSupplier.name} onChange={(event) => setNewSupplier({ ...newSupplier, name: event.target.value })} /></label><label>NIF/CIF<input value={newSupplier.tax_id} onChange={(event) => setNewSupplier({ ...newSupplier, tax_id: event.target.value })} /></label><label>Persona de contacto<input value={newSupplier.contact} onChange={(event) => setNewSupplier({ ...newSupplier, contact: event.target.value })} /></label><label>Teléfono<input value={newSupplier.phone} onChange={(event) => setNewSupplier({ ...newSupplier, phone: event.target.value })} /></label><label>Email<input type="email" value={newSupplier.email} onChange={(event) => setNewSupplier({ ...newSupplier, email: event.target.value })} /></label><label>Condiciones de pago<input value={newSupplier.payment_terms} onChange={(event) => setNewSupplier({ ...newSupplier, payment_terms: event.target.value })} /></label><label className="supplier-create-wide">Dirección<textarea value={newSupplier.address} onChange={(event) => setNewSupplier({ ...newSupplier, address: event.target.value })} /></label></div><footer className="preview-actions"><button type="button" className="button secondary" onClick={() => setNewSupplierOpen(false)}>Cancelar</button><button className="button primary" disabled={newSupplierSaving}>{newSupplierSaving ? "Guardando…" : "Guardar proveedor"}</button></footer></form></div>}
       {active === "Productos" && labelProduct && (
         <ProductLabelModal

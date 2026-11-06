@@ -21,7 +21,7 @@ const sections = [
   ["Notas", "Notas"], ["Historial", "Historial"], ["Usuarios y permisos", "Usuarios y permisos"],
   ["Papelera", "Papelera"], ["Documentos", "Documentos"],
 ];
-const sectionGroups = { Balance: "Análisis y control", Informes: "Análisis y control", "Tareas programadas": "Automatización", Notas: "Automatización", "Usuarios y permisos": "Administración", Papelera: "Administración", Documentos: "Administración", Historial: "Administración" };
+const sectionGroups = { Balance: "Análisis y control", Informes: "Análisis y control", "Tareas programadas": "Automatización", Notas: "Automatización", "Usuarios y permisos": "Configuración", Papelera: "Configuración", Documentos: "Configuración", Historial: "Configuración" };
 
 async function waitForData() {
   await page.waitForFunction(() => !document.body.innerText.includes("Actualizando datos") && !document.body.innerText.includes("Cargando datos desde la base de datos"), { timeout: 25000 }).catch(() => undefined);

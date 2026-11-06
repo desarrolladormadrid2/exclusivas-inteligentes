@@ -2050,6 +2050,65 @@ const purchaseOrderReceiptFields = `
 function getPurchaseOrderRows() {
   return db.prepare(`SELECT po.*,suppliers.name supplier_name,suppliers.payment_terms supplier_payment_terms,${purchaseOrderReceiptFields} FROM purchase_orders po LEFT JOIN suppliers ON suppliers.id=po.supplier_id WHERE CAST(COALESCE(po.deleted,0) AS INTEGER)=0 ORDER BY po.order_date DESC,po.id DESC LIMIT 500`).all().map(enrichPurchaseOrder);
 }
+function getPendingPurchaseReceiptOrders() {
+  const rows = db.prepare(`
+    WITH ordered AS (
+      SELECT pol.purchase_order_id,pol.product_id,
+        COALESCE(NULLIF(TRIM(pol.quantity_unit),''),NULLIF(TRIM(p.unit),''),'unidad') AS quantity_unit,
+        SUM(COALESCE(pol.quantity,0)) AS ordered_quantity,
+        MIN(COALESCE(pol.unit_cost,0)) AS unit_cost
+      FROM purchase_order_lines pol
+      LEFT JOIN products p ON p.id=pol.product_id
+      WHERE CAST(COALESCE(pol.deleted,0) AS INTEGER)=0
+      GROUP BY pol.purchase_order_id,pol.product_id,COALESCE(NULLIF(TRIM(pol.quantity_unit),''),NULLIF(TRIM(p.unit),''),'unidad')
+    ), received AS (
+      SELECT gr.purchase_order_id,gl.product_id,
+        COALESCE(NULLIF(TRIM(gl.quantity_unit),''),NULLIF(TRIM(p.unit),''),'unidad') AS quantity_unit,
+        SUM(CASE WHEN gl.status='Producto equivocado' THEN 0 ELSE MAX(0,COALESCE(gl.received_quantity,0)-COALESCE(gl.damaged_quantity,0)-COALESCE(gl.substituted_quantity,0)) END) AS received_good_quantity
+      FROM goods_receipt_lines gl
+      JOIN goods_receipts gr ON gr.id=gl.receipt_id
+      LEFT JOIN products p ON p.id=gl.product_id
+      WHERE gr.validation_status='Validada'
+        AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0
+        AND CAST(COALESCE(gl.deleted,0) AS INTEGER)=0
+      GROUP BY gr.purchase_order_id,gl.product_id,COALESCE(NULLIF(TRIM(gl.quantity_unit),''),NULLIF(TRIM(p.unit),''),'unidad')
+    )
+    SELECT po.id,po.code,po.title,po.supplier_id,s.name AS supplier_name,po.status,
+      po.order_date,po.expected_date,po.notes,ordered.product_id,p.name AS product_name,p.sku,
+      ordered.quantity_unit,ordered.ordered_quantity,COALESCE(received.received_good_quantity,0) AS received_good_quantity,
+      MAX(0,ordered.ordered_quantity-COALESCE(received.received_good_quantity,0)) AS remaining_quantity,
+      ordered.unit_cost,pending_receipt.id AS pending_receipt_id,pending_receipt.code AS pending_receipt_code
+    FROM purchase_orders po
+    JOIN suppliers s ON s.id=po.supplier_id
+    JOIN ordered ON ordered.purchase_order_id=po.id
+    JOIN products p ON p.id=ordered.product_id
+    LEFT JOIN received ON received.purchase_order_id=po.id
+      AND received.product_id=ordered.product_id AND received.quantity_unit=ordered.quantity_unit
+    LEFT JOIN (
+      SELECT purchase_order_id,MIN(id) AS id,MIN(code) AS code
+      FROM goods_receipts
+      WHERE validation_status='Pendiente' AND CAST(COALESCE(deleted,0) AS INTEGER)=0
+      GROUP BY purchase_order_id
+    ) pending_receipt ON pending_receipt.purchase_order_id=po.id
+    WHERE po.status IN ('Enviado','Pedido','En tránsito','Parcialmente recibido','Recibido con incidencia')
+      AND CAST(COALESCE(po.deleted,0) AS INTEGER)=0
+      AND MAX(0,ordered.ordered_quantity-COALESCE(received.received_good_quantity,0))>0
+    ORDER BY CASE WHEN po.expected_date IS NULL OR TRIM(po.expected_date)='' THEN 1 ELSE 0 END,
+      po.expected_date,po.order_date,po.id,product_name
+  `).all();
+  const orders = new Map();
+  for (const row of rows) {
+    let order = orders.get(Number(row.id));
+    if (!order) {
+      order = { id: Number(row.id), code: row.code, title: row.title, supplier_id: Number(row.supplier_id), supplier_name: row.supplier_name, status: row.status, order_date: row.order_date, expected_date: row.expected_date, notes: row.notes, pending_receipt_id: row.pending_receipt_id ? Number(row.pending_receipt_id) : null, pending_receipt_code: row.pending_receipt_code || "", lines: [], remaining_units: 0 };
+      orders.set(Number(row.id), order);
+    }
+    const line = { product_id: Number(row.product_id), product_name: row.product_name, sku: row.sku, quantity_unit: row.quantity_unit, ordered_quantity: Number(row.ordered_quantity || 0), received_good_quantity: Number(row.received_good_quantity || 0), remaining_quantity: Number(row.remaining_quantity || 0), unit_cost: Number(row.unit_cost || 0) };
+    order.lines.push(line);
+    order.remaining_units += line.remaining_quantity;
+  }
+  return [...orders.values()];
+}
 function getVehicleWithMetrics(id) {
   const vehicle = db.prepare("SELECT * FROM vehicles WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(id));
   if (!vehicle) return null;
@@ -3832,6 +3891,10 @@ export async function crmApiHandler(req, res) {
         if (!warehouse) return send(res, 400, { error: "Selecciona el almacén de destino" });
         if (counterpartyType === "Cliente" && (purchaseOrderId || purchaseInvoiceId)) return send(res, 400, { error: "Las entradas de cliente no pueden vincular un pedido o factura de compra" });
         if (purchaseOrderId && !db.prepare("SELECT id FROM purchase_orders WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(purchaseOrderId)) return send(res, 400, { error: "El pedido de compra no existe" });
+        if (purchaseOrderId) {
+          const pendingReceipt = db.prepare("SELECT id,code FROM goods_receipts WHERE purchase_order_id=? AND validation_status='Pendiente' AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 1").get(purchaseOrderId);
+          if (pendingReceipt) return send(res, 409, { error: `El pedido ya tiene una entrada pendiente de validar (${pendingReceipt.code}). Abre esa entrada en “Entradas registradas” antes de registrar otra.` });
+        }
         if (purchaseInvoiceId && !db.prepare("SELECT id FROM invoices WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(purchaseInvoiceId)) return send(res, 400, { error: "La factura de compra no existe" });
         if (!inputLines.length) return send(res, 400, { error: "Añade al menos un producto a la entrada" });
         const now = new Date().toISOString();
@@ -3889,6 +3952,13 @@ export async function crmApiHandler(req, res) {
         let stockAppliedBy = null;
         if (!remoteMode) db.exec("BEGIN");
         try {
+          if (purchaseOrderId) {
+            const pendingReceipt = db.prepare("SELECT id,code FROM goods_receipts WHERE purchase_order_id=? AND validation_status='Pendiente' AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 1").get(purchaseOrderId);
+            if (pendingReceipt) {
+              if (!remoteMode) db.exec("ROLLBACK");
+              return send(res, 409, { error: `El pedido ya tiene una entrada pendiente de validar (${pendingReceipt.code}). Abre esa entrada en “Entradas registradas” antes de registrar otra.` });
+            }
+          }
           const created = db.prepare("INSERT INTO goods_receipts(code,supplier_id,client_id,counterparty_type,purchase_order_id,purchase_invoice_id,warehouse_id,receipt_date,status,validation_status,validated_by,validated_at,stock_applied,stock_on_validation,stock_applied_at,stock_applied_by,notes,created_by,received_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(code, supplierId, clientId, counterpartyType, purchaseOrderId, purchaseInvoiceId, warehouseId, receiptDate, status, validationStatus, validatedBy, validatedAt, stockApplied, stockOnValidation, stockAppliedAt, stockAppliedBy, String(d.notes || "").trim(), actor, String(d.received_by || actor), now, now);
           const receiptId = Number(created.lastInsertRowid);
           const insertLine = db.prepare("INSERT INTO goods_receipt_lines(receipt_id,product_id,product_name_snapshot,expected_quantity,received_quantity,quantity_unit,damaged_quantity,substituted_quantity,substitute_product_id,unit_cost,expected_value,received_value,economic_difference,status,lot_code,expiry_date,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
@@ -4330,6 +4400,9 @@ export async function crmApiHandler(req, res) {
         const limitValue = query.has("limit") ? Math.min(parsePageValue(query.get("limit"), 0), 5000) : null;
         const offsetValue = query.has("offset") ? parsePageValue(query.get("offset"), 0) : 0;
         const bypassReadCache = query.has("refresh") || query.get("cache") === "no-store";
+        if (t === "purchase_orders" && p[2] === "pending-receipt") {
+          return send(res, 200, getPendingPurchaseReceiptOrders());
+        }
         if (p[2] && Number.isInteger(Number(p[2]))) {
           const source = t === "orders"
             ? `orders LEFT JOIN clients AS order_client ON order_client.id=orders.client_id`
