@@ -734,11 +734,11 @@ db.exec(`CREATE TABLE IF NOT EXISTS purchase_order_observations(id INTEGER PRIMA
 try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_supplier_alias_normalized ON supplier_product_aliases(supplier_id,normalized_alias)"); } catch {}
 try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_supplier_recurrent_product ON supplier_recurrent_items(supplier_id,product_id)"); } catch {}
 db.exec(`CREATE TABLE IF NOT EXISTS goods_receipts(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,supplier_id INTEGER NOT NULL,purchase_order_id INTEGER,purchase_invoice_id INTEGER,warehouse_id INTEGER,receipt_date TEXT NOT NULL,status TEXT DEFAULT 'Borrador',validation_status TEXT DEFAULT 'Pendiente',validated_by TEXT,validated_at TEXT,notes TEXT,created_by TEXT,received_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
-for (const column of ["purchase_invoice_id INTEGER", "validation_status TEXT DEFAULT 'Pendiente'", "validated_by TEXT", "validated_at TEXT", "client_id INTEGER", "counterparty_type TEXT DEFAULT 'Proveedor'", "stock_applied INTEGER DEFAULT 1", "stock_applied_at TEXT", "stock_applied_by TEXT"]) {
+for (const column of ["purchase_invoice_id INTEGER", "validation_status TEXT DEFAULT 'Pendiente'", "validated_by TEXT", "validated_at TEXT", "client_id INTEGER", "counterparty_type TEXT DEFAULT 'Proveedor'", "stock_applied INTEGER DEFAULT 1", "stock_on_validation INTEGER DEFAULT 1", "stock_added_quantity REAL DEFAULT -1", "stock_applied_at TEXT", "stock_applied_by TEXT"]) {
   try { db.exec(`ALTER TABLE goods_receipts ADD COLUMN ${column}`); } catch {}
 }
 if (remoteMode && process.env.RUN_REMOTE_MIGRATIONS === "1") {
-  for (const column of ["purchase_invoice_id INTEGER", "validation_status TEXT DEFAULT 'Pendiente'", "validated_by TEXT", "validated_at TEXT", "client_id INTEGER", "counterparty_type TEXT DEFAULT 'Proveedor'", "stock_applied INTEGER DEFAULT 1", "stock_applied_at TEXT", "stock_applied_by TEXT"]) {
+  for (const column of ["purchase_invoice_id INTEGER", "validation_status TEXT DEFAULT 'Pendiente'", "validated_by TEXT", "validated_at TEXT", "client_id INTEGER", "counterparty_type TEXT DEFAULT 'Proveedor'", "stock_applied INTEGER DEFAULT 1", "stock_on_validation INTEGER DEFAULT 1", "stock_added_quantity REAL DEFAULT -1", "stock_applied_at TEXT", "stock_applied_by TEXT"]) {
     try { db.prepare(`ALTER TABLE goods_receipts ADD COLUMN ${column}`).run(); } catch {}
   }
 }
@@ -1825,7 +1825,7 @@ const lookupFields = {
   order_lines: ["id", "order_id", "product_id", "quantity", "quantity_requested", "quantity_unit", "prepared", "prepared_quantity", "preparation_status", "incident_resolution"],
   invoices: ["id", "code", "order_id", "client_id", "amount", "base_amount", "vat_amount", "equivalence_surcharge_enabled", "equivalence_surcharge_amount", "equivalence_surcharge_breakdown", "status", "created_at", "issue_date", "due_date", "client_name_snapshot", "client_legal_name_snapshot", "client_tax_id_snapshot", "client_billing_address_snapshot", "client_billing_city_snapshot", "client_delivery_address_snapshot", "client_delivery_city_snapshot"],
   purchase_orders: ["id", "code", "title", "supplier_id", "status", "order_date", "expected_date", "amount", "validation_status", "supplier_invoice_code", "invoice_date", "payment_terms_snapshot", "payment_due_date", "payment_status", "payment_paid_at", "payment_reference"],
-  goods_receipts: ["id", "code", "counterparty_type", "client_id", "supplier_id", "purchase_order_id", "purchase_invoice_id", "warehouse_id", "receipt_date", "status", "validation_status", "validated_by", "validated_at", "stock_applied", "stock_applied_at", "stock_applied_by", "line_count", "incident_count", "received_by", "notes"],
+  goods_receipts: ["id", "code", "counterparty_type", "client_id", "supplier_id", "purchase_order_id", "purchase_invoice_id", "warehouse_id", "receipt_date", "status", "validation_status", "validated_by", "validated_at", "stock_applied", "stock_on_validation", "stock_added_quantity", "stock_applied_at", "stock_applied_by", "line_count", "incident_count", "received_by", "notes"],
   goods_receipt_lines: ["id", "receipt_id", "product_id", "product_name_snapshot", "expected_quantity", "received_quantity", "quantity_unit", "damaged_quantity", "substituted_quantity", "substitute_product_id", "unit_cost", "expected_value", "received_value", "economic_difference", "status", "lot_id", "lot_code", "expiry_date", "notes", "location_verified_status", "location_verified_code", "location_verified_reason", "location_verified_by", "location_verified_at"],
   goods_receipt_incidents: ["id", "receipt_id", "receipt_line_id", "supplier_id", "type", "description", "expected_quantity", "received_quantity", "damaged_quantity", "substituted_quantity", "substitute_product_id", "economic_difference", "status", "claim_status", "attachment_name", "attachment_mime", "created_by", "created_at"],
   payments: ["id", "invoice_id", "amount", "payment_date", "method", "reference", "notes", "status", "voided_at", "voided_by", "void_reason"],
@@ -1863,7 +1863,7 @@ function lookupSelectFor(resource, profile = "") {
   const cacheKey = `lookup:${resource}:${profile || "default"}`;
   if (!listColumnsCache.has(cacheKey)) {
     const available = new Set(db.prepare(`PRAGMA table_info(${resource})`).all().map((column) => String(column.name || "")));
-    const tablePrefix = resource === "orders" ? "orders." : resource === "shipments" ? "shipments." : "";
+    const tablePrefix = ["orders", "shipments", "invoices", "payments"].includes(resource) ? `${resource}.` : "";
     const columns = requested.filter((column) => available.has(column)).map((column) => `${tablePrefix}"${column.replaceAll('"', '""')}"`);
     if (resource === "orders") columns.push("order_client.name AS client_name", "order_client.city AS client_city");
     listColumnsCache.set(cacheKey, columns.length ? columns.join(",") : "*");
@@ -1919,6 +1919,49 @@ function storeRows(resource, includeDeleted, includeInactive, rows) {
 }
 function recordAudit(actor, method, resource, action, details = "") {
   try { db.prepare("INSERT INTO audit_logs(actor,method,resource,action,details,created_at) VALUES(?,?,?,?,?,?)").run(actor || "Usuario local", method, resource, action, details, new Date().toISOString()); } catch {}
+}
+
+function applyGoodsReceiptStock(receipt, actor, appliedAt = new Date().toISOString()) {
+  if (!receipt || Number(receipt.stock_applied || 0) === 1) return false;
+  const lines = db.prepare("SELECT * FROM goods_receipt_lines WHERE receipt_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id").all(Number(receipt.id));
+  const insertMovement = db.prepare("INSERT INTO inventory_movements(product_id,warehouse_id,movement_type,quantity,reference,movement_date,notes,receipt_id,created_by) VALUES(?,?,?,?,?,?,?,?,?)");
+  const findLot = db.prepare("SELECT id FROM product_lots WHERE product_id=? AND lot_code=? AND (warehouse_id=? OR warehouse_id IS NULL) ORDER BY id LIMIT 1");
+  const insertLot = db.prepare("INSERT INTO product_lots(product_id,lot_code,quantity,waste_quantity,expiry_date,received_date,warehouse_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)");
+  const updateLot = db.prepare("UPDATE product_lots SET quantity=COALESCE(quantity,0)+?,waste_quantity=COALESCE(waste_quantity,0)+?,expiry_date=COALESCE(?,expiry_date),received_date=COALESCE(?,received_date),warehouse_id=COALESCE(warehouse_id,?),updated_at=? WHERE id=?");
+  const updateLineLot = db.prepare("UPDATE goods_receipt_lines SET lot_id=? WHERE id=?");
+  const receiptCode = String(receipt.code || `ENT-${receipt.id}`);
+  const receiptDate = String(receipt.receipt_date || appliedAt.slice(0, 10));
+  const warehouseId = Number(receipt.warehouse_id || 0) || null;
+  let stockAddedQuantity = 0;
+  for (const line of lines) {
+    const received = Math.max(0, Number(line.received_quantity || 0));
+    const damaged = Math.min(received, Math.max(0, Number(line.damaged_quantity || 0)));
+    const substituted = Math.min(received, Math.max(0, Number(line.substituted_quantity || 0)));
+    const wrongProduct = String(line.status || "") === "Producto equivocado";
+    const usableOriginal = wrongProduct ? 0 : Math.max(0, received - damaged - substituted);
+    if (usableOriginal > 0) {
+      stockAddedQuantity += usableOriginal;
+      insertMovement.run(line.product_id, warehouseId, "Entrada", usableOriginal, receiptCode, receiptDate, `Recepción ${receiptCode} · ${line.product_name_snapshot || "Producto"}`, Number(receipt.id), actor);
+      db.prepare("UPDATE products SET stock=COALESCE(stock,0)+?,cost_price=CASE WHEN ? > 0 THEN ? ELSE cost_price END,real_cost=CASE WHEN ? > 0 THEN ? ELSE real_cost END,updated_at=? WHERE id=?").run(usableOriginal, Number(line.unit_cost || 0), Number(line.unit_cost || 0), Number(line.unit_cost || 0), Number(line.unit_cost || 0), appliedAt, line.product_id);
+    }
+    if (!wrongProduct && line.lot_code && (usableOriginal > 0 || damaged > 0)) {
+      const existingLot = findLot.get(line.product_id, line.lot_code, warehouseId);
+      const lotId = existingLot
+        ? Number(existingLot.id)
+        : Number(insertLot.run(line.product_id, line.lot_code, usableOriginal, damaged, line.expiry_date, receiptDate, warehouseId, appliedAt, appliedAt).lastInsertRowid);
+      if (existingLot) updateLot.run(usableOriginal, damaged, line.expiry_date, receiptDate, warehouseId, appliedAt, lotId);
+      updateLineLot.run(lotId, line.id);
+    }
+    if (line.substitute_product_id && substituted > 0) {
+      stockAddedQuantity += substituted;
+      insertMovement.run(line.substitute_product_id, warehouseId, "Entrada", substituted, receiptCode, receiptDate, `Sustitución en recepción ${receiptCode} · ${line.product_name_snapshot || "Producto"}`, Number(receipt.id), actor);
+      db.prepare("UPDATE products SET stock=COALESCE(stock,0)+?,updated_at=? WHERE id=?").run(substituted, appliedAt, line.substitute_product_id);
+    }
+  }
+  db.prepare("UPDATE goods_receipts SET stock_applied=1,stock_added_quantity=?,stock_applied_at=?,stock_applied_by=?,updated_at=? WHERE id=?").run(stockAddedQuantity, appliedAt, actor, appliedAt, Number(receipt.id));
+  invalidateRelatedReadCaches("inventory_movements");
+  invalidateReadCache("products");
+  return true;
 }
 function vehicleMaintenanceState(vehicle) {
   const today = new Date();
@@ -1992,6 +2035,7 @@ const purchaseOrderReceiptFields = `
   (SELECT gr.status FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.id DESC LIMIT 1) AS receipt_status,
   (SELECT gr.validation_status FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.id DESC LIMIT 1) AS receipt_validation_status,
   (SELECT gr.stock_applied FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.id DESC LIMIT 1) AS receipt_stock_applied,
+  (SELECT gr.stock_added_quantity FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.id DESC LIMIT 1) AS receipt_stock_added_quantity,
   (SELECT gr.stock_applied_at FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.id DESC LIMIT 1) AS receipt_stock_applied_at,
   (SELECT gr.stock_applied_by FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.id DESC LIMIT 1) AS receipt_stock_applied_by,
   (SELECT gr.received_by FROM goods_receipts gr WHERE gr.purchase_order_id=po.id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 ORDER BY gr.id DESC LIMIT 1) AS receipt_received_by,
@@ -2340,7 +2384,7 @@ export async function crmApiHandler(req, res) {
       if (p[1] === "purchase_orders" && p[2] && p[3] === "detail" && req.method === "GET") {
         const order = db.prepare(`SELECT po.*,s.name supplier_name,s.email supplier_email,s.address supplier_address,s.city supplier_city,${purchaseOrderReceiptFields} FROM purchase_orders po LEFT JOIN suppliers s ON s.id=po.supplier_id WHERE po.id=? AND CAST(COALESCE(po.deleted,0) AS INTEGER)=0`).get(Number(p[2]));
         if (!order) return send(res, 404, { error: "Pedido de compra no encontrado" });
-        const lines = db.prepare("SELECT pol.*,p.name product_name,p.sku,MAX(0,pol.quantity-COALESCE((SELECT SUM(gl.received_quantity) FROM goods_receipt_lines gl JOIN goods_receipts gr ON gr.id=gl.receipt_id WHERE gr.purchase_order_id=pol.purchase_order_id AND gl.product_id=pol.product_id AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 AND CAST(COALESCE(gl.deleted,0) AS INTEGER)=0),0)) remaining_quantity FROM purchase_order_lines pol LEFT JOIN products p ON p.id=pol.product_id WHERE pol.purchase_order_id=? AND CAST(COALESCE(pol.deleted,0) AS INTEGER)=0 ORDER BY pol.id").all(Number(p[2]));
+        const lines = db.prepare("SELECT pol.*,p.name product_name,p.sku,MAX(0,pol.quantity-COALESCE((SELECT SUM(CASE WHEN gl.status='Producto equivocado' THEN 0 ELSE MAX(0,COALESCE(gl.received_quantity,0)-COALESCE(gl.damaged_quantity,0)-COALESCE(gl.substituted_quantity,0)) END) FROM goods_receipt_lines gl JOIN goods_receipts gr ON gr.id=gl.receipt_id WHERE gr.purchase_order_id=pol.purchase_order_id AND gl.product_id=pol.product_id AND gr.validation_status='Validada' AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 AND CAST(COALESCE(gl.deleted,0) AS INTEGER)=0),0)) remaining_quantity FROM purchase_order_lines pol LEFT JOIN products p ON p.id=pol.product_id WHERE pol.purchase_order_id=? AND CAST(COALESCE(pol.deleted,0) AS INTEGER)=0 ORDER BY pol.id").all(Number(p[2]));
         const observations = db.prepare("SELECT * FROM purchase_order_observations WHERE purchase_order_id=? ORDER BY id DESC LIMIT 100").all(Number(p[2]));
         return send(res, 200, { ...enrichPurchaseOrder(order), lines, observations });
       }
@@ -3811,8 +3855,9 @@ export async function crmApiHandler(req, res) {
           const rawAttachments = Array.isArray(input.attachments) ? input.attachments : [];
           if (input.attachment_data) rawAttachments.unshift({ name: input.attachment_name, mime: input.attachment_mime, data: input.attachment_data });
           if (expected === 0 && received === 0 && !String(input.notes || input.incident_description || "").trim() && !rawAttachments.length && damaged === 0 && substituted === 0) continue;
-          const requestedStatus = ["Correcta", "Diferencia", "Producto equivocado", "Dañado", "Sustituido"].includes(String(input.status)) ? String(input.status) : "Correcta";
+          const requestedStatus = ["Pendiente", "Correcta", "Diferencia", "Producto equivocado", "Dañado", "Sustituido"].includes(String(input.status)) ? String(input.status) : "Pendiente";
           const status = requestedStatus === "Correcta" && expected !== received ? "Diferencia" : requestedStatus;
+          if (status === "Sustituido" && substituted <= 0) return send(res, 400, { error: `Indica cuántas unidades de ${product.name} fueron sustituidas y selecciona el producto recibido.` });
           const attachments = [];
           for (let index = 0; index < rawAttachments.length; index += 1) {
             const attachment = rawAttachments[index] || {};
@@ -3824,51 +3869,35 @@ export async function crmApiHandler(req, res) {
           }
           const expectedValue = expected * Math.max(0, Number(input.unit_cost || 0));
           const receivedValue = received * Math.max(0, Number(input.unit_cost || 0));
-          lines.push({ productId, product, expected, received, damaged, substituted, substituteProductId, lotCode, expiryDate, quantityUnit, unitCost: Math.max(0, Number(input.unit_cost || 0)), expectedValue, receivedValue, economicDifference: receivedValue - expectedValue, status, notes: String(input.notes || "").trim(), incidentDescription: String(input.incident_description || "").trim(), attachments });
+          const effectiveDamaged = status === "Dañado" && damaged === 0 ? received : damaged;
+          lines.push({ productId, product, expected, received, damaged: effectiveDamaged, substituted, substituteProductId, lotCode, expiryDate, quantityUnit, unitCost: Math.max(0, Number(input.unit_cost || 0)), expectedValue, receivedValue, economicDifference: receivedValue - expectedValue, status, notes: String(input.notes || "").trim(), incidentDescription: String(input.incident_description || "").trim(), attachments });
         }
         if (!lines.length) return send(res, 400, { error: "Las líneas deben tener alguna cantidad recibida o una incidencia" });
-        const hasIncident = lines.some((line) => line.status !== "Correcta" || line.incidentDescription || line.attachments.length || line.damaged > 0 || line.substituted > 0 || (line.expected !== line.received));
+        const hasIncident = lines.some((line) => (line.status !== "Correcta" && line.status !== "Pendiente") || line.incidentDescription || line.attachments.length || line.damaged > 0 || line.substituted > 0 || (line.expected !== line.received));
         const code = String(d.code || `ENT-${new Date().getFullYear()}-${String(Date.now()).slice(-7)}`);
         const status = hasIncident ? "Con incidencia" : "Recepcionada";
         const validationStatus = ["Pendiente", "Validada", "Rechazada"].includes(String(d.validation_status)) ? String(d.validation_status) : "Pendiente";
+        if (validationStatus === "Validada" && lines.some((line) => line.status === "Pendiente")) return send(res, 400, { error: "Revisa el resultado de cada producto antes de validar la entrada" });
         const validatedBy = validationStatus === "Validada" ? String(d.validated_by || actor) : null;
         const validatedAt = validationStatus === "Validada" ? now : null;
-        const stockApplied = d.stock_applied === undefined ? 1 : ([true, 1, "1", "true", "on"].includes(d.stock_applied) ? 1 : 0);
-        const stockAppliedAt = stockApplied ? now : null;
-        const stockAppliedBy = stockApplied ? actor : null;
+        const stockOnValidation = d.stock_on_validation === undefined
+          ? (d.stock_applied === undefined ? 1 : ([true, 1, "1", "true", "on"].includes(d.stock_applied) ? 1 : 0))
+          : ([true, 1, "1", "true", "on"].includes(d.stock_on_validation) ? 1 : 0);
+        let stockApplied = 0;
+        let stockAddedQuantity = -1;
+        let stockAppliedAt = null;
+        let stockAppliedBy = null;
         if (!remoteMode) db.exec("BEGIN");
         try {
-          const created = db.prepare("INSERT INTO goods_receipts(code,supplier_id,client_id,counterparty_type,purchase_order_id,purchase_invoice_id,warehouse_id,receipt_date,status,validation_status,validated_by,validated_at,stock_applied,stock_applied_at,stock_applied_by,notes,created_by,received_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(code, supplierId, clientId, counterpartyType, purchaseOrderId, purchaseInvoiceId, warehouseId, receiptDate, status, validationStatus, validatedBy, validatedAt, stockApplied, stockAppliedAt, stockAppliedBy, String(d.notes || "").trim(), actor, String(d.received_by || actor), now, now);
+          const created = db.prepare("INSERT INTO goods_receipts(code,supplier_id,client_id,counterparty_type,purchase_order_id,purchase_invoice_id,warehouse_id,receipt_date,status,validation_status,validated_by,validated_at,stock_applied,stock_on_validation,stock_applied_at,stock_applied_by,notes,created_by,received_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(code, supplierId, clientId, counterpartyType, purchaseOrderId, purchaseInvoiceId, warehouseId, receiptDate, status, validationStatus, validatedBy, validatedAt, stockApplied, stockOnValidation, stockAppliedAt, stockAppliedBy, String(d.notes || "").trim(), actor, String(d.received_by || actor), now, now);
           const receiptId = Number(created.lastInsertRowid);
           const insertLine = db.prepare("INSERT INTO goods_receipt_lines(receipt_id,product_id,product_name_snapshot,expected_quantity,received_quantity,quantity_unit,damaged_quantity,substituted_quantity,substitute_product_id,unit_cost,expected_value,received_value,economic_difference,status,lot_code,expiry_date,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
-          const insertMovement = db.prepare("INSERT INTO inventory_movements(product_id,warehouse_id,movement_type,quantity,reference,movement_date,notes,receipt_id,created_by) VALUES(?,?,?,?,?,?,?,?,?)");
-          const findLot = db.prepare("SELECT id FROM product_lots WHERE product_id=? AND lot_code=? AND (warehouse_id=? OR warehouse_id IS NULL) ORDER BY id LIMIT 1");
-          const insertLot = db.prepare("INSERT INTO product_lots(product_id,lot_code,quantity,waste_quantity,expiry_date,received_date,warehouse_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)");
-          const updateLot = db.prepare("UPDATE product_lots SET quantity=COALESCE(quantity,0)+?,waste_quantity=COALESCE(waste_quantity,0)+?,expiry_date=COALESCE(?,expiry_date),received_date=COALESCE(?,received_date),warehouse_id=COALESCE(warehouse_id,?),updated_at=? WHERE id=?");
-          const updateLineLot = db.prepare("UPDATE goods_receipt_lines SET lot_id=? WHERE id=?");
           const insertIncident = db.prepare("INSERT INTO goods_receipt_incidents(receipt_id,receipt_line_id,supplier_id,type,description,expected_quantity,received_quantity,damaged_quantity,substituted_quantity,substitute_product_id,economic_difference,status,attachment_name,attachment_mime,attachment_data,attachments_json,claim_status,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
           const incidents = [];
           for (const line of lines) {
             const lineResult = insertLine.run(receiptId, line.productId, line.product.name, line.expected, line.received, line.quantityUnit, line.damaged, line.substituted, line.substituteProductId, line.unitCost, line.expectedValue, line.receivedValue, line.economicDifference, line.status, line.lotCode || null, line.expiryDate, line.notes, now, now);
             const lineId = Number(lineResult.lastInsertRowid);
-            const usableOriginal = Math.max(0, line.received - line.damaged - line.substituted);
-            if (stockApplied && usableOriginal > 0) {
-              insertMovement.run(line.productId, warehouseId, "Entrada", usableOriginal, code, receiptDate, `Recepción ${code} · ${line.product.name}`, receiptId, actor);
-              db.prepare("UPDATE products SET stock=COALESCE(stock,0)+?,cost_price=CASE WHEN ? > 0 THEN ? ELSE cost_price END,real_cost=CASE WHEN ? > 0 THEN ? ELSE real_cost END,updated_at=? WHERE id=?").run(usableOriginal, line.unitCost, line.unitCost, line.unitCost, line.unitCost, now, line.productId);
-            }
-            if (stockApplied && line.lotCode && (usableOriginal > 0 || line.damaged > 0)) {
-              const existingLot = findLot.get(line.productId, line.lotCode, warehouseId);
-              const lotId = existingLot
-                ? Number(existingLot.id)
-                : Number(insertLot.run(line.productId, line.lotCode, usableOriginal, line.damaged, line.expiryDate, receiptDate, warehouseId, now, now).lastInsertRowid);
-              if (existingLot) updateLot.run(usableOriginal, line.damaged, line.expiryDate, receiptDate, warehouseId, now, lotId);
-              updateLineLot.run(lotId, lineId);
-            }
-            if (stockApplied && line.substituteProductId && line.substituted > 0) {
-              insertMovement.run(line.substituteProductId, warehouseId, "Entrada", line.substituted, code, receiptDate, `Sustitución en recepción ${code} · ${line.product.name}`, receiptId, actor);
-              db.prepare("UPDATE products SET stock=COALESCE(stock,0)+?,updated_at=? WHERE id=?").run(line.substituted, now, line.substituteProductId);
-            }
-            const incident = line.status !== "Correcta" || line.incidentDescription || line.attachments.length || line.damaged > 0 || line.substituted > 0 || line.expected !== line.received;
+            const incident = (line.status !== "Correcta" && line.status !== "Pendiente") || line.incidentDescription || line.attachments.length || line.damaged > 0 || line.substituted > 0 || line.expected !== line.received;
             if (incident) {
               const type = line.damaged > 0 ? "Dañado" : line.substituted > 0 ? "Sustituido" : line.status;
               const description = line.incidentDescription || (type === "Dañado" ? `Producto recibido dañado: ${line.damaged} unidades.` : type === "Sustituido" ? `Producto sustituido: ${line.substituted} unidades${line.substituteProductId ? "." : ". Falta indicar la referencia alternativa."}` : type === "Producto equivocado" ? "Producto recibido no corresponde con la referencia esperada." : `Diferencia de unidades: esperadas ${line.expected}, recibidas ${line.received}.`);
@@ -3877,9 +3906,17 @@ export async function crmApiHandler(req, res) {
               incidents.push({ id: Number(incidentResult.lastInsertRowid), product_name: line.product.name, description });
             }
           }
-          if (purchaseOrderId) {
+          if (validationStatus === "Validada" && stockOnValidation) {
+            const receipt = db.prepare("SELECT * FROM goods_receipts WHERE id=?").get(receiptId);
+            applyGoodsReceiptStock(receipt, actor, now);
+            stockApplied = 1;
+            stockAddedQuantity = Number(db.prepare("SELECT stock_added_quantity FROM goods_receipts WHERE id=?").get(receiptId)?.stock_added_quantity || 0);
+            stockAppliedAt = now;
+            stockAppliedBy = actor;
+          }
+          if (purchaseOrderId && validationStatus === "Validada") {
             const ordered = new Map(db.prepare("SELECT product_id,SUM(quantity) quantity FROM purchase_order_lines WHERE purchase_order_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 GROUP BY product_id").all(purchaseOrderId).map((line) => [Number(line.product_id), Number(line.quantity || 0)]));
-            const alreadyReceived = new Map(db.prepare("SELECT gl.product_id,SUM(gl.received_quantity) quantity FROM goods_receipt_lines gl JOIN goods_receipts gr ON gr.id=gl.receipt_id WHERE gr.purchase_order_id=? AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 AND CAST(COALESCE(gl.deleted,0) AS INTEGER)=0 GROUP BY gl.product_id").all(purchaseOrderId).map((line) => [Number(line.product_id), Number(line.quantity || 0)]));
+            const alreadyReceived = new Map(db.prepare("SELECT gl.product_id,SUM(CASE WHEN gl.status='Producto equivocado' THEN 0 ELSE MAX(0,COALESCE(gl.received_quantity,0)-COALESCE(gl.damaged_quantity,0)-COALESCE(gl.substituted_quantity,0)) END) quantity FROM goods_receipt_lines gl JOIN goods_receipts gr ON gr.id=gl.receipt_id WHERE gr.purchase_order_id=? AND gr.validation_status='Validada' AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 AND CAST(COALESCE(gl.deleted,0) AS INTEGER)=0 GROUP BY gl.product_id").all(purchaseOrderId).map((line) => [Number(line.product_id), Number(line.quantity || 0)]));
             const partial = [...ordered.entries()].some(([productId, quantity]) => Number(alreadyReceived.get(productId) || 0) + 0.0001 < quantity);
             const nextStatus = hasIncident ? "Recibido con incidencia" : partial ? "Parcialmente recibido" : "Recibido";
             db.prepare("UPDATE purchase_orders SET status=?,updated_at=? WHERE id=?").run(nextStatus, now, purchaseOrderId);
@@ -3890,7 +3927,7 @@ export async function crmApiHandler(req, res) {
           invalidateRelatedReadCaches("goods_receipts");
           invalidateRelatedReadCaches("inventory_movements");
           invalidateReadCache("products");
-          return send(res, 201, { id: receiptId, code, counterparty_type: counterpartyType, supplier_id: supplierId || null, client_id: clientId || null, counterparty_name: client?.name || supplier?.name, supplier_name: supplier?.name || null, client_name: client?.name || null, warehouse_id: warehouseId, status, validation_status: validationStatus, stock_applied: stockApplied, stock_applied_at: stockAppliedAt, stock_applied_by: stockAppliedBy, validated_by: validatedBy, validated_at: validatedAt, purchase_invoice_id: purchaseInvoiceId, line_count: lines.length, incident_count: incidents.length, economic_difference: lines.reduce((sum, line) => sum + Number(line.economicDifference || 0), 0), received_by: String(d.received_by || actor), receipt_date: receiptDate, notes: String(d.notes || "").trim() });
+          return send(res, 201, { id: receiptId, code, counterparty_type: counterpartyType, supplier_id: supplierId || null, client_id: clientId || null, counterparty_name: client?.name || supplier?.name, supplier_name: supplier?.name || null, client_name: client?.name || null, warehouse_id: warehouseId, status, validation_status: validationStatus, stock_applied: stockApplied, stock_added_quantity: stockAddedQuantity, stock_applied_at: stockAppliedAt, stock_applied_by: stockAppliedBy, validated_by: validatedBy, validated_at: validatedAt, purchase_invoice_id: purchaseInvoiceId, line_count: lines.length, incident_count: incidents.length, economic_difference: lines.reduce((sum, line) => sum + Number(line.economicDifference || 0), 0), received_by: String(d.received_by || actor), receipt_date: receiptDate, notes: String(d.notes || "").trim() });
         } catch (error) {
           if (!remoteMode) { try { db.exec("ROLLBACK"); } catch {} }
           return send(res, 500, { error: error?.message || "No se pudo registrar la entrada" });
@@ -4952,6 +4989,64 @@ export async function crmApiHandler(req, res) {
         }
         if (t === "goods_receipts") {
           const currentReceipt = db.prepare("SELECT * FROM goods_receipts WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(p[2]));
+          if (!currentReceipt) return send(res, 404, { error: "Entrada no encontrada" });
+          if (d.validation_status !== undefined) {
+            const nextValidationStatus = String(d.validation_status || "");
+            if (!["Pendiente", "Validada", "Rechazada"].includes(nextValidationStatus)) return send(res, 400, { error: "El estado de validación no es válido" });
+            if (nextValidationStatus === "Validada" && Number(currentReceipt.stock_applied || 0) === 0) {
+              const pendingLine = db.prepare("SELECT id,product_name_snapshot FROM goods_receipt_lines WHERE receipt_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 AND COALESCE(status,'Pendiente')='Pendiente' LIMIT 1").get(Number(p[2]));
+              if (pendingLine) return send(res, 409, { error: `Revisa primero el resultado de ${pendingLine.product_name_snapshot || "cada producto"}.` });
+            }
+            if (Number(currentReceipt.stock_applied || 0) === 1 && nextValidationStatus !== "Validada") {
+              return send(res, 409, { error: "El stock de esta entrada ya se incorporó. Para rechazarla, registra primero el ajuste de inventario correspondiente." });
+            }
+            if (["Pendiente", "Rechazada"].includes(nextValidationStatus) && Number(currentReceipt.stock_applied || 0) === 0) {
+              const nextValidatedBy = null;
+              const nextValidatedAt = null;
+              db.prepare("UPDATE goods_receipts SET validation_status=?,validated_by=?,validated_at=?,updated_at=? WHERE id=?").run(nextValidationStatus, nextValidatedBy, nextValidatedAt, new Date().toISOString(), Number(p[2]));
+            } else {
+              const now = new Date().toISOString();
+              if (nextValidationStatus === "Validada" && Number(currentReceipt.stock_applied || 0) === 0 && Number(currentReceipt.stock_on_validation ?? 1) === 1) {
+                if (!remoteMode) db.exec("BEGIN");
+                try {
+                  applyGoodsReceiptStock(currentReceipt, actor, now);
+                  db.prepare("UPDATE goods_receipts SET validation_status='Validada',validated_by=?,validated_at=?,updated_at=? WHERE id=?").run(String(d.validated_by || actor), now, now, Number(p[2]));
+                  if (currentReceipt.purchase_order_id) {
+                    const purchaseOrderId = Number(currentReceipt.purchase_order_id);
+                    const ordered = new Map(db.prepare("SELECT product_id,SUM(quantity) quantity FROM purchase_order_lines WHERE purchase_order_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 GROUP BY product_id").all(purchaseOrderId).map((line) => [Number(line.product_id), Number(line.quantity || 0)]));
+                    const alreadyReceived = new Map(db.prepare("SELECT gl.product_id,SUM(CASE WHEN gl.status='Producto equivocado' THEN 0 ELSE MAX(0,COALESCE(gl.received_quantity,0)-COALESCE(gl.damaged_quantity,0)-COALESCE(gl.substituted_quantity,0)) END) quantity FROM goods_receipt_lines gl JOIN goods_receipts gr ON gr.id=gl.receipt_id WHERE gr.purchase_order_id=? AND gr.validation_status='Validada' AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 AND CAST(COALESCE(gl.deleted,0) AS INTEGER)=0 GROUP BY gl.product_id").all(purchaseOrderId).map((line) => [Number(line.product_id), Number(line.quantity || 0)]));
+                    const partial = [...ordered.entries()].some(([productId, quantity]) => Number(alreadyReceived.get(productId) || 0) + 0.0001 < quantity);
+                    const hasIncident = Boolean(db.prepare("SELECT id FROM goods_receipt_incidents WHERE receipt_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 LIMIT 1").get(Number(p[2])));
+                    db.prepare("UPDATE purchase_orders SET status=?,updated_at=? WHERE id=?").run(hasIncident ? "Recibido con incidencia" : partial ? "Parcialmente recibido" : "Recibido", now, purchaseOrderId);
+                  }
+                  if (!remoteMode) db.exec("COMMIT");
+                } catch (error) {
+                  if (!remoteMode) { try { db.exec("ROLLBACK"); } catch {} }
+                  return send(res, 500, { error: error?.message || "No se pudo validar la entrada ni actualizar el stock" });
+                }
+              } else {
+                const nextValidatedBy = nextValidationStatus === "Validada" ? String(d.validated_by || actor) : null;
+                const nextValidatedAt = nextValidationStatus === "Validada" ? String(d.validated_at || now) : null;
+                db.prepare("UPDATE goods_receipts SET validation_status=?,validated_by=?,validated_at=?,updated_at=? WHERE id=?").run(nextValidationStatus, nextValidatedBy, nextValidatedAt, now, Number(p[2]));
+                if (nextValidationStatus === "Validada" && currentReceipt.purchase_order_id) {
+                  const purchaseOrderId = Number(currentReceipt.purchase_order_id);
+                  const ordered = new Map(db.prepare("SELECT product_id,SUM(quantity) quantity FROM purchase_order_lines WHERE purchase_order_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 GROUP BY product_id").all(purchaseOrderId).map((line) => [Number(line.product_id), Number(line.quantity || 0)]));
+                  const alreadyReceived = new Map(db.prepare("SELECT gl.product_id,SUM(CASE WHEN gl.status='Producto equivocado' THEN 0 ELSE MAX(0,COALESCE(gl.received_quantity,0)-COALESCE(gl.damaged_quantity,0)-COALESCE(gl.substituted_quantity,0)) END) quantity FROM goods_receipt_lines gl JOIN goods_receipts gr ON gr.id=gl.receipt_id WHERE gr.purchase_order_id=? AND gr.validation_status='Validada' AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 AND CAST(COALESCE(gl.deleted,0) AS INTEGER)=0 GROUP BY gl.product_id").all(purchaseOrderId).map((line) => [Number(line.product_id), Number(line.quantity || 0)]));
+                  const partial = [...ordered.entries()].some(([productId, quantity]) => Number(alreadyReceived.get(productId) || 0) + 0.0001 < quantity);
+                  const hasIncident = Boolean(db.prepare("SELECT id FROM goods_receipt_incidents WHERE receipt_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 LIMIT 1").get(Number(p[2])));
+                  db.prepare("UPDATE purchase_orders SET status=?,updated_at=? WHERE id=?").run(hasIncident ? "Recibido con incidencia" : partial ? "Parcialmente recibido" : "Recibido", now, purchaseOrderId);
+                }
+              }
+            }
+            const updatedReceipt = db.prepare("SELECT * FROM goods_receipts WHERE id=?").get(Number(p[2]));
+            recordAudit(actor, "PUT", `goods_receipts/${Number(p[2])}`, "Validar entrada", JSON.stringify({ validation_status: updatedReceipt.validation_status, stock_applied: Number(updatedReceipt.stock_applied || 0) === 1 }));
+            invalidateRelatedReadCaches("goods_receipts");
+            invalidateRelatedReadCaches("inventory_movements");
+            invalidateReadCache("products");
+            return send(res, 200, updatedReceipt);
+          }
+          if (d.stock_applied !== undefined || d.stock_applied_at !== undefined || d.stock_applied_by !== undefined) return send(res, 400, { error: "El estado del stock solo cambia al validar la entrada" });
+          if (d.stock_on_validation !== undefined && Number(currentReceipt.stock_applied || 0) === 1) return send(res, 409, { error: "No se puede cambiar la opción de stock después de incorporarlo" });
           const counterpartyType = String(d.counterparty_type || currentReceipt?.counterparty_type || "Proveedor") === "Cliente" ? "Cliente" : "Proveedor";
           const supplierId = counterpartyType === "Proveedor" ? Number(d.supplier_id ?? currentReceipt?.supplier_id ?? 0) : 0;
           const clientId = counterpartyType === "Cliente" ? Number(d.client_id ?? currentReceipt?.client_id ?? 0) : 0;
@@ -4961,6 +5056,7 @@ export async function crmApiHandler(req, res) {
           if (d.warehouse_id !== undefined && !db.prepare("SELECT id FROM warehouses WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(warehouseId)) return send(res, 400, { error: "El almacén de la entrada no existe" });
           if (d.purchase_order_id && !db.prepare("SELECT id FROM purchase_orders WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(d.purchase_order_id))) return send(res, 400, { error: "El pedido de compra relacionado no existe" });
           if (d.purchase_invoice_id && !db.prepare("SELECT id FROM invoices WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(d.purchase_invoice_id))) return send(res, 400, { error: "La factura de compra relacionada no existe" });
+          if (Number(currentReceipt.stock_applied || 0) === 1 && ((d.warehouse_id !== undefined && Number(d.warehouse_id) !== Number(currentReceipt.warehouse_id)) || (d.receipt_date !== undefined && String(d.receipt_date) !== String(currentReceipt.receipt_date)))) return send(res, 409, { error: "No se puede cambiar el almacén o la fecha después de incorporar el stock. Registra un ajuste de inventario." });
         }
         if (t === "products" && pendingProductPhoto) {
           try {

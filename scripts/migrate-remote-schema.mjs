@@ -29,6 +29,8 @@ const migrationsByTable = {
     ["client_id", "ALTER TABLE goods_receipts ADD COLUMN client_id INTEGER"],
     ["counterparty_type", "ALTER TABLE goods_receipts ADD COLUMN counterparty_type TEXT DEFAULT 'Proveedor'"],
     ["stock_applied", "ALTER TABLE goods_receipts ADD COLUMN stock_applied INTEGER DEFAULT 1"],
+    ["stock_on_validation", "ALTER TABLE goods_receipts ADD COLUMN stock_on_validation INTEGER DEFAULT 1"],
+    ["stock_added_quantity", "ALTER TABLE goods_receipts ADD COLUMN stock_added_quantity REAL DEFAULT -1"],
     ["stock_applied_at", "ALTER TABLE goods_receipts ADD COLUMN stock_applied_at TEXT"],
     ["stock_applied_by", "ALTER TABLE goods_receipts ADD COLUMN stock_applied_by TEXT"],
   ],
