@@ -1878,6 +1878,9 @@ function listSelectFor(resource) {
   if (resource === "delivery_notes") {
     return `delivery_notes.*,(SELECT id FROM shipments WHERE shipments.order_id=delivery_notes.order_id AND CAST(COALESCE(shipments.deleted,0) AS INTEGER)=0 ORDER BY shipments.id DESC LIMIT 1) AS shipment_id`;
   }
+  if (resource === "quotes") {
+    return `quotes.*,(SELECT TRIM(COALESCE(clients.name,'') || CASE WHEN TRIM(COALESCE(clients.city,''))<>'' THEN ' · ' || TRIM(clients.city) ELSE '' END) FROM clients WHERE clients.id=quotes.client_id) AS client_name_snapshot`;
+  }
   if (!["products", "expenses"].includes(resource)) return "*";
   if (!listColumnsCache.has(resource)) {
     const excluded = resource === "products"
