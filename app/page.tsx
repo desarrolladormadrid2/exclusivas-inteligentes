@@ -7077,7 +7077,12 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const preparationAssigneeNames = new Set(preparationAssigneeOptions.map((candidate: any) => String(candidate.username || "")));
   const usesRecordModal = ["Clientes", "Proveedores", "Almacenes", "Lugares de recogida", "Productos", "Cobros"].includes(active);
   const previewLocation = preview ? (lookups.collection_points || []).find((item: any) => Number(item.id) === Number(preview.collection_point_id)) : null;
-  const effectivePreviewClient = previewClient || (preview ? getClient(preview.client_id) : null);
+  const effectivePreviewClient = previewClient || (preview ? getClient(preview.client_id) : null) || (preview?.client_name_snapshot ? {
+    name: preview.client_name_snapshot,
+    tax_id: preview.client_tax_id_snapshot || "",
+    address: preview.client_billing_address_snapshot || preview.client_delivery_address_snapshot || "",
+    city: preview.client_billing_city_snapshot || preview.client_delivery_city_snapshot || "",
+  } : null);
   const previewReceptionDate = preview?.shipping_date || preview?.preparation_date || preparationDateFilter;
   const previewReceptionStart = preview?.delivery_window_start || previewLocation?.opening_time || effectivePreviewClient?.opening_time || "";
   const previewReceptionEnd = preview?.delivery_window_end || previewLocation?.closing_time || effectivePreviewClient?.closing_time || "";
