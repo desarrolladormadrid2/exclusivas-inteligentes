@@ -91,6 +91,7 @@ Estas reglas recogen las decisiones de diseño y funcionamiento acordadas con el
 - Las relaciones visibles para personas (cliente, proveedor, proveedor principal, producto, almacén, pedido y documentos relacionados) deben mostrar nombre o código legible; los IDs numéricos quedan solo para lógica interna, búsquedas o auditoría técnica.
 - Los documentos deben mostrar sus líneas, cantidades, importes, base imponible, IVA y total cuando corresponda.
 - Las acciones deben respetar el flujo: un pedido puede editarse mientras no esté enviado; una incidencia debe dejar trazabilidad de la resolución.
+- En cada bloque se debe comprobar que el usuario puede cambiar el estado de cada registro desde el listado o detalle de ese mismo bloque, que la acción está visible y habilitada cuando corresponde y que respeta el flujo. Revisar expresamente pedidos (nuevo, preparación, enviado y cancelado), albaranes (pendiente, en reparto y entregado) y facturas (proforma, pendiente, parcial, cobrada, vencida y anulada); distinguir estados editables de los calculados desde eventos relacionados (por ejemplo, cobros).
 
 ## Archivos e imágenes externas
 

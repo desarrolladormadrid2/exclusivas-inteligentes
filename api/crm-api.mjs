@@ -1875,6 +1875,9 @@ const lookupProfiles = {
   },
 };
 function listSelectFor(resource) {
+  if (resource === "delivery_notes") {
+    return `delivery_notes.*,(SELECT id FROM shipments WHERE shipments.order_id=delivery_notes.order_id AND CAST(COALESCE(shipments.deleted,0) AS INTEGER)=0 ORDER BY shipments.id DESC LIMIT 1) AS shipment_id`;
+  }
   if (!["products", "expenses"].includes(resource)) return "*";
   if (!listColumnsCache.has(resource)) {
     const excluded = resource === "products"

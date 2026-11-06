@@ -4858,7 +4858,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     const preparationCacheDate = active === "Preparación de pedidos" ? preparationDateFilter : "";
     // Los documentos conservan copias históricas de clientes y productos.
     // Cambiamos su caché para dejar atrás listados guardados antes del snapshot.
-    const cacheKeyPrefix = ["invoices", "payments", "delivery_notes", "shipments", "returns", "order_lines", "delivery_note_lines"].includes(c.api) ? "excluvas.listado.v4" : "excluvas.listado.v3";
+    const cacheKeyPrefix = ["invoices", "payments", "delivery_notes", "shipments", "returns", "order_lines", "delivery_note_lines"].includes(c.api) ? "excluvas.listado.v5" : "excluvas.listado.v3";
     const cacheKey = `${cacheKeyPrefix}.${c.api}.${preparationCacheDate || "all-dates"}.${showDeleted ? "deleted" : "active"}.${showInactive ? "all-statuses" : "active-only"}`;
     const applyList = (value: any[]) => {
       const enrichedRows = c.api === "orders"
@@ -5556,8 +5556,10 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     openPaymentForInvoice(invoice);
   }
   async function setDeliveryNoteDeliveryStatus(note: any) {
-    const shipment = (lookups.shipments || []).find((item: any) => Number(item.order_id) === Number(note?.order_id));
-    if (!shipment) {
+    const shipment = note?.shipment_id
+      ? { id: Number(note.shipment_id) }
+      : (lookups.shipments || []).find((item: any) => Number(item.order_id) === Number(note?.order_id));
+    if (!shipment?.id) {
       setError("Este albarán no tiene un envío asociado. Crea primero la nota de carga desde el pedido.");
       return;
     }
@@ -8175,7 +8177,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                         )}
                         {active === "Albaranes" && (
                           <>
-                            {(() => { const shipment = (lookups.shipments || []).find((item: any) => Number(item.order_id) === Number(r.order_id)); return <button type="button" className="row-action primary" disabled={!shipment} title={!shipment ? "El albarán no tiene un envío asociado" : undefined} onClick={() => void setDeliveryNoteDeliveryStatus(r)}>{!shipment ? "Sin envío" : r.status === "Entregado" ? "Reabrir entrega" : "Marcar entregado"}</button>; })()}
+                            {(() => { const hasShipment = Boolean(r.shipment_id || (lookups.shipments || []).some((item: any) => Number(item.order_id) === Number(r.order_id))); return <button type="button" className="row-action primary" disabled={!hasShipment} title={!hasShipment ? "El albarán no tiene un envío asociado" : undefined} onClick={() => void setDeliveryNoteDeliveryStatus(r)}>{!hasShipment ? "Sin envío" : r.status === "Entregado" ? "Reabrir entrega" : "Marcar entregado"}</button>; })()}
                             <button className="row-action workflow" onClick={() => void openCommercialDocumentPdf(r, "delivery")}>Ver PDF</button>
                             <button className="row-action" onClick={() => void copyCommercialDocumentLink(r, "delivery")}>Compartir enlace</button>
                             <button className="row-action workflow" onClick={() => convertDeliveryToInvoice(r)}>Crear factura</button>

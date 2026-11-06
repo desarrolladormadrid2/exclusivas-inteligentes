@@ -256,6 +256,14 @@ test("albaranes y envíos conservan sus nombres históricos de cliente y product
     delivery = created.data;
     const storedDelivery = await call(`/delivery_notes/${delivery.id}`);
     assert.equal(storedDelivery.data.client_name_snapshot, client.name);
+    const listedDelivery = (await call("/delivery_notes")).data.find((row) => Number(row.id) === Number(delivery.id));
+    assert.equal(Number(listedDelivery?.shipment_id), Number(shipment.id));
+    const markedDelivered = await call(`/shipments/${listedDelivery.shipment_id}/delivery-status`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "Entregado" }) });
+    assert.equal(markedDelivered.status, 200);
+    assert.equal((await call(`/delivery_notes/${delivery.id}`)).data.status, "Entregado");
+    const reopened = await call(`/shipments/${listedDelivery.shipment_id}/delivery-status`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "Enviado" }) });
+    assert.equal(reopened.status, 200);
+    assert.equal((await call(`/delivery_notes/${delivery.id}`)).data.status, "Pendiente");
     const deliveryLines = (await call("/delivery_note_lines")).data;
     assert.ok(deliveryLines.some((row) => Number(row.delivery_note_id) === Number(delivery.id) && row.product_name_snapshot === product.name));
     await call(`/clients/${client.id}`, { method: "DELETE" });
