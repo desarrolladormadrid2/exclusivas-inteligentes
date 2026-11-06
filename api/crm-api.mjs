@@ -396,7 +396,9 @@ function recalculateInvoiceTax(invoiceId, actor = "Sistema") {
   if (!id) return null;
   const invoice = db.prepare("SELECT i.*,c.equivalence_surcharge_enabled client_equivalence_surcharge_enabled FROM invoices i LEFT JOIN clients c ON c.id=i.client_id WHERE i.id=? AND CAST(COALESCE(i.deleted,0) AS INTEGER)=0").get(id);
   if (!invoice) return null;
-  const lines = db.prepare("SELECT * FROM invoice_lines WHERE invoice_id=? ORDER BY id").all(id);
+  if (!["Proforma", "Anulada"].includes(String(invoice.status || ""))) appendGtrInvoiceLine(id);
+  const activeLineFilter = hasColumn("invoice_lines", "deleted") ? " AND CAST(COALESCE(deleted,0) AS INTEGER)=0" : "";
+  const lines = db.prepare(`SELECT * FROM invoice_lines WHERE invoice_id=?${activeLineFilter} ORDER BY id`).all(id);
   if (!lines.length) return invoice;
   const enabled = Boolean(Number(invoice.equivalence_surcharge_enabled ?? invoice.client_equivalence_surcharge_enabled ?? 0));
   const totals = calculateInvoiceTotals(lines, enabled);
@@ -477,9 +479,12 @@ function markInvoicePdfStale(invoiceId) {
 }
 function ensureGtrServiceProduct() {
   const existing = db.prepare("SELECT id FROM products WHERE sku='GTR-SERVICIO' AND CAST(COALESCE(deleted,0) AS INTEGER)=0 LIMIT 1").get();
-  if (existing) return Number(existing.id);
+  if (existing) {
+    db.prepare("UPDATE products SET active=0,product_status='Servicio',stock=0,stock_reserved=0 WHERE id=?").run(Number(existing.id));
+    return Number(existing.id);
+  }
   const now = new Date().toISOString();
-  const created = db.prepare("INSERT INTO products(name,sku,description,unit,unit_price,cost_price,vat,accounting_product_group,accounting_vat_group,inventory_register_group,product_status,active,preorder,stock,stock_reserved,stock_min,stock_target,stock_safety,created_at,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run("Gestión de Tratamiento de Residuos (GTR)", "GTR-SERVICIO", "Servicio asociado de gestión de tratamiento de residuos.", "servicio", 1.17, 0, 21, "Servicios", "21%", "Servicios", "Servicio", 1, 0, 0, 0, 0, 0, 0, now, "Sistema");
+  const created = db.prepare("INSERT INTO products(name,sku,description,unit,unit_price,cost_price,vat,accounting_product_group,accounting_vat_group,inventory_register_group,product_status,active,preorder,stock,stock_reserved,stock_min,stock_target,stock_safety,created_at,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run("Gestión de Tratamiento de Residuos (GTR)", "GTR-SERVICIO", "Servicio asociado de gestión de tratamiento de residuos.", "servicio", 1.17, 0, 21, "Servicios", "21%", "Servicios", "Servicio", 0, 0, 0, 0, 0, 0, 0, now, "Sistema");
   recordAudit("Sistema", "POST", `products/${Number(created.lastInsertRowid)}`, "Crear servicio GTR", "Concepto GTR · 1,17 € · IVA 21% · cuenta 70500000");
   return Number(created.lastInsertRowid);
 }
@@ -491,8 +496,13 @@ function appendGtrDeliveryLine(deliveryNoteId) {
 }
 function appendGtrInvoiceLine(invoiceId) {
   const productId = ensureGtrServiceProduct();
-  const existing = db.prepare("SELECT id FROM invoice_lines WHERE invoice_id=? AND (line_type='GTR' OR product_id=?) LIMIT 1").get(Number(invoiceId), productId);
-  if (existing) return;
+  const activeLineFilter = hasColumn("invoice_lines", "deleted") ? " AND CAST(COALESCE(deleted,0) AS INTEGER)=0" : "";
+  const existing = db.prepare(`SELECT id FROM invoice_lines WHERE invoice_id=? AND (line_type='GTR' OR product_id=?)${activeLineFilter} ORDER BY id LIMIT 1`).get(Number(invoiceId), productId);
+  if (existing) {
+    const restoreDeleted = hasColumn("invoice_lines", "deleted") ? ",deleted=0" : "";
+    db.prepare(`UPDATE invoice_lines SET product_id=?,quantity=1,unit_price=1.17,discount=0,vat=21,amount=1.17,description='Gestión de Tratamiento de Residuos (GTR)',line_type='GTR',accounting_account='70500000'${restoreDeleted} WHERE id=?`).run(productId, Number(existing.id));
+    return;
+  }
   db.prepare("INSERT INTO invoice_lines(invoice_id,product_id,quantity,unit_price,discount,vat,amount,description,line_type,accounting_account) VALUES(?,?,?,?,?,?,?,?,?,?)").run(Number(invoiceId), productId, 1, 1.17, 0, 21, 1.17, "Gestión de Tratamiento de Residuos (GTR)", "GTR", "70500000");
 }
 function invoiceShareUrl(req, token) {
@@ -1034,7 +1044,7 @@ if (!remoteMode) {
 db.exec(
   `CREATE TABLE IF NOT EXISTS order_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,order_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity REAL DEFAULT 0,unit_price REAL DEFAULT 0,discount REAL DEFAULT 0,vat REAL DEFAULT 21,amount REAL DEFAULT 0,barcode_scanned_code TEXT,barcode_scan_status TEXT DEFAULT 'pending',barcode_scanned_at TEXT,barcode_scanned_by TEXT);CREATE TABLE IF NOT EXISTS quote_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,quote_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity REAL DEFAULT 0,unit_price REAL DEFAULT 0,discount REAL DEFAULT 0,vat REAL DEFAULT 21,amount REAL DEFAULT 0);CREATE TABLE IF NOT EXISTS delivery_note_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,delivery_note_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity REAL DEFAULT 0);CREATE TABLE IF NOT EXISTS invoice_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity REAL DEFAULT 0,unit_price REAL DEFAULT 0,discount REAL DEFAULT 0,vat REAL DEFAULT 21,amount REAL DEFAULT 0);`,
 );
-for (const [table, columns] of [["delivery_note_lines", ["description TEXT", "unit_price REAL DEFAULT 0", "vat REAL DEFAULT 21", "amount REAL DEFAULT 0", "line_type TEXT", "accounting_account TEXT"]], ["invoice_lines", ["description TEXT", "line_type TEXT", "accounting_account TEXT"]]]) {
+for (const [table, columns] of [["delivery_note_lines", ["description TEXT", "unit_price REAL DEFAULT 0", "vat REAL DEFAULT 21", "amount REAL DEFAULT 0", "line_type TEXT", "accounting_account TEXT"]], ["invoice_lines", ["description TEXT", "line_type TEXT", "accounting_account TEXT", "equivalence_surcharge_percent REAL DEFAULT 0", "equivalence_surcharge_amount REAL DEFAULT 0"]]]) {
   for (const column of columns) { try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${column}`); } catch {} }
 }
 // Snapshots para que el histórico siga legible aunque sus fichas maestras se
@@ -1069,6 +1079,10 @@ try { db.exec(`
    WHERE product_name_snapshot IS NULL OR TRIM(product_name_snapshot)='';
 `); } catch {}
 db.exec(`CREATE TABLE IF NOT EXISTS invoice_orders(id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_id INTEGER NOT NULL,order_id INTEGER NOT NULL,UNIQUE(invoice_id,order_id),UNIQUE(order_id));`);
+// Estas cachés se inicializan antes de la reconciliación de arranque porque
+// el recálculo de facturas puede invalidarlas durante esa primera pasada.
+const readCache = new Map();
+const schemaColumnsCache = new Map();
 if (!remoteMode) {
   try { db.exec("INSERT OR IGNORE INTO invoice_orders(invoice_id,order_id) SELECT id,order_id FROM invoices WHERE order_id IS NOT NULL"); } catch {}
 }
@@ -1098,6 +1112,36 @@ try {
       Number(payment.id),
     );
     recordAudit("Sistema", "SYSTEM", `payments/${Number(payment.id)}/void`, "Anular cobro huérfano", JSON.stringify({ payment_id: Number(payment.id), invoice_id: Number(payment.invoice_id), amount: Number(payment.amount || 0) }));
+  }
+  const invoiceLineDeletedFilter = hasColumn("invoice_lines", "deleted") ? "CAST(COALESCE(l.deleted,0) AS INTEGER)=0 AND" : "";
+  const invoiceGtrDeletedFilter = hasColumn("invoice_lines", "deleted") ? "CAST(COALESCE(g.deleted,0) AS INTEGER)=0 AND" : "";
+  const openInvoicesMissingGtr = db.prepare(`
+    SELECT i.id,i.amount,COALESCE(SUM(CASE WHEN p.id IS NOT NULL
+      AND CAST(COALESCE(p.deleted,0) AS INTEGER)=0
+      AND COALESCE(p.status,'Aplicado')<>'Anulado'
+      AND p.voided_at IS NULL THEN p.amount ELSE 0 END),0) paid_amount
+    FROM invoices i
+    LEFT JOIN payments p ON p.invoice_id=i.id
+    WHERE CAST(COALESCE(i.deleted,0) AS INTEGER)=0
+      AND COALESCE(i.status,'Pendiente') NOT IN ('Anulada','Proforma','Cobrada','Pagada')
+      AND EXISTS(SELECT 1 FROM invoice_lines l WHERE l.invoice_id=i.id AND ${invoiceLineDeletedFilter} COALESCE(l.line_type,'')<>'GTR')
+      AND NOT EXISTS(SELECT 1 FROM invoice_lines g LEFT JOIN products gp ON gp.id=g.product_id WHERE g.invoice_id=i.id AND ${invoiceGtrDeletedFilter} (g.line_type='GTR' OR gp.sku='GTR-SERVICIO'))
+    GROUP BY i.id
+    HAVING COALESCE(SUM(CASE WHEN p.id IS NOT NULL
+      AND CAST(COALESCE(p.deleted,0) AS INTEGER)=0
+      AND COALESCE(p.status,'Aplicado')<>'Anulado'
+      AND p.voided_at IS NULL THEN p.amount ELSE 0 END),0) < MAX(i.amount)-0.01
+  `).all();
+  for (const invoice of openInvoicesMissingGtr) {
+    const previousAmount = Number(invoice.amount || 0);
+    appendGtrInvoiceLine(Number(invoice.id));
+    const totals = recalculateInvoiceTax(Number(invoice.id), "Sistema");
+    markInvoicePdfStale(Number(invoice.id));
+    recordAudit("Sistema", "SYSTEM", `invoices/${Number(invoice.id)}/gtr`, "Regularizar GTR en factura abierta", JSON.stringify({ invoice_id: Number(invoice.id), previous_amount: previousAmount, amount: Number(totals?.amount || 0), paid_amount: Number(invoice.paid_amount || 0), gtr_base: 1.17, gtr_vat: 21, accounting_account: "70500000" }));
+  }
+  if (openInvoicesMissingGtr.length) {
+    invalidateReadCache("invoice_lines");
+    invalidateReadCache("invoices");
   }
   const invoiceRows = db.prepare(`
     SELECT i.id,i.amount,i.status,i.due_date,
@@ -1130,7 +1174,9 @@ try {
     }
     try { syncOrderStatusFromInvoice(Number(invoice.id)); } catch {}
   }
-} catch {}
+} catch (error) {
+  console.error("No se pudieron reconciliar facturas y cobros al iniciar el CRM:", error);
+}
 for (const column of [
   "pdf_public_id TEXT",
   "pdf_url TEXT",
@@ -1807,11 +1853,9 @@ async function sendPortalOrderEmail(order, shareUrl, recipient) {
   if (!response.ok) throw new Error(result?.message || result?.error || "El proveedor de correo rechazó el aviso del pedido");
   return { mode: "resend", provider_id: result.id || null, to, share_url: shareUrl };
 }
-const readCache = new Map();
 const READ_CACHE_MS = 60000;
 const REMOTE_READ_CACHE_MS = 5000;
 const listColumnsCache = new Map();
-const schemaColumnsCache = new Map();
 function hasColumn(resource, column) {
   const key = `${resource}:${column}`;
   if (!schemaColumnsCache.has(key)) {
@@ -5007,6 +5051,10 @@ export async function crmApiHandler(req, res) {
           const names = stockAlerts.map((item) => db.prepare("SELECT name FROM products WHERE id=?").get(item.product_id)?.name || `Producto #${item.product_id}`);
           db.prepare("INSERT INTO notes(title,content,priority,module,record_id,important,completed,created_at) VALUES(?,?,?,?,?,?,?,?)").run(`Revisar stock · ${d.code || "Nuevo pedido"}`, `El pedido queda reservado, pero ${names.join(", ")} quedará por debajo del stock mínimo o sin unidades suficientes. Revisa reposición antes de preparar.`, stockShortages.length ? "Urgente" : "Alta", "Stock", Number(r.lastInsertRowid), 1, 0, now);
         }
+        if (t === "invoices") {
+          const totals = recalculateInvoiceTax(Number(r.lastInsertRowid), actor);
+          if (totals) Object.assign(d, { amount: totals.amount, base_amount: totals.base_amount, vat_amount: totals.vat_amount, equivalence_surcharge_amount: totals.equivalence_surcharge_amount, equivalence_surcharge_breakdown: JSON.stringify(totals.equivalence_surcharge_breakdown || []) });
+        }
         if (t === "invoice_lines" && d.invoice_id) { recalculateInvoiceTax(d.invoice_id, actor); markInvoicePdfStale(d.invoice_id); }
         if (t === "order_lines" && d.order_id) markCommercialDocumentPdfStale("order", d.order_id);
         if (t === "quote_lines" && d.quote_id) markCommercialDocumentPdfStale("quote", d.quote_id);
@@ -5476,7 +5524,11 @@ export async function crmApiHandler(req, res) {
           recordAudit(actor, "PUT", `purchase_orders/${Number(p[2])}`, "Editar líneas de pedido a proveedor", JSON.stringify({ lines: purchaseOrderLinesToReplace.length, amount: d.amount }));
         }
         if (t === "payments" && currentRecord.invoice_id) recalculateInvoicePaymentStatus(currentRecord.invoice_id, actor);
-        if (t === "invoices" && String(d.status || "") !== "Anulada") recalculateInvoicePaymentStatus(Number(p[2]), actor);
+        if (t === "invoices" && String(d.status ?? currentRecord.status ?? "Pendiente") !== "Anulada") {
+          const totals = recalculateInvoiceTax(Number(p[2]), actor);
+          if (totals) Object.assign(d, { amount: totals.amount, base_amount: totals.base_amount, vat_amount: totals.vat_amount, equivalence_surcharge_amount: totals.equivalence_surcharge_amount, equivalence_surcharge_breakdown: JSON.stringify(totals.equivalence_surcharge_breakdown || []) });
+          recalculateInvoicePaymentStatus(Number(p[2]), actor);
+        }
         if (t === "order_lines" && normalizedLotAllocations) {
           db.prepare("DELETE FROM order_line_lots WHERE order_line_id=?").run(Number(p[2]));
           const insertLotAllocation = db.prepare("INSERT INTO order_line_lots(order_line_id,lot_id,lot_code,expiry_date,quantity,created_at,updated_at) VALUES(?,?,?,?,?,?,?)");

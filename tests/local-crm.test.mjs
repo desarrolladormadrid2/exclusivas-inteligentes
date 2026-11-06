@@ -153,6 +153,32 @@ test("un pedido conserva sus líneas al convertirlo en albarán y factura", asyn
   await call(`/clients/${client.id}`, { method: "DELETE" });
 });
 
+test("las facturas añaden GTR una sola vez y mantienen el saldo tras un cobro parcial", async () => {
+  const client = (await call("/clients", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "__TEST_CLIENTE_GTR__" }) })).data;
+  const product = (await call("/products", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "__TEST_PRODUCTO_GTR__", unit_price: 100, vat: 21 }) })).data;
+  const invoice = (await call("/invoices", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: `__TEST_GTR_${Date.now()}`, client_id: client.id, amount: 100, status: "Pendiente" }) })).data;
+  const item = await call("/invoice_lines", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ invoice_id: invoice.id, product_id: product.id, quantity: 1, unit_price: 100, vat: 21, amount: 100 }) });
+  assert.equal(item.status, 201);
+  let lines = (await call("/invoice_lines")).data.filter((line) => line.invoice_id === invoice.id);
+  assert.equal(lines.filter((line) => line.line_type === "GTR").length, 1);
+  assert.equal(lines.find((line) => line.line_type === "GTR").accounting_account, "70500000");
+  let current = (await call("/invoices")).data.find((row) => row.id === invoice.id);
+  assert.equal(Number(current.base_amount), 101.17);
+  assert.equal(Number(current.vat_amount), 21.25);
+  assert.equal(Number(current.amount), 122.42);
+  const payment = await call("/payments", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ invoice_id: invoice.id, amount: 10, method: "Transferencia" }) });
+  assert.equal(payment.status, 201);
+  current = (await call("/invoices")).data.find((row) => row.id === invoice.id);
+  assert.equal(current.status, "Parcial");
+  assert.equal(Number(current.amount), 122.42);
+  lines = (await call("/invoice_lines")).data.filter((line) => line.invoice_id === invoice.id);
+  assert.equal(lines.filter((line) => line.line_type === "GTR").length, 1);
+  await call(`/payments/${payment.data.id}`, { method: "DELETE" });
+  await call(`/invoices/${invoice.id}`, { method: "DELETE" });
+  await call(`/products/${product.id}`, { method: "DELETE" });
+  await call(`/clients/${client.id}`, { method: "DELETE" });
+});
+
 test("una entrada de almacén actualiza el stock real", async () => {
   const product = (await call("/products", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "__TEST_ENTRADA__", stock: 1 }) })).data;
   const before = (await call("/products")).data.find((x) => x.id === product.id).stock;
