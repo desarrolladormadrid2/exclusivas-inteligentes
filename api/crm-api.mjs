@@ -505,6 +505,20 @@ function appendGtrInvoiceLine(invoiceId) {
   }
   db.prepare("INSERT INTO invoice_lines(invoice_id,product_id,quantity,unit_price,discount,vat,amount,description,line_type,accounting_account) VALUES(?,?,?,?,?,?,?,?,?,?)").run(Number(invoiceId), productId, 1, 1.17, 0, 21, 1.17, "Gestión de Tratamiento de Residuos (GTR)", "GTR", "70500000");
 }
+function ensureLegacyInvoiceBaseLine(invoice) {
+  const id = Number(invoice?.id || 0);
+  if (!id) return;
+  const activeLineFilter = hasColumn("invoice_lines", "deleted") ? " AND CAST(COALESCE(deleted,0) AS INTEGER)=0" : "";
+  const existing = db.prepare(`SELECT id FROM invoice_lines WHERE invoice_id=? AND COALESCE(line_type,'')<>'GTR'${activeLineFilter} LIMIT 1`).get(id);
+  if (existing) return;
+  const vat = Math.max(0, Number(invoice.vat || 21));
+  const storedBase = Number(invoice.base_amount || 0);
+  const previousTotal = Math.max(0, Number(invoice.amount || 0));
+  const originalBase = Math.round((storedBase > 0 ? storedBase : previousTotal / (1 + vat / 100) + Number.EPSILON) * 100) / 100;
+  if (!originalBase) return;
+  db.prepare("INSERT INTO invoice_lines(invoice_id,product_id,quantity,unit_price,discount,vat,amount,description,line_type) VALUES(?,?,?,?,?,?,?,?,?)")
+    .run(id, 0, 1, originalBase, 0, vat, originalBase, "Importe original de factura (sin desglose)", "LegacyBase");
+}
 function invoiceShareUrl(req, token) {
   const host = String(req.headers.host || "exclusivas-inteligentes.vercel.app");
   const protocol = host.startsWith("localhost") || host.startsWith("127.") ? "http" : "https";
@@ -1114,9 +1128,10 @@ try {
     recordAudit("Sistema", "SYSTEM", `payments/${Number(payment.id)}/void`, "Anular cobro huérfano", JSON.stringify({ payment_id: Number(payment.id), invoice_id: Number(payment.invoice_id), amount: Number(payment.amount || 0) }));
   }
   const invoiceLineDeletedFilter = hasColumn("invoice_lines", "deleted") ? "CAST(COALESCE(l.deleted,0) AS INTEGER)=0 AND" : "";
+  const invoiceLineActiveCondition = hasColumn("invoice_lines", "deleted") ? " AND CAST(COALESCE(l.deleted,0) AS INTEGER)=0" : "";
   const invoiceGtrDeletedFilter = hasColumn("invoice_lines", "deleted") ? "CAST(COALESCE(g.deleted,0) AS INTEGER)=0 AND" : "";
   const openInvoicesMissingGtr = db.prepare(`
-    SELECT i.id,i.amount,COALESCE(SUM(CASE WHEN p.id IS NOT NULL
+    SELECT i.id,i.amount,i.base_amount,COALESCE(SUM(CASE WHEN p.id IS NOT NULL
       AND CAST(COALESCE(p.deleted,0) AS INTEGER)=0
       AND COALESCE(p.status,'Aplicado')<>'Anulado'
       AND p.voided_at IS NULL THEN p.amount ELSE 0 END),0) paid_amount
@@ -1124,7 +1139,8 @@ try {
     LEFT JOIN payments p ON p.invoice_id=i.id
     WHERE CAST(COALESCE(i.deleted,0) AS INTEGER)=0
       AND COALESCE(i.status,'Pendiente') NOT IN ('Anulada','Proforma','Cobrada','Pagada')
-      AND EXISTS(SELECT 1 FROM invoice_lines l WHERE l.invoice_id=i.id AND ${invoiceLineDeletedFilter} COALESCE(l.line_type,'')<>'GTR')
+      AND (EXISTS(SELECT 1 FROM invoice_lines l WHERE l.invoice_id=i.id AND ${invoiceLineDeletedFilter} COALESCE(l.line_type,'')<>'GTR')
+        OR NOT EXISTS(SELECT 1 FROM invoice_lines l WHERE l.invoice_id=i.id${invoiceLineActiveCondition}))
       AND NOT EXISTS(SELECT 1 FROM invoice_lines g LEFT JOIN products gp ON gp.id=g.product_id WHERE g.invoice_id=i.id AND ${invoiceGtrDeletedFilter} (g.line_type='GTR' OR gp.sku='GTR-SERVICIO'))
     GROUP BY i.id
     HAVING COALESCE(SUM(CASE WHEN p.id IS NOT NULL
@@ -1134,6 +1150,7 @@ try {
   `).all();
   for (const invoice of openInvoicesMissingGtr) {
     const previousAmount = Number(invoice.amount || 0);
+    ensureLegacyInvoiceBaseLine(invoice);
     appendGtrInvoiceLine(Number(invoice.id));
     const totals = recalculateInvoiceTax(Number(invoice.id), "Sistema");
     markInvoicePdfStale(Number(invoice.id));
