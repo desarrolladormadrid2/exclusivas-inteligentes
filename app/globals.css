@@ -7409,28 +7409,30 @@ body.reparto-modal-open {
   .logistics-returns-list .table-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 7px; }
   .logistics-shipments-list .table-tools-primary,
   .logistics-shipments-list .table-tools-filters,
-  .logistics-stock-out-list .table-tools-primary,
-  .logistics-stock-out-list .table-tools-filters,
   .logistics-returns-list .table-tools-primary,
   .logistics-returns-list .table-tools-filters { display: contents; }
   .logistics-shipments-list .table-tools-primary > input,
-  .logistics-stock-out-list .table-tools-primary > input,
   .logistics-returns-list .table-tools-primary > input { flex: 1 1 250px; min-width: 180px; }
   .logistics-shipments-list .table-tools-primary .saved-views,
-  .logistics-stock-out-list .table-tools-primary .saved-views,
   .logistics-returns-list .table-tools-primary .saved-views { flex: 0 1 auto; width: auto; overflow: visible; white-space: nowrap; }
   .logistics-shipments-list .table-tools-filters .list-filter-field,
-  .logistics-stock-out-list .table-tools-filters .list-filter-field,
   .logistics-returns-list .table-tools-filters .list-filter-field { display: inline-flex; flex: 0 1 auto; width: auto; gap: 4px; white-space: nowrap; }
   .logistics-shipments-list .table-tools-filters .list-filter-field input,
-  .logistics-stock-out-list .table-tools-filters .list-filter-field input,
   .logistics-returns-list .table-tools-filters .list-filter-field input { width: 108px; min-width: 90px; }
   .logistics-shipments-list .table-tools-filters .list-filter-field select,
-  .logistics-stock-out-list .table-tools-filters .list-filter-field select,
   .logistics-returns-list .table-tools-filters .list-filter-field select { width: 128px; min-width: 100px; }
   .logistics-shipments-list .table-tools-filters > .deleted-toggle,
-  .logistics-stock-out-list .table-tools-filters > .deleted-toggle,
   .logistics-returns-list .table-tools-filters > .deleted-toggle { flex: 0 0 auto; width: auto; min-width: 118px; margin: 0 !important; }
+
+  .logistics-stock-out-list .table-tools { flex-wrap: nowrap; overflow-x: auto; }
+  .logistics-stock-out-list .table-tools-primary,
+  .logistics-stock-out-list .table-tools-filters { display: contents; }
+  .logistics-stock-out-list .table-tools-primary > input { flex: 1 1 200px; min-width: 150px; }
+  .logistics-stock-out-list .table-tools-primary .saved-views { flex: 0 1 auto; width: auto; overflow: visible; white-space: nowrap; }
+  .logistics-stock-out-list .table-tools-filters .list-filter-field { display: inline-flex; flex: 0 1 auto; width: auto; gap: 4px; white-space: nowrap; }
+  .logistics-stock-out-list .table-tools-filters .list-filter-field input { width: 96px; min-width: 82px; }
+  .logistics-stock-out-list .table-tools-filters .list-filter-field select { width: 116px; min-width: 96px; }
+  .logistics-stock-out-list .table-tools-filters > .deleted-toggle { flex: 0 0 auto; width: auto; min-width: 118px; margin: 0 !important; }
 
   .logistics-warehouses-list .table-tools,
   .logistics-collection-list .table-tools { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; }
@@ -7449,6 +7451,5 @@ body.reparto-modal-open {
 @media (max-width: 1199px) {
   .logistics-products-list .product-bulk-toolbar > span { margin-right: 0; }
   .logistics-shipments-list .table-tools,
-  .logistics-stock-out-list .table-tools,
   .logistics-returns-list .table-tools { display: grid; gap: 7px; }
 }
