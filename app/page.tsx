@@ -4963,7 +4963,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       Pedidos: ["clients", "shipments", "invoices", "payments"],
       Presupuestos: ["clients"],
       Albaranes: ["clients", "orders"],
-      Facturas: ["clients"],
+      Facturas: ["clients", "payments"],
       // Cobros ya es el listado de payments. Solo necesitamos las facturas
       // para mostrar el código y el cliente relacionado; volver a descargar
       // payments como lookup duplica la consulta y sobrecarga Turso.
