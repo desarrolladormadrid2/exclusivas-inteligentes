@@ -7033,10 +7033,11 @@ body.reparto-modal-open {
 .supplier-product-suggestions small { color: #596570; }
 .supplier-recurring-check { display: flex !important; align-items: center; gap: 6px !important; white-space: nowrap; }
 .supplier-recurring-check input { width: auto !important; }
-.supplier-alias-remember { display: flex; align-items: center; gap: 7px; padding: 7px 9px; border: 1px solid #e0e4e7; color: #3f4851; font-size: 12px; }
-.supplier-alias-remember input { width: auto !important; }
 .supplier-order-lines { display: grid; gap: 6px; }
-.supplier-order-line { display: grid; grid-template-columns: minmax(150px, 1.4fr) minmax(85px, .55fr) minmax(110px, .8fr) minmax(90px, .6fr) auto 28px; align-items: end; gap: 8px; padding: 8px; border: 1px solid #e0e4e7; }
+.supplier-order-line { display: grid; grid-template-columns: minmax(130px, 1.1fr) minmax(110px, .85fr) minmax(85px, .6fr) minmax(100px, .75fr) minmax(85px, .6fr) auto 28px; align-items: end; gap: 8px; padding: 8px; border: 1px solid #e0e4e7; }
+.supplier-order-line-reference { display: grid; align-self: end; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.supplier-order-line-reference > small { color: #3f4851; font-size: 12px; font-weight: 700; }
+.supplier-order-line-reference > b { font-size: 13px; font-weight: 500; }
 .supplier-order-line > strong { align-self: center; white-space: nowrap; }
 .supplier-order-line > button { border: 0; background: transparent; font-size: 20px; cursor: pointer; }
 .supplier-order-builder-footer { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 8px; border-top: 1px solid #e2e5e8; padding-top: 10px; }
@@ -7048,7 +7049,6 @@ body.reparto-modal-open {
   .supplier-line-adder { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .supplier-line-adder .supplier-product-search { grid-column: span 2; }
   .supplier-recurring-check { grid-column: span 2; white-space: normal; }
-  .supplier-alias-remember { align-items: flex-start; }
 }
 .supplier-recurrent-panel { display: grid; gap: 8px; border: 1px solid #e1e5e8; padding: 10px; }
 .supplier-recurrent-panel > div:first-child { display: grid; gap: 3px; }
@@ -7203,6 +7203,8 @@ body.reparto-modal-open {
   .supplier-orders-tools { grid-template-columns: minmax(0, 1fr) minmax(160px, .8fr); }
   .supplier-order-row { grid-template-columns: minmax(0, 1fr); }
   .supplier-order-actions { justify-content: flex-start; }
+  .supplier-order-line { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .supplier-order-line > div, .supplier-order-line-reference { grid-column: span 2; }
   .supplier-line-adder { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .supplier-order-edit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .supplier-order-edit-notes { grid-column: span 2; }
@@ -7243,8 +7245,8 @@ body.reparto-modal-open {
   .supplier-recurrent-new > b { grid-column: auto; }
   .supplier-ocr-unmatched article { grid-template-columns: minmax(0, 1fr); }
   .supplier-ocr-unmatched article > span { grid-column: auto; }
-  .supplier-order-line { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; }
-  .supplier-order-line > div { grid-column: span 2; }
+   .supplier-order-line { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; }
+   .supplier-order-line > div, .supplier-order-line-reference { grid-column: span 2; }
   .supplier-order-line > strong { justify-self: start; }
   .supplier-order-line > button { justify-self: end; }
   .supplier-order-builder-footer { justify-content: stretch; }
@@ -7491,12 +7493,42 @@ body.reparto-modal-open {
 .supplier-purchasing-page > .supplier-purchase-tabs { display: none; }
 .supplier-purchasing-page .supplier-order-builder-head { display: none; }
 .supplier-purchasing-page .supplier-line-adder { margin-top: 10px; padding-top: 10px; border-top: 1px solid #d7dce1; }
+.supplier-purchasing-page .supplier-line-adder { grid-template-columns: minmax(180px, 1.45fr) minmax(150px, 1.1fr) minmax(100px, .8fr) minmax(90px, .65fr) minmax(110px, .8fr) auto auto; }
 .supplier-manager-head { display: grid; grid-template-columns: minmax(180px, auto) minmax(0, 1fr) auto; align-items: center; gap: 10px; margin-bottom: 0; }
 .supplier-manager-title .eyebrow { margin-bottom: 2px; }
 .supplier-manager-title h2 { margin: 0; }
 .supplier-manager-title .muted { display: none; }
 .supplier-manager-actions { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .supplier-manager-head > .supplier-purchase-tabs { min-width: 0; justify-content: center; border-bottom: 0; }
+
+/* Pedidos: encabezado limpio y filtros en dos filas compactas. */
+@media (min-width: 1400px) {
+  .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; row-gap: 8px; }
+  .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head { display: flex; grid-column: 1; grid-row: auto; margin: 0; }
+  .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head > div:first-child,
+  .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head > div:last-child { grid-column: auto; grid-row: auto; }
+  .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel { display: block; grid-column: 1; grid-row: auto; }
+  .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel > .table-tools { display: grid; grid-column: 1; grid-row: auto; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 8px; border-bottom: 1px solid #d1d5db; background: #fafafa; }
+  .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary { display: grid; grid-template-columns: minmax(220px, 1fr) auto auto; align-items: center; gap: 7px; }
+  .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary > input { width: 100%; min-width: 0; }
+  .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary .saved-views { grid-column: 1 / -1; width: 100%; }
+  .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); align-items: end; gap: 6px; padding: 0; }
+  .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters > .billing-filter-select,
+  .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters > .list-filter-field,
+  .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters > .deleted-toggle { width: 100%; min-width: 0; box-sizing: border-box; }
+  .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; gap: 3px; white-space: normal; }
+  .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field input,
+  .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field select { width: 100%; min-width: 0; }
+}
+@media (min-width: 651px) and (max-width: 1399px) {
+  .manager.sales-order-list .table-tools-filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .manager.sales-order-list .table-tools-filters .list-filter-field { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; gap: 3px; white-space: normal; }
+  .manager.sales-order-list .table-tools-filters > .billing-filter-select,
+  .manager.sales-order-list .table-tools-filters .list-filter-field,
+  .manager.sales-order-list .table-tools-filters > .deleted-toggle { width: 100%; min-width: 0; box-sizing: border-box; }
+  .manager.sales-order-list .table-tools-filters .list-filter-field input,
+  .manager.sales-order-list .table-tools-filters .list-filter-field select { width: 100%; min-width: 0; }
+}
 .supplier-manager-head > .supplier-purchase-tabs button { padding: 8px 9px; white-space: nowrap; }
 .supplier-recurring-check { display: none !important; }
 @media (max-width: 1200px) {

@@ -2543,6 +2543,32 @@ export async function crmApiHandler(req, res) {
           throw error;
         }
       }
+      if (p[1] === "supplier_product_aliases" && p[2] && req.method === "PUT") {
+        const id = Number(p[2]);
+        const existing = db.prepare("SELECT * FROM supplier_product_aliases WHERE id=?").get(id);
+        if (!existing) return send(res, 404, { error: "Equivalencia de producto no encontrada" });
+        const body = await read(req);
+        const supplierId = Number(body.supplier_id || existing.supplier_id), productId = Number(body.product_id || existing.product_id);
+        const aliasName = String(body.alias_name ?? existing.alias_name ?? "").trim().slice(0, 180);
+        const normalizedAlias = aliasName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("es-ES").replace(/[^a-z0-9]+/g, " ").trim();
+        if (!supplierId || !productId || !normalizedAlias) return send(res, 400, { error: "Selecciona proveedor, producto y escribe el alias" });
+        if (!db.prepare("SELECT id FROM suppliers WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(supplierId)) return send(res, 400, { error: "El proveedor seleccionado no existe" });
+        if (!db.prepare("SELECT id FROM products WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(productId)) return send(res, 400, { error: "El producto seleccionado no existe" });
+        const supplierRef = String(body.supplier_ref ?? existing.supplier_ref ?? "").trim().slice(0, 120) || null;
+        const quantityUnit = String(body.quantity_unit ?? existing.quantity_unit ?? "unidad").trim().slice(0, 40) || "unidad";
+        const source = String(body.source ?? existing.source ?? "Manual").trim().slice(0, 30) || "Manual";
+        const active = Number(body.active ?? existing.active ?? 1) === 1 ? 1 : 0;
+        const now = new Date().toISOString();
+        try {
+          db.prepare("UPDATE supplier_product_aliases SET supplier_id=?,product_id=?,alias_name=?,normalized_alias=?,supplier_ref=?,quantity_unit=?,source=?,active=?,updated_at=? WHERE id=?").run(supplierId, productId, aliasName, normalizedAlias, supplierRef, quantityUnit, source, active, now, id);
+          recordAudit(actor, "PUT", `supplier_product_aliases/${id}`, active === Number(existing.active) ? "Actualizar equivalencia de producto" : active ? "Activar equivalencia de producto" : "Desactivar equivalencia de producto", JSON.stringify({ supplier_id: supplierId, product_id: productId, alias_name: aliasName, source, active }));
+          invalidateReadCache("supplier_product_aliases");
+          return send(res, 200, { ...existing, id, supplier_id: supplierId, product_id: productId, alias_name: aliasName, normalized_alias: normalizedAlias, supplier_ref: supplierRef, quantity_unit: quantityUnit, source, active, updated_at: now });
+        } catch (error) {
+          if (String(error?.message || "").includes("UNIQUE")) return send(res, 409, { error: "Este alias ya está registrado para el proveedor" });
+          throw error;
+        }
+      }
       if (p[1] === "purchase_orders" && p[2] && p[3] === "detail" && req.method === "GET") {
         const order = db.prepare(`SELECT po.*,s.name supplier_name,s.email supplier_email,s.address supplier_address,s.city supplier_city,${purchaseOrderReceiptFields} FROM purchase_orders po LEFT JOIN suppliers s ON s.id=po.supplier_id WHERE po.id=? AND CAST(COALESCE(po.deleted,0) AS INTEGER)=0`).get(Number(p[2]));
         if (!order) return send(res, 404, { error: "Pedido de compra no encontrado" });
