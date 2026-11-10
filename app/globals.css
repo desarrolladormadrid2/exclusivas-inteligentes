@@ -7512,13 +7512,135 @@ body.reparto-modal-open {
   .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary { display: grid; grid-template-columns: minmax(220px, 1fr) auto auto; align-items: center; gap: 7px; }
   .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary > input { width: 100%; min-width: 0; }
   .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary .saved-views { grid-column: 1 / -1; width: 100%; }
-  .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); align-items: end; gap: 6px; padding: 0; }
+  .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); align-items: end; gap: 5px; padding: 0; }
   .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters > .billing-filter-select,
   .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters > .list-filter-field,
   .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters > .deleted-toggle { width: 100%; min-width: 0; box-sizing: border-box; }
   .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; gap: 3px; white-space: normal; }
   .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field input,
   .manager.sales-order-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field select { width: 100%; min-width: 0; }
+}
+
+/* En escritorio, los listados comerciales comparten una cabecera limpia y
+   una banda de filtros compacta. Los controles no se mezclan con el título. */
+@media (min-width: 1400px) {
+  .manager.sales-quote-list:has(> .manager-head):has(> .panel.table-panel > .table-tools),
+  .manager.sales-delivery-list:has(> .manager-head):has(> .panel.table-panel > .table-tools),
+  .manager.sales-invoice-list:has(> .manager-head):has(> .panel.table-panel > .table-tools),
+  .manager.sales-payment-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+    row-gap: 8px;
+  }
+  .manager.sales-quote-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head,
+  .manager.sales-delivery-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head,
+  .manager.sales-invoice-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head,
+  .manager.sales-payment-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head {
+    display: flex;
+    grid-column: 1;
+    grid-row: auto;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin: 0;
+  }
+  .manager.sales-quote-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head > div:first-child,
+  .manager.sales-delivery-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head > div:first-child,
+  .manager.sales-invoice-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head > div:first-child,
+  .manager.sales-payment-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head > div:first-child { min-width: 0; }
+  .manager.sales-quote-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head > div:last-child,
+  .manager.sales-delivery-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head > div:last-child,
+  .manager.sales-invoice-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head > div:last-child,
+  .manager.sales-payment-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head > div:last-child {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 5px;
+    min-width: 0;
+    white-space: nowrap;
+  }
+  .manager.sales-quote-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel,
+  .manager.sales-delivery-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel,
+  .manager.sales-invoice-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel,
+  .manager.sales-payment-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel { display: block; grid-column: 1; grid-row: auto; min-width: 0; }
+  .manager.sales-quote-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel > .table-tools,
+  .manager.sales-delivery-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel > .table-tools,
+  .manager.sales-invoice-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel > .table-tools,
+  .manager.sales-payment-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel > .table-tools {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    padding: 7px 8px;
+    border-bottom: 1px solid #d1d5db;
+    background: #fafafa;
+  }
+  .manager.sales-quote-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary,
+  .manager.sales-delivery-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary,
+  .manager.sales-invoice-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary,
+  .manager.sales-payment-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+  .manager.sales-quote-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary > input,
+  .manager.sales-delivery-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary > input,
+  .manager.sales-invoice-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary > input,
+  .manager.sales-payment-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary > input { flex: 1 1 260px; width: auto; min-width: 180px; }
+  .manager.sales-quote-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary > .list-count,
+  .manager.sales-delivery-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary > .list-count,
+  .manager.sales-invoice-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary > .list-count,
+  .manager.sales-payment-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary > .list-count { flex: 0 0 auto; white-space: nowrap; }
+  .manager.sales-quote-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary .saved-views,
+  .manager.sales-delivery-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary .saved-views,
+  .manager.sales-invoice-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary .saved-views,
+  .manager.sales-payment-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary .saved-views { flex: 0 0 auto; width: auto; min-width: 0; flex-wrap: nowrap; overflow-x: auto; }
+  .manager.sales-quote-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters,
+  .manager.sales-delivery-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters,
+  .manager.sales-invoice-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters,
+  .manager.sales-payment-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: end; gap: 6px; padding: 0; }
+  .manager.sales-quote-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters > .list-filter-field,
+  .manager.sales-quote-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters > .deleted-toggle,
+  .manager.sales-delivery-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters > .list-filter-field,
+  .manager.sales-delivery-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters > .deleted-toggle,
+  .manager.sales-invoice-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters > .list-filter-field,
+  .manager.sales-invoice-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters > .deleted-toggle,
+  .manager.sales-payment-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters > .list-filter-field,
+  .manager.sales-payment-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters > .deleted-toggle { width: 100%; min-width: 0; box-sizing: border-box; }
+  .manager.sales-quote-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field,
+  .manager.sales-delivery-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field,
+  .manager.sales-invoice-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field,
+  .manager.sales-payment-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; white-space: nowrap; font-size: 9px; }
+  .manager.sales-quote-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field input,
+  .manager.sales-quote-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field select,
+  .manager.sales-delivery-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field input,
+  .manager.sales-delivery-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field select,
+  .manager.sales-invoice-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field input,
+  .manager.sales-invoice-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field select,
+  .manager.sales-payment-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field input,
+  .manager.sales-payment-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field select { width: 100%; min-width: 0; height: 27px; font-size: 10px; }
+}
+
+/* Una sola banda de búsqueda y filtros en los listados comerciales con ancho
+   de escritorio; cada sección conserva sus etiquetas y sus vistas rápidas. */
+@media (min-width: 1400px) {
+  .manager:is(.sales-quote-list, .sales-delivery-list, .sales-invoice-list, .sales-payment-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel > .table-tools {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 8px;
+  }
+  .manager:is(.sales-quote-list, .sales-delivery-list, .sales-invoice-list, .sales-payment-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary,
+  .manager:is(.sales-quote-list, .sales-delivery-list, .sales-invoice-list, .sales-payment-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters { display: contents; }
+  .manager:is(.sales-quote-list, .sales-delivery-list, .sales-invoice-list, .sales-payment-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary > input { flex: 1 1 240px; width: auto; min-width: 150px; max-width: 340px; }
+  .manager:is(.sales-quote-list, .sales-delivery-list, .sales-invoice-list, .sales-payment-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary .saved-views { flex: 0 1 auto; width: auto; min-width: 0; max-width: 300px; overflow-x: auto; }
+  .manager:is(.sales-quote-list, .sales-delivery-list, .sales-invoice-list, .sales-payment-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field { display: inline-flex; flex: 0 1 auto; align-items: center; gap: 4px; width: auto; white-space: nowrap; font-size: 9px; }
+  .manager:is(.sales-quote-list, .sales-delivery-list, .sales-invoice-list, .sales-payment-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field select { width: 128px; min-width: 100px; height: 27px; font-size: 10px; }
+  .manager:is(.sales-quote-list, .sales-delivery-list, .sales-invoice-list, .sales-payment-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field input { width: 112px; min-width: 96px; height: 27px; font-size: 10px; }
+  .manager:is(.sales-quote-list, .sales-delivery-list, .sales-invoice-list, .sales-payment-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters > .deleted-toggle { flex: 0 0 auto; width: auto; min-width: 120px; min-height: 27px; margin: 0 !important; padding: 4px 7px; font-size: 10px; }
 }
 @media (min-width: 651px) and (max-width: 1399px) {
   .manager.sales-order-list .table-tools-filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
