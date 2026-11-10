@@ -7663,3 +7663,54 @@ body.reparto-modal-open {
   .supplier-manager-actions { grid-column: 1; grid-row: 2; }
   .supplier-manager-head > .supplier-purchase-tabs { grid-row: 3; }
 }
+
+/* Logística: ancho completo para herramientas densas, con bloques de filtros
+   estables que no se mezclan con el título ni con las acciones. */
+@media (min-width: 1400px) {
+  .manager:is(.logistics-products-list, .logistics-stock-list, .logistics-shipments-list, .crm-preparation-manager):has(> .manager-head):has(> .panel.table-panel > .table-tools) {
+    display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; row-gap: 8px;
+  }
+  .manager:is(.logistics-products-list, .logistics-stock-list, .logistics-shipments-list, .crm-preparation-manager):has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head {
+    display: flex; grid-column: 1; grid-row: auto; justify-content: space-between; align-items: center; gap: 12px; margin: 0;
+  }
+  .manager:is(.logistics-products-list, .logistics-stock-list, .logistics-shipments-list, .crm-preparation-manager):has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head > div:last-child {
+    display: flex; align-items: center; justify-content: flex-end; gap: 5px; min-width: 0; white-space: nowrap;
+  }
+  .manager:is(.logistics-products-list, .logistics-stock-list, .logistics-shipments-list, .crm-preparation-manager):has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel {
+    display: block; grid-column: 1; grid-row: auto; min-width: 0;
+  }
+  .manager:is(.logistics-products-list, .logistics-stock-list, .logistics-shipments-list, .crm-preparation-manager):has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel > .table-tools {
+    grid-column: 1; grid-row: auto; min-width: 0; padding: 7px 8px; border-bottom: 1px solid #d1d5db; background: #fafafa;
+  }
+  .manager.logistics-products-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel > .table-tools { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; }
+  .manager.logistics-products-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary { display: flex; align-items: center; flex-wrap: nowrap; gap: 6px; min-width: 0; }
+  .manager.logistics-products-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary > input { flex: 1 1 300px; width: auto; min-width: 180px; }
+  .manager.logistics-products-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary .saved-views { flex: 0 1 auto; width: auto; min-width: 0; overflow: visible; white-space: nowrap; }
+  .manager.logistics-products-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters { display: grid; grid-template-columns: auto auto repeat(5, minmax(0, 1fr)); align-items: center; gap: 5px; padding: 0; }
+  .manager.logistics-products-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters > .deleted-toggle { width: auto; min-width: 0; min-height: 28px; margin: 0 !important; padding: 3px 6px; font-size: 9px; }
+  .manager.logistics-products-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .product-filters { display: contents; }
+  .manager.logistics-products-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .product-filters select { width: 100%; min-width: 0; height: 28px; padding: 0 5px; font-size: 9px; }
+  .manager.logistics-products-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .product-filters .button { min-width: 0; height: 28px; padding: 0 6px; font-size: 9px; }
+  .manager.logistics-products-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .product-select-all input { flex: 0 0 14px; width: 14px; min-width: 14px; height: 14px; }
+  .manager.logistics-products-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .product-bulk-toolbar { display: flex; grid-column: 1 / -1; align-items: center; flex-wrap: nowrap; gap: 6px; min-width: 0; min-height: 28px; padding: 3px 0 0; border-top: 1px solid #e1e7ea; background: transparent; }
+  .manager.logistics-products-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .product-bulk-toolbar > span { flex: 1 1 auto; min-width: 100px; margin: 0; }
+  .manager.logistics-products-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .product-bulk-toolbar > button { min-width: 0; min-height: 28px; padding: 3px 7px; font-size: 9px; }
+  .manager.logistics-products-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .product-bulk-toolbar > .product-bulk-category { width: 145px; min-width: 120px; height: 28px; padding: 0 5px; font-size: 9px; }
+
+  .manager:is(.logistics-stock-list, .logistics-shipments-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel > .table-tools { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; }
+  .manager:is(.logistics-stock-list, .logistics-shipments-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary,
+  .manager:is(.logistics-stock-list, .logistics-shipments-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters { display: contents; }
+  .manager:is(.logistics-stock-list, .logistics-shipments-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary > input { flex: 1 1 260px; min-width: 180px; max-width: 420px; }
+  .manager:is(.logistics-stock-list, .logistics-shipments-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary .saved-views { flex: 0 1 auto; width: auto; min-width: 0; overflow: visible; white-space: nowrap; }
+  .manager.logistics-stock-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .stock-sort-select { flex: 0 1 230px; width: 230px; min-width: 180px; height: 28px; font-size: 10px; }
+  .manager:is(.logistics-stock-list, .logistics-shipments-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters > .deleted-toggle { flex: 0 0 auto; width: auto; min-width: 112px; min-height: 28px; margin: 0 !important; padding: 4px 7px; font-size: 9px; }
+  .manager.logistics-shipments-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field { display: inline-flex; align-items: center; gap: 4px; width: auto; white-space: nowrap; font-size: 9px; }
+  .manager.logistics-shipments-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel > .table-tools { gap: 8px; }
+  .manager.logistics-shipments-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field input { width: 112px; min-width: 96px; height: 28px; font-size: 10px; }
+  .manager.logistics-shipments-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field select { width: 140px; min-width: 110px; height: 28px; font-size: 10px; }
+
+  .manager.crm-preparation-manager:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel > .table-tools { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; }
+  .manager.crm-preparation-manager:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary { display: flex; flex: 1 1 auto; align-items: center; flex-wrap: nowrap; min-width: 0; }
+  .manager.crm-preparation-manager:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary > input { flex: 1 1 auto; min-width: 220px; }
+  .manager.crm-preparation-manager:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters { display: flex; flex: 0 0 auto; align-items: center; flex-wrap: nowrap; gap: 6px; padding: 0; }
+}
