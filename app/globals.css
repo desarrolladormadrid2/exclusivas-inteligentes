@@ -7471,3 +7471,41 @@ body.reparto-modal-open {
   .logistics-shipments-list .table-tools,
   .logistics-returns-list .table-tools { display: grid; gap: 7px; }
 }
+
+/* Cabeceras de los listados: integrar búsqueda y acciones del panel cuando hay ancho suficiente. */
+@media (min-width: 1400px) {
+  .manager:has(> .manager-head):has(> .panel.table-panel > .table-tools) { display: grid; grid-template-columns: max-content minmax(260px, 1fr) max-content; align-items: center; column-gap: 12px; row-gap: 0; }
+  .manager:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head { display: contents; margin: 0; }
+  .manager:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head > div:first-child { grid-column: 1; grid-row: 1; min-width: 0; }
+  .manager:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head > div:last-child { grid-column: 3; grid-row: 1; display: flex; justify-content: flex-end; align-items: center; gap: 5px; min-width: 0; white-space: nowrap; }
+  .manager:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel { display: contents; }
+  .manager:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel > .table-tools { display: flex; grid-column: 2; grid-row: 1; flex-wrap: wrap; align-items: center; justify-content: flex-start; min-width: 0; gap: 5px; padding: 0 0 7px; border: 0; border-bottom: 1px solid #d1d5db; background: transparent; }
+  .manager:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary,
+  .manager:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters { display: contents; }
+  .manager:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary > input { flex: 1 1 210px; min-width: 140px; }
+  .manager:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary > .list-count { flex: 0 0 auto; white-space: nowrap; }
+  .manager:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel > :not(.table-tools) { grid-column: 1 / -1; }
+  .manager:has(> .manager-head):has(> .panel.table-panel > .table-tools) > :not(.manager-head):not(.panel.table-panel) { grid-column: 1 / -1; }
+}
+
+.supplier-purchasing-page > .supplier-purchase-tabs { display: none; }
+.supplier-purchasing-page .supplier-order-builder-head { display: none; }
+.supplier-purchasing-page .supplier-line-adder { margin-top: 10px; padding-top: 10px; border-top: 1px solid #d7dce1; }
+.supplier-manager-head { display: grid; grid-template-columns: minmax(180px, auto) minmax(0, 1fr) auto; align-items: center; gap: 10px; margin-bottom: 0; }
+.supplier-manager-title .eyebrow { margin-bottom: 2px; }
+.supplier-manager-title h2 { margin: 0; }
+.supplier-manager-title .muted { display: none; }
+.supplier-manager-actions { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.supplier-manager-head > .supplier-purchase-tabs { min-width: 0; justify-content: center; border-bottom: 0; }
+.supplier-manager-head > .supplier-purchase-tabs button { padding: 8px 9px; white-space: nowrap; }
+.supplier-recurring-check { display: none !important; }
+@media (max-width: 1200px) {
+  .supplier-manager-head { grid-template-columns: minmax(0, 1fr) auto; }
+  .supplier-manager-head > .supplier-purchase-tabs { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; overflow-x: auto; }
+  .supplier-manager-actions { grid-column: 2; grid-row: 1; }
+}
+@media (max-width: 560px) {
+  .supplier-manager-head { grid-template-columns: minmax(0, 1fr); }
+  .supplier-manager-actions { grid-column: 1; grid-row: 2; }
+  .supplier-manager-head > .supplier-purchase-tabs { grid-row: 3; }
+}
