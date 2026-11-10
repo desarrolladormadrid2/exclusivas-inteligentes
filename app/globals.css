@@ -7714,3 +7714,54 @@ body.reparto-modal-open {
   .manager.crm-preparation-manager:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary > input { flex: 1 1 auto; min-width: 220px; }
   .manager.crm-preparation-manager:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters { display: flex; flex: 0 0 auto; align-items: center; flex-wrap: nowrap; gap: 6px; padding: 0; }
 }
+
+/* Entrada: valida lo recibido primero; las incidencias quedan disponibles al desplegar cada línea. */
+.goods-receipt-mode { display:flex; align-items:center; flex-wrap:wrap; gap:6px; padding:8px 10px; border:1px solid #d7e0e4; background:#f7f9fa; }
+.goods-receipt-mode > b { margin-right:4px; color:#26343d; font-size:12px; }
+.goods-receipt-mode > button { min-height:30px; padding:5px 10px; border:1px solid #ccd9de; background:#fff; color:#344650; font:inherit; font-size:11px; cursor:pointer; }
+.goods-receipt-mode > button.is-selected { border-color:#b91c1c; background:#b91c1c; color:#fff; font-weight:700; }
+.goods-receipt-mode > small { flex:1 1 210px; color:#687782; font-size:11px; }
+.goods-receipt-options { align-self:center; padding:7px 9px; border:1px solid #d7e0e4; background:#f7f9fa; }
+.goods-receipt-options > summary,.goods-receipt-line-options > summary { color:#536873; font-size:11px; font-weight:700; cursor:pointer; }
+.goods-receipt-options .goods-receipt-stock-toggle { margin-top:8px; }
+.goods-receipt-line-simple { grid-template-columns:minmax(220px,1.7fr) repeat(3,minmax(100px,.65fr)) minmax(175px,1fr); align-items:center; }
+.goods-receipt-line-simple .goods-receipt-line-product { align-self:center; }
+.goods-receipt-line-simple .goods-receipt-line-product small { color:#087f5b; font-size:11px; }
+.goods-receipt-line-simple > label { min-width:0; }
+.goods-receipt-line-simple input:disabled { background:#f1f4f5; color:#596a72; }
+.goods-receipt-line-options { grid-column:1/-1; padding-top:5px; border-top:1px solid #e4eaed; }
+.goods-receipt-line-options-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:9px; margin-top:10px; }
+.goods-receipt-line-options-grid > label { min-width:0; }
+.goods-receipt-line-options-grid .goods-receipt-line-wide,.goods-receipt-line-options-grid .goods-receipt-photo,.goods-receipt-line-options-grid .goods-receipt-attachment-preview { grid-column:1/-1; }
+.goods-receipt-stock-summary { display:grid; flex:1 1 260px; gap:3px; color:#087f5b; font-size:12px; }
+.goods-receipt-stock-summary small { color:#687782; font-size:10px; font-weight:400; }
+.goods-receipt-submit { justify-content:flex-end; padding-top:9px; border-top:1px solid #d7e0e4; }
+
+/* Salidas y devoluciones: una cabecera propia y filtros completos alineados en la banda siguiente. */
+@media (min-width:1400px) {
+  .manager:is(.logistics-stock-out-list,.logistics-returns-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) { display:grid; grid-template-columns:minmax(0,1fr); align-items:stretch; row-gap:6px; }
+  .manager:is(.logistics-stock-out-list,.logistics-returns-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head { display:flex; grid-column:1; grid-row:auto; align-items:center; justify-content:space-between; gap:12px; margin:0; }
+  .manager:is(.logistics-stock-out-list,.logistics-returns-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head > div:last-child { display:flex; align-items:center; justify-content:flex-end; gap:5px; white-space:nowrap; }
+  .manager:is(.logistics-stock-out-list,.logistics-returns-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel { display:block; grid-column:1; grid-row:auto; min-width:0; }
+  .manager:is(.logistics-stock-out-list,.logistics-returns-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel > .table-tools { display:flex; flex-wrap:wrap; align-items:center; gap:5px 7px; padding:6px 8px; }
+  .manager:is(.logistics-stock-out-list,.logistics-returns-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary { display:flex; flex:1 1 100%; flex-wrap:nowrap; align-items:center; gap:6px; min-width:0; }
+  .manager:is(.logistics-stock-out-list,.logistics-returns-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters { display:flex; flex:1 1 100%; flex-wrap:wrap; align-items:center; gap:5px 7px; min-width:0; padding:0; }
+  .manager:is(.logistics-stock-out-list,.logistics-returns-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary > input { flex:1 1 250px; min-width:180px; }
+  .manager:is(.logistics-stock-out-list,.logistics-returns-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary .saved-views { flex:0 1 auto; width:auto; min-width:0; overflow:visible; white-space:nowrap; }
+  .manager:is(.logistics-stock-out-list,.logistics-returns-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field { display:inline-flex; flex:0 1 auto; align-items:center; gap:4px; width:auto; white-space:nowrap; font-size:10px; }
+  .manager:is(.logistics-stock-out-list,.logistics-returns-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field input { width:108px; min-width:96px; height:28px; }
+  .manager:is(.logistics-stock-out-list,.logistics-returns-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field select { width:132px; min-width:110px; height:28px; }
+  .manager:is(.logistics-stock-out-list,.logistics-returns-list):has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters > .deleted-toggle { flex:0 0 auto; width:auto; min-width:120px; min-height:28px; margin:0 !important; padding:4px 7px; font-size:10px; }
+}
+@media (max-width:900px) {
+  .goods-receipt-line-simple { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .goods-receipt-line-simple .goods-receipt-line-product,.goods-receipt-line-simple .goods-receipt-line-options { grid-column:1/-1; }
+  .goods-receipt-line-options-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .goods-receipt-options { grid-column:1/-1; }
+}
+@media (max-width:560px) {
+  .goods-receipt-line-simple,.goods-receipt-line-options-grid { grid-template-columns:1fr; }
+  .goods-receipt-line-simple .goods-receipt-line-product,.goods-receipt-line-simple .goods-receipt-line-options,.goods-receipt-line-options-grid .goods-receipt-line-wide,.goods-receipt-line-options-grid .goods-receipt-photo,.goods-receipt-line-options-grid .goods-receipt-attachment-preview { grid-column:1; }
+  .goods-receipt-mode > b,.goods-receipt-mode > small { flex-basis:100%; }
+  .goods-receipt-submit > button { width:100%; }
+}
