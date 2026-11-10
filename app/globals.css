@@ -3294,35 +3294,40 @@ footer span {
 .goods-receipt-tabs button { min-height:38px; padding:0 12px; border:0; border-bottom:2px solid transparent; background:transparent; color:#526670; cursor:pointer; font:inherit; font-weight:600; }
 .goods-receipt-tabs button:hover, .goods-receipt-tabs button:focus-visible { color:#991b1b; outline:none; }
 .goods-receipt-tabs button.is-active { border-bottom-color:#b91c1c; color:#b91c1c; }
-.pending-supplier-receipts { display:grid; gap:10px; padding:12px; border:1px solid #d5dfe3; background:#fff; }
-.pending-supplier-receipts-head, .pending-supplier-receipts-head > div, .pending-supplier-order > header, .pending-supplier-order > header > div { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.pending-supplier-receipts { display:grid; gap:10px; padding:12px; border:1px solid #d5dfe3; background:#f7f8f9; }
+.pending-supplier-receipts-head, .pending-supplier-receipts-head > div, .pending-supplier-order > header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .pending-supplier-receipts-head h2 { margin:0; color:#26343d; font-size:16px; }
 .pending-supplier-receipts-head p { margin:3px 0 0; color:#687782; font-size:11px; }
 .pending-supplier-receipts-head > div:last-child { flex-shrink:0; }
-.pending-supplier-receipts-head > div:last-child > b, .pending-supplier-receipts-tools > span { color:#536873; font-size:11px; white-space:nowrap; }
+.pending-supplier-receipts-head > div:last-child > b { color:#536873; font-size:11px; white-space:nowrap; }
 .pending-supplier-receipts-tools { display:flex; align-items:center; justify-content:space-between; gap:10px; }
 .pending-supplier-receipts-tools input { box-sizing:border-box; width:min(440px,100%); min-height:34px; padding:6px 9px; border:1px solid #cbd7dc; background:#fff; color:#26343d; font:inherit; }
+.pending-supplier-receipts-tools > span { padding:7px 10px; border:1px solid #d5dfe3; background:#fff; color:#536873; font-size:11px; font-weight:600; white-space:nowrap; }
 .pending-supplier-order-list { display:grid; gap:8px; }
-.pending-supplier-order { min-width:0; border:1px solid #d4dde1; background:#fff; }
-.pending-supplier-order:nth-child(even) { background:#f1f2f3; }
-.pending-supplier-order > header { align-items:flex-start; padding:9px 11px; border-bottom:1px solid #d4dde1; }
-.pending-supplier-order > header > div:first-child { min-width:0; align-items:flex-start; flex-direction:column; gap:2px; }
-.pending-supplier-order > header > div:first-child > b { color:#b91c1c; font-size:11px; }
-.pending-supplier-order > header > div:first-child > strong { color:#26343d; font-size:13px; }
-.pending-supplier-order > header > div:first-child > small { color:#5f717a; font-size:11px; }
-.pending-supplier-order > header > div:last-child { flex-shrink:0; }
-.pending-supplier-order-notes { margin:0; padding:7px 11px; border-bottom:1px solid #d4dde1; color:#526670; font-size:11px; }
+.pending-supplier-order { min-width:0; border:1px solid #cfd9de; background:#fff; }
+.pending-supplier-order > header { align-items:center; padding:9px 11px; border-bottom:1px solid #d4dde1; }
+.pending-supplier-order-identity { min-width:0; display:grid; gap:5px; }
+.pending-supplier-order-title { min-width:0; display:flex; align-items:baseline; flex-wrap:wrap; gap:8px; }
+.pending-supplier-order-title > b { color:#9f1d20; font-size:11px; white-space:nowrap; }
+.pending-supplier-order-title > strong { color:#26343d; font-size:14px; }
+.pending-supplier-order-meta { display:flex; align-items:center; flex-wrap:wrap; gap:4px 16px; color:#5f717a; font-size:11px; }
+.pending-supplier-order-actions { flex-shrink:0; display:flex; align-items:center; justify-content:flex-end; gap:10px; }
+.pending-supplier-order-actions .supplier-order-status { white-space:nowrap; }
+.pending-supplier-order-notes { margin:0; padding:5px 8px; border-left:2px solid #c6d0d5; background:#f7f8f9; color:#526670; font-size:11px; overflow-wrap:anywhere; }
 .pending-supplier-order-lines-wrap { overflow-x:auto; }
-.pending-supplier-order-lines { width:100%; border-collapse:collapse; font-size:12px; }
-.pending-supplier-order-lines th, .pending-supplier-order-lines td { padding:6px 9px; border-bottom:1px solid #dce2e5; text-align:left; }
-.pending-supplier-order-lines th { background:#e8ecee; color:#596a73; font-size:10px; }
-.pending-supplier-order-lines tbody tr:nth-child(odd) { background:#fff; }
-.pending-supplier-order-lines tbody tr:nth-child(even) { background:#f1f2f3; }
-.pending-supplier-order-lines tbody tr:hover { background:#e2e8eb; }
+.pending-supplier-order-lines { width:100%; table-layout:fixed; border-collapse:collapse; font-size:12px; }
+.pending-supplier-order-lines th, .pending-supplier-order-lines td { padding:6px 10px; border-bottom:1px solid #e1e6e9; text-align:left; }
+.pending-supplier-order-lines th:first-child { width:48%; }
+.pending-supplier-order-lines th:not(:first-child) { width:17.33%; }
+.pending-supplier-order-lines th:not(:first-child), .pending-supplier-order-lines td:not(:first-child) { text-align:right; }
+.pending-supplier-order-lines th { background:#f1f4f5; color:#596a73; font-size:10px; font-weight:700; }
+.pending-supplier-order-lines tbody tr { background:#fff; }
+.pending-supplier-order-lines tbody tr:hover { background:#f7f9fa; }
 .pending-supplier-order-lines td:first-child { display:grid; gap:2px; }
 .pending-supplier-order-lines td:first-child b { color:#26343d; font-size:12px; }
 .pending-supplier-order-lines td:first-child small { color:#647781; font-size:10px; }
-.pending-supplier-order-lines td:last-child strong { color:#26343d; white-space:nowrap; }
+.pending-supplier-order-lines td:not(:first-child) { white-space:nowrap; color:#344850; font-variant-numeric:tabular-nums; }
+.pending-supplier-order-lines td:last-child strong { display:inline-block; padding:3px 7px; border:1px solid #f1d6b8; background:#fff8ef; color:#9a4e08; white-space:nowrap; }
 .pending-supplier-receipts-empty { margin:0; padding:16px 10px; color:#687782; font-size:12px; }
 @media (max-width: 720px) {
   .goods-receipt-tabs { gap:4px; }
@@ -3331,20 +3336,20 @@ footer span {
   .pending-supplier-receipts-head > div:last-child { gap:6px; }
   .pending-supplier-receipts-tools { align-items:stretch; flex-direction:column; }
   .pending-supplier-receipts-tools input { width:100%; }
-  .pending-supplier-order > header { flex-direction:column; align-items:stretch; }
-  .pending-supplier-order > header > div:last-child { align-items:flex-start; flex-direction:column; justify-content:flex-start; gap:7px; box-sizing:border-box; padding-right:58px; }
-  .pending-supplier-order > header > div:last-child .button { width:100%; }
+  .pending-supplier-order > header { align-items:stretch; flex-direction:column; }
+  .pending-supplier-order-actions { align-items:center; justify-content:space-between; }
+  .pending-supplier-order-actions .button { flex:1; }
+  .pending-supplier-order-meta { gap:4px 10px; }
   .pending-supplier-order-lines { min-width:0; }
   .pending-supplier-order-lines thead { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); }
   .pending-supplier-order-lines tbody, .pending-supplier-order-lines tbody tr { display:grid; }
   .pending-supplier-order-lines tbody { gap:5px; padding:6px; }
-  .pending-supplier-order-lines tbody tr { grid-template-columns:1fr 1fr; gap:0 10px; padding:6px 8px; border:1px solid #d4dde1; }
-  .pending-supplier-order-lines tbody tr:nth-child(odd) { background:#fff; }
-  .pending-supplier-order-lines tbody tr:nth-child(even) { background:#f1f2f3; }
+  .pending-supplier-order-lines tbody tr { grid-template-columns:1fr 1fr; gap:0 10px; padding:6px 8px; border:1px solid #d4dde1; background:#fff; }
   .pending-supplier-order-lines td { display:grid; grid-template-columns:minmax(90px,38%) minmax(0,1fr); gap:7px; padding:4px 0; border:0; overflow-wrap:anywhere; }
   .pending-supplier-order-lines td::before { content:attr(data-label); color:#687782; font-size:9px; font-weight:700; text-transform:uppercase; }
   .pending-supplier-order-lines td:first-child { grid-column:1 / -1; }
   .pending-supplier-order-lines td:first-child::before { content:""; }
+  .pending-supplier-order-lines td:not(:first-child) { text-align:left; }
 }
 .goods-receipt-location-check .goods-receipt-location-inputs,
 .goods-receipt-location-check .goods-receipt-location-actions,
