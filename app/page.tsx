@@ -4213,7 +4213,7 @@ function GoodsReceiptForm({ lookups, actor, initialPurchaseOrderId = "", onIniti
   const [header, setHeader] = useState({ code: `ENT-${new Date().getFullYear()}-${String(Date.now()).slice(-7)}`, counterparty_type: "Proveedor", client_id: "", supplier_id: "", purchase_order_id: "", purchase_invoice_id: "", warehouse_id: "", receipt_date: tabletTodayInput(), validation_status: "Pendiente", validated_by: "", stock_applied: true, notes: "" });
   const [productSearch, setProductSearch] = useState("");
   const [lines, setLines] = useState<any[]>([]);
-  const [receiptMode, setReceiptMode] = useState<"completa" | "parcial">("parcial");
+  const [lineEditor, setLineEditor] = useState<{ index: number; draft: any } | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [newProductOpen, setNewProductOpen] = useState(false);
@@ -4230,17 +4230,54 @@ function GoodsReceiptForm({ lookups, actor, initialPurchaseOrderId = "", onIniti
   function addProduct(product: any) {
     if (!product) return;
     setLines((current) => [...current, { product_id: String(product.id), product_name: product.name, sku: product.sku || "", expected_quantity: "0", received_quantity: "1", quantity_unit: product.unit || "unidad", damaged_quantity: "0", substituted_quantity: "0", substitute_product_id: "", lot_code: "", expiry_date: "", unit_cost: String(Number(product.cost_price || 0)), status: "", notes: "", incident_description: "", attachments: [] }]);
-    setReceiptMode("parcial");
     setProductSearch("");
     setMessage("");
   }
   function updateLine(index: number, field: string, value: any) {
-    setLines((current) => current.map((line, lineIndex) => lineIndex === index ? { ...line, [field]: value } : line));
-    if (field === "received_quantity") setReceiptMode("parcial");
+    setLines((current) => current.map((line, lineIndex) => lineIndex === index ? { ...line, [field]: value, ...(field === "received_quantity" ? { status: "" } : {}), reviewed: false } : line));
+  }
+  function openLineEditor(index: number) {
+    setLineEditor({ index, draft: { ...lines[index] } });
+  }
+  function saveLineEditor() {
+    if (!lineEditor) return;
+    const line = lineEditor.draft;
+    const expected = Number(line.expected_quantity || 0);
+    const received = Number(line.received_quantity || 0);
+    const damaged = Number(line.damaged_quantity || 0);
+    const substituted = Number(line.substituted_quantity || 0);
+    const status = line.status && !["Correcta", "Diferencia"].includes(line.status) ? line.status : (damaged > 0 ? "Dañado" : substituted > 0 ? "Sustituido" : received === expected ? "Correcta" : "Diferencia");
+    setLines((current) => current.map((item, index) => index === lineEditor.index ? { ...line, expected_quantity: String(expected), received_quantity: String(received), damaged_quantity: String(damaged), substituted_quantity: String(substituted), status, reviewed: true } : item));
+    setLineEditor(null);
+  }
+  async function attachLinePhotos(files: FileList | null) {
+    const selected = Array.from(files || []);
+    if (!selected.length || !lineEditor) return;
+    if (selected.some((file) => file.size > 4 * 1024 * 1024)) { setMessage("Cada foto de la incidencia no puede superar 4 MB."); return; }
+    try {
+      const attachments = await Promise.all(selected.map((file) => new Promise<any>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve({ name: file.name, mime: file.type || "image/jpeg", data: String(reader.result || "") });
+        reader.onerror = () => reject(new Error("No se pudo leer una de las fotografías."));
+        reader.readAsDataURL(file);
+      })));
+      setLineEditor((current) => current ? { ...current, draft: { ...current.draft, attachments: [...(current.draft.attachments || []), ...attachments] } } : current);
+      setMessage("");
+    } catch (error: any) { setMessage(error?.message || "No se pudieron adjuntar las fotografías."); }
+  }
+  function validateLine(index: number) {
+    const line = lines[index];
+    if (!line) return;
+    const expected = Number(line.expected_quantity || 0);
+    const received = Number(line.received_quantity || 0);
+    const damaged = Number(line.damaged_quantity || 0);
+    const substituted = Number(line.substituted_quantity || 0);
+    const status = line.status && !["Correcta", "Diferencia"].includes(line.status) ? line.status : (damaged > 0 ? "Dañado" : substituted > 0 ? "Sustituido" : received === expected ? "Correcta" : "Diferencia");
+    setLines((current) => current.map((item, lineIndex) => lineIndex === index ? { ...item, status, reviewed: true } : item));
   }
   const stockTotals = lines.reduce((totals: Record<string, number>, line) => {
     const expected = Number(line.expected_quantity || 0);
-    const received = receiptMode === "completa" && expected > 0 ? expected : Number(line.received_quantity || 0);
+    const received = Number(line.received_quantity || 0);
     const status = line.status || (Number(line.damaged_quantity || 0) > 0 ? "Dañado" : Number(line.substituted_quantity || 0) > 0 ? "Sustituido" : received === expected ? "Correcta" : "Diferencia");
     const goodOriginal = status === "Producto equivocado" || (status === "Dañado" && Number(line.damaged_quantity || 0) === 0) ? 0 : Math.max(0, received - Number(line.damaged_quantity || 0) - Number(line.substituted_quantity || 0));
     const good = goodOriginal + (status !== "Producto equivocado" && line.substitute_product_id ? Number(line.substituted_quantity || 0) : 0);
@@ -4249,9 +4286,11 @@ function GoodsReceiptForm({ lookups, actor, initialPurchaseOrderId = "", onIniti
     return totals;
   }, {});
   const stockSummary = Object.entries(stockTotals).map(([unit, quantity]) => `${quantity} ${unit}${quantity === 1 ? "" : "s"}`).join(" · ") || "0 unidades";
+  const reviewedLineCount = lines.filter((line) => line.reviewed).length;
+  const pendingReviewCount = lines.length - reviewedLineCount;
   async function loadPurchaseOrder(purchaseOrderId: string) {
     setHeader((current) => ({ ...current, purchase_order_id: purchaseOrderId }));
-    if (!purchaseOrderId) { setLines([]); setReceiptMode("parcial"); return; }
+    if (!purchaseOrderId) { setLines([]); return; }
     setMessage("Cargando las líneas previstas del pedido…");
     try {
       const response = await fetch(`/api/purchase_orders/${purchaseOrderId}/detail`);
@@ -4264,29 +4303,13 @@ function GoodsReceiptForm({ lookups, actor, initialPurchaseOrderId = "", onIniti
         const expected = Number(line.remaining_quantity ?? line.quantity ?? 0);
         return { product_id: String(line.product_id), product_name: line.product_name || "Producto", sku: line.sku || "", expected_quantity: String(expected), received_quantity: String(expected), quantity_unit: line.quantity_unit || "unidad", damaged_quantity: "0", substituted_quantity: "0", substitute_product_id: "", lot_code: "", expiry_date: "", unit_cost: String(Number(line.unit_cost || 0)), status: "", notes: "", incident_description: "", attachments: [] };
       }));
-      setReceiptMode("completa");
-      setMessage(`${purchase.code}: ${remainingLines.length} líneas pendientes. Si ha llegado menos, elige “Solo lo recibido” y ajusta las cantidades.`);
+      setMessage(`${purchase.code}: ${remainingLines.length} productos pendientes. Revisa cada fila; ajusta lo recibido o registra una incidencia.`);
     } catch (error: any) { setMessage(error?.message || "No se pudieron cargar las líneas del pedido."); }
   }
   useEffect(() => {
     if (!initialPurchaseOrderId) return;
     void loadPurchaseOrder(initialPurchaseOrderId).finally(() => onInitialPurchaseOrderConsumed?.());
   }, [initialPurchaseOrderId]);
-  async function attachLinePhotos(index: number, files: FileList | null) {
-    const selected = Array.from(files || []);
-    if (!selected.length) return;
-    if (selected.some((file) => file.size > 4 * 1024 * 1024)) { setMessage("Cada foto de la incidencia no puede superar 4 MB."); return; }
-    try {
-      const attachments = await Promise.all(selected.map((file) => new Promise<any>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve({ name: file.name, mime: file.type || "image/jpeg", data: String(reader.result || "") });
-        reader.onerror = () => reject(new Error("No se pudo leer una de las fotografías."));
-        reader.readAsDataURL(file);
-      })));
-      setLines((current) => current.map((line, lineIndex) => lineIndex === index ? { ...line, attachments: [...(line.attachments || []), ...attachments] } : line));
-      setMessage("");
-    } catch (error: any) { setMessage(error?.message || "No se pudieron adjuntar las fotografías."); }
-  }
   async function createProduct() {
     if (!newProduct.name.trim()) return;
     setNewProductSaving(true);
@@ -4305,12 +4328,13 @@ function GoodsReceiptForm({ lookups, actor, initialPurchaseOrderId = "", onIniti
     const counterpartyLabel = header.counterparty_type === "Cliente" ? "cliente" : "proveedor";
     if (!(header.counterparty_type === "Cliente" ? header.client_id : header.supplier_id) || !header.warehouse_id) { setMessage(`Selecciona el ${counterpartyLabel} y el almacén de destino.`); return; }
     if (!lines.length) { setMessage("Busca y añade al menos un producto."); return; }
+    if (validate && lines.some((line) => !line.reviewed)) { setMessage("Revisa cada producto con “Validar” o registra su incidencia antes de sumar el stock."); return; }
     setSaving(true); setMessage("");
     try {
       const validationStatus = validate ? "Validada" : "Pendiente";
       const response = await fetch("/api/goods_receipts/receive", { method: "POST", headers: { "Content-Type": "application/json", "X-Actor": actor }, body: JSON.stringify({ ...header, validation_status: validationStatus, stock_applied: Boolean(header.stock_applied), supplier_id: header.counterparty_type === "Proveedor" && header.supplier_id ? Number(header.supplier_id) : null, client_id: header.counterparty_type === "Cliente" && header.client_id ? Number(header.client_id) : null, purchase_order_id: header.counterparty_type === "Proveedor" && header.purchase_order_id ? Number(header.purchase_order_id) : null, purchase_invoice_id: header.counterparty_type === "Proveedor" && header.purchase_invoice_id ? Number(header.purchase_invoice_id) : null, warehouse_id: Number(header.warehouse_id), validated_by: validate ? actor : null, lines: lines.map((line) => {
         const expected = Number(line.expected_quantity || 0);
-        const received = receiptMode === "completa" && expected > 0 ? expected : Number(line.received_quantity || 0);
+        const received = Number(line.received_quantity || 0);
         const damaged = Number(line.damaged_quantity || 0);
         const substituted = Number(line.substituted_quantity || 0);
         const status = line.status || (damaged > 0 ? "Dañado" : substituted > 0 ? "Sustituido" : received === expected ? "Correcta" : "Diferencia");
@@ -4320,7 +4344,7 @@ function GoodsReceiptForm({ lookups, actor, initialPurchaseOrderId = "", onIniti
       if (!response.ok) throw new Error(created.error || "No se pudo registrar la entrada");
       onCreated(created);
       setHeader({ code: `ENT-${new Date().getFullYear()}-${String(Date.now()).slice(-7)}`, counterparty_type: "Proveedor", client_id: "", supplier_id: "", purchase_order_id: "", purchase_invoice_id: "", warehouse_id: "", receipt_date: tabletTodayInput(), validation_status: "Pendiente", validated_by: "", stock_applied: true, notes: "" });
-      setLines([]); setProductSearch(""); setReceiptMode("parcial");
+      setLines([]); setProductSearch("");
     } catch (error: any) { setMessage(error.message || "No se pudo registrar la entrada"); }
     finally { setSaving(false); }
   }
@@ -4337,41 +4361,30 @@ function GoodsReceiptForm({ lookups, actor, initialPurchaseOrderId = "", onIniti
       <details className="goods-receipt-options"><summary>Opciones avanzadas</summary><label className="goods-receipt-stock-toggle"><span>Inventario</span><span><input type="checkbox" checked={Boolean(header.stock_applied)} onChange={(event) => setHeader({ ...header, stock_applied: event.target.checked })} /> Actualizar stock al validar</span><small>Al validar se suman únicamente las unidades correctas y no dañadas.</small></label></details>
       <label className="goods-receipt-wide">Notas generales<textarea value={header.notes} onChange={(event) => setHeader({ ...header, notes: event.target.value })} placeholder="Observaciones de la recepción…" /></label>
     </div>
-    <section className="goods-receipt-lines"><div className="goods-receipt-lines-head"><div><b>Productos recibidos</b><small>Busca por nombre, SKU, marca o categoría y añade las líneas que correspondan. Puedes añadir el mismo producto varias veces para separar sus lotes.</small></div><span>{lines.length} añadidas</span></div>
+    <section className="goods-receipt-lines"><div className="goods-receipt-lines-head"><div><b>Productos recibidos</b><small>Una fila por producto. Ajusta lo recibido; si falta cantidad, queda pendiente en el pedido.</small></div><span>{lines.length} productos</span></div>
       <div className="goods-receipt-product-picker"><input aria-label="Buscar producto para la entrada" autoComplete="off" placeholder="Buscar producto por nombre o referencia…" value={productSearch} onChange={(event) => setProductSearch(event.target.value)} />{productSearch.trim() && <div className="goods-receipt-suggestions">{matchingProducts.map((item: any) => <button type="button" key={item.id} onClick={() => addProduct(item)}><b>{item.name}</b><small>{[item.sku, item.unit, item.category].filter(Boolean).join(" · ") || "Sin referencia"}</small></button>)}{!matchingProducts.length && <span>No hay productos. <button type="button" className="link-button" onClick={() => setNewProductOpen(true)}>Dar de alta producto</button></span>}</div>}</div>
-      {header.purchase_order_id ? <div className="goods-receipt-mode" role="group" aria-label="Tipo de recepción"><b>¿Cuánto ha llegado?</b><button type="button" className={receiptMode === "completa" ? "is-selected" : ""} onClick={() => { setReceiptMode("completa"); setLines((current) => current.map((line) => Number(line.expected_quantity || 0) > 0 ? { ...line, received_quantity: String(line.expected_quantity) } : line)); }}>Todo lo esperado</button><button type="button" className={receiptMode === "parcial" ? "is-selected" : ""} onClick={() => setReceiptMode("parcial")}>Solo lo recibido</button><small>{receiptMode === "completa" ? "Se recibirán las cantidades pendientes del pedido." : "Indica lo que ha llegado; el resto seguirá pendiente."}</small></div> : <div className="goods-receipt-mode"><b>Recepción manual</b><small>Indica cuánto ha llegado; al validar se sumarán las unidades correctas.</small></div>}
       {newProductOpen && <div className="goods-receipt-new-product"><b>Alta rápida de producto</b><input autoFocus placeholder="Nombre del producto *" value={newProduct.name} onChange={(event) => setNewProduct({ ...newProduct, name: event.target.value })} /><input placeholder="SKU o referencia" value={newProduct.sku} onChange={(event) => setNewProduct({ ...newProduct, sku: event.target.value })} /><select value={newProduct.unit} onChange={(event) => setNewProduct({ ...newProduct, unit: event.target.value })}><option value="unidad">Unidad</option><option value="caja">Caja</option><option value="botella">Botella</option><option value="kg">Kg</option></select><input type="number" min="0" step="any" placeholder="Coste unitario" value={newProduct.cost_price} onChange={(event) => setNewProduct({ ...newProduct, cost_price: event.target.value })} /><button type="button" className="button primary" disabled={newProductSaving} onClick={() => void createProduct()}>{newProductSaving ? "Guardando…" : "Crear y añadir"}</button><button type="button" className="button secondary" onClick={() => setNewProductOpen(false)}>Cancelar</button></div>}
-      {lines.length ? <div className="goods-receipt-line-list">{lines.map((line, index) => {
-        const expected = Number(line.expected_quantity || 0);
-        const received = receiptMode === "completa" && expected > 0 ? expected : Number(line.received_quantity || 0);
-        const damaged = Number(line.damaged_quantity || 0);
-        const substituted = Number(line.substituted_quantity || 0);
-        const status = line.status || (damaged > 0 ? "Dañado" : substituted > 0 ? "Sustituido" : received === expected ? "Correcta" : "Diferencia");
-        const goodOriginal = status === "Producto equivocado" || (status === "Dañado" && damaged === 0) ? 0 : Math.max(0, received - damaged - substituted);
-        const good = goodOriginal + (status !== "Producto equivocado" && line.substitute_product_id ? substituted : 0);
-        return <article key={`${line.product_id}-${index}`} className="goods-receipt-line goods-receipt-line-simple">
-          <div className="goods-receipt-line-product"><b>{line.product_name}</b><small>{line.sku || "Sin referencia"} · Se suman {good} {line.quantity_unit || "unidades"}</small><button type="button" className="link-button" onClick={() => setLines((current) => current.filter((_, lineIndex) => lineIndex !== index))}>Quitar</button></div>
-          <label>Esperadas<input type="number" min="0" step="any" value={line.expected_quantity} onChange={(event) => updateLine(index, "expected_quantity", event.target.value)} /></label>
-          <label>Recibidas<input type="number" min="0" step="any" value={receiptMode === "completa" && expected > 0 ? line.expected_quantity : line.received_quantity} disabled={receiptMode === "completa" && expected > 0} onChange={(event) => updateLine(index, "received_quantity", event.target.value)} /></label>
-          <label>Unidad<select value={line.quantity_unit} onChange={(event) => updateLine(index, "quantity_unit", event.target.value)}>{Array.from(new Set([line.quantity_unit, "unidad", "caja", "botella", "pack", "palet", "kg", "litro"].filter(Boolean))).map((unit) => <option key={unit}>{unit}</option>)}</select></label>
-          <details className="goods-receipt-line-options"><summary>Incidencia, lote y otros datos</summary><div className="goods-receipt-line-options-grid">
-            <label>Lote<input value={line.lot_code} onChange={(event) => updateLine(index, "lot_code", event.target.value)} placeholder="Ej. L-2026-001" /></label>
-            <label>Fecha de caducidad<input type="date" value={line.expiry_date} onChange={(event) => updateLine(index, "expiry_date", event.target.value)} /></label>
-            <label>Coste unitario<input type="number" min="0" step="any" value={line.unit_cost} onChange={(event) => updateLine(index, "unit_cost", event.target.value)} /></label>
-            <label>Resultado manual<select value={line.status} onChange={(event) => updateLine(index, "status", event.target.value)}><option value="">Automático según cantidades</option><option>Correcta</option><option>Diferencia</option><option>Producto equivocado</option><option>Dañado</option><option>Sustituido</option></select><small>Selecciona resultado solo si necesitas indicar una incidencia especial.</small></label>
-            <label>Unidades dañadas<input type="number" min="0" step="any" value={line.damaged_quantity} onChange={(event) => updateLine(index, "damaged_quantity", event.target.value)} /></label>
-            <label>Unidades sustituidas<input type="number" min="0" step="any" value={line.substituted_quantity} onChange={(event) => updateLine(index, "substituted_quantity", event.target.value)} /></label>
-            <label>Producto sustituto<select value={line.substitute_product_id} onChange={(event) => updateLine(index, "substitute_product_id", event.target.value)}><option value="">No aplica</option>{products.filter((item: any) => Number(item.id) !== Number(line.product_id)).map((item: any) => <option key={item.id} value={item.id}>{item.name}{item.sku ? ` · ${item.sku}` : ""}</option>)}</select></label>
-            <div className="goods-receipt-line-difference"><span>Diferencia económica</span><strong className={received === expected ? "" : "goods-receipt-incident-text"}>{((received - expected) * Number(line.unit_cost || 0)).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</strong><small>Recibido − esperado</small></div>
-            <label className="goods-receipt-line-wide">Observación o incidencia<textarea value={line.incident_description} onChange={(event) => updateLine(index, "incident_description", event.target.value)} placeholder="Ej. 2 cajas rotas o referencia incorrecta…" /></label>
-            <label className="goods-receipt-photo">Fotografías de la incidencia<input type="file" accept="image/*" capture="environment" multiple onChange={(event) => { void attachLinePhotos(index, event.target.files); event.currentTarget.value = ""; }} /><small>{(line.attachments || []).length ? `${line.attachments.length} fotografía${line.attachments.length === 1 ? "" : "s"} adjunta${line.attachments.length === 1 ? "" : "s"}` : "Puedes adjuntar varias fotografías · máximo 4 MB cada una"}</small></label>
-            {(line.attachments || []).length > 0 && <div className="goods-receipt-attachment-preview">{line.attachments.map((attachment: any, attachmentIndex: number) => <div key={`${attachment.name}-${attachmentIndex}`}><img src={attachment.data} alt={attachment.name || "Fotografía de incidencia"} /><button type="button" className="link-button" aria-label={`Quitar ${attachment.name || "fotografía"}`} onClick={() => updateLine(index, "attachments", (line.attachments || []).filter((_: any, currentIndex: number) => currentIndex !== attachmentIndex))}>×</button></div>)}</div>}
-          </div></details>
-        </article>;
-      })}</div> : <p className="goods-receipt-empty">Todavía no hay líneas. Busca un producto arriba para añadirlo.</p>}
+      {lines.length ? <div className="goods-receipt-table-wrap"><table className="goods-receipt-table"><thead><tr><th>Producto</th><th>Esperadas</th><th>Recibidas</th><th>Se suman</th><th>Revisión</th><th>Acciones</th></tr></thead><tbody>{lines.map((line,index)=>{
+        const expected=Number(line.expected_quantity||0);
+        const received=Number(line.received_quantity||0);
+        const damaged=Number(line.damaged_quantity||0);
+        const substituted=Number(line.substituted_quantity||0);
+        const status=line.status||(damaged>0?"Dañado":substituted>0?"Sustituido":received===expected?"Correcta":"Diferencia");
+        const goodOriginal=status==="Producto equivocado"||(status==="Dañado"&&damaged===0)?0:Math.max(0,received-damaged-substituted);
+        const good=goodOriginal+(status!=="Producto equivocado"&&line.substitute_product_id?substituted:0);
+        return <tr key={`${line.product_id}-${index}`}>
+          <td data-label="Producto"><b>{line.product_name}</b><small>{line.sku||"Sin referencia"}{line.lot_code?` · Lote ${line.lot_code}`:""}</small></td>
+          <td data-label="Esperadas">{expected} {line.quantity_unit||"unidad"}</td>
+          <td data-label="Recibidas"><input aria-label={`Unidades recibidas de ${line.product_name}`} type="number" min="0" step="any" value={line.received_quantity} onChange={(event)=>updateLine(index,"received_quantity",event.target.value)} /><small>{line.quantity_unit||"unidad"}</small></td>
+          <td data-label="Se suman" className="goods-receipt-table-stock">{good} {line.quantity_unit||"unidad"}</td>
+          <td data-label="Revisión"><span className={`goods-receipt-review-state${line.reviewed?" is-done":""}`}>{line.reviewed?(status==="Correcta"?"Validada":status):"Pendiente"}</span></td>
+          <td data-label="Acciones"><div className="goods-receipt-table-actions"><button type="button" className="button primary" disabled={line.reviewed} onClick={()=>validateLine(index)}>{line.reviewed?"Validado":"Validar"}</button><button type="button" className="button secondary" onClick={()=>openLineEditor(index)}>{line.reviewed&&status!=="Correcta"?"Editar incidencia":"Incidencia"}</button><button type="button" className="link-button" aria-label={`Quitar ${line.product_name}`} onClick={()=>setLines((current)=>current.filter((_,lineIndex)=>lineIndex!==index))}>Quitar</button></div></td>
+        </tr>;
+      })}</tbody></table></div> : <p className="goods-receipt-empty">Todavía no hay líneas. Busca un producto arriba para añadirlo.</p>}
     </section>
+    {lineEditor && <div className="preview-overlay goods-receipt-line-modal-overlay" role="dialog" aria-modal="true" aria-label={`Incidencia de ${lineEditor.draft.product_name}`} onMouseDown={(event) => event.target === event.currentTarget && setLineEditor(null)}><section className="goods-receipt-line-modal"><header className="preview-header"><div><b>Incidencia · {lineEditor.draft.product_name}</b><small>Indica lo recibido y qué problema hay para dejarlo anotado.</small></div><button type="button" className="preview-close" aria-label="Cerrar" onClick={() => setLineEditor(null)}>×</button></header><div className="goods-receipt-line-modal-fields"><label>Esperadas<input value={`${lineEditor.draft.expected_quantity} ${lineEditor.draft.quantity_unit || "unidad"}`} readOnly /></label><label>Recibidas<input type="number" min="0" step="any" value={lineEditor.draft.received_quantity} onChange={(event) => setLineEditor((current) => current ? { ...current, draft: { ...current.draft, received_quantity: event.target.value, status: "" } } : current)} /></label><label>Unidades dañadas<input type="number" min="0" step="any" value={lineEditor.draft.damaged_quantity} onChange={(event) => setLineEditor((current) => current ? { ...current, draft: { ...current.draft, damaged_quantity: event.target.value, status: Number(event.target.value) > 0 ? "Dañado" : current.draft.status === "Dañado" ? "" : current.draft.status } } : current)} /></label><label>Unidades sustituidas<input type="number" min="0" step="any" value={lineEditor.draft.substituted_quantity} onChange={(event) => setLineEditor((current) => current ? { ...current, draft: { ...current.draft, substituted_quantity: event.target.value, status: Number(event.target.value) > 0 ? "Sustituido" : current.draft.status === "Sustituido" ? "" : current.draft.status } } : current)} /></label><label>Producto sustituto<select value={lineEditor.draft.substitute_product_id} onChange={(event) => setLineEditor((current) => current ? { ...current, draft: { ...current.draft, substitute_product_id: event.target.value, status: event.target.value ? "Sustituido" : current.draft.status === "Sustituido" ? "" : current.draft.status } } : current)}><option value="">No aplica</option>{products.filter((item: any) => Number(item.id) !== Number(lineEditor.draft.product_id)).map((item: any) => <option key={item.id} value={item.id}>{item.name}{item.sku ? ` · ${item.sku}` : ""}</option>)}</select></label><label>Resultado<select value={lineEditor.draft.status} onChange={(event) => setLineEditor((current) => current ? { ...current, draft: { ...current.draft, status: event.target.value } } : current)}><option value="">Automático según cantidades</option><option>Diferencia</option><option>Producto equivocado</option><option>Dañado</option><option>Sustituido</option></select></label><label className="goods-receipt-line-modal-wide">Observación<textarea autoFocus value={lineEditor.draft.incident_description} onChange={(event) => setLineEditor((current) => current ? { ...current, draft: { ...current.draft, incident_description: event.target.value } } : current)} placeholder="Describe brevemente la incidencia…" /></label><label className="goods-receipt-line-modal-wide">Fotografías<input type="file" accept="image/*" capture="environment" multiple onChange={(event) => { void attachLinePhotos(event.target.files); event.currentTarget.value = ""; }} /><small>{lineEditor.draft.attachments?.length ? `${lineEditor.draft.attachments.length} fotos adjuntas` : "Opcional · máximo 4 MB por foto"}</small></label></div><details className="goods-receipt-line-modal-advanced"><summary>Lote y coste</summary><div className="goods-receipt-line-modal-fields"><label>Lote<input value={lineEditor.draft.lot_code} onChange={(event) => setLineEditor((current) => current ? { ...current, draft: { ...current.draft, lot_code: event.target.value } } : current)} /></label><label>Caducidad<input type="date" value={lineEditor.draft.expiry_date} onChange={(event) => setLineEditor((current) => current ? { ...current, draft: { ...current.draft, expiry_date: event.target.value } } : current)} /></label><label>Coste unitario<input type="number" min="0" step="any" value={lineEditor.draft.unit_cost} onChange={(event) => setLineEditor((current) => current ? { ...current, draft: { ...current.draft, unit_cost: event.target.value } } : current)} /></label></div></details><footer className="preview-actions"><button type="button" className="button secondary" onClick={() => setLineEditor(null)}>Cancelar</button><button type="button" className="button primary" onClick={saveLineEditor}>Guardar incidencia</button></footer></section></div>}
     {message && <div className="error-message" role="alert">{message}</div>}
-    <div className="goods-receipt-submit"><div className="goods-receipt-stock-summary"><b>{header.stock_applied ? `Al validar se sumarán: ${stockSummary}` : `Validada sin sumar unidades al stock`}</b><small>Las cantidades que no lleguen ahora seguirán pendientes en el pedido.</small></div><button type="button" className="button secondary" disabled={saving} onClick={(event) => void receive(event, false)}>{saving ? "Guardando…" : "Guardar pendiente"}</button><button type="button" className="button primary" disabled={saving} onClick={(event) => void receive(event, true)}>{saving ? "Validando…" : header.stock_applied ? `Validar ${receiptMode === "completa" ? "todo lo esperado" : "lo recibido"} y sumar al stock` : "Validar sin sumar al stock"}</button></div>
+    <div className="goods-receipt-submit"><div className="goods-receipt-stock-summary"><b>{reviewedLineCount}/{lines.length} productos revisados · {header.stock_applied ? `Se sumarán ${stockSummary}` : "validada sin sumar stock"}</b><small>{pendingReviewCount ? `Revisa los ${pendingReviewCount} pendientes con el botón de cada fila.` : "Las cantidades no recibidas seguirán pendientes en el pedido."}</small></div><button type="button" className="button secondary" disabled={saving} onClick={(event) => void receive(event, false)}>{saving ? "Guardando…" : "Guardar pendiente"}</button><button type="button" className="button primary" disabled={saving || !lines.length || pendingReviewCount > 0} onClick={(event) => void receive(event, true)}>{saving ? "Validando…" : header.stock_applied ? `Validar y sumar al stock (${reviewedLineCount})` : "Validar sin sumar al stock"}</button></div>
   </div>;
 }
 
