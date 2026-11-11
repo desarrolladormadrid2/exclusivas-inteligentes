@@ -7821,3 +7821,95 @@ body.reparto-modal-open {
   .goods-receipt-line-modal-fields { grid-template-columns:1fr; }
   .goods-receipt-line-modal-wide { grid-column:1; }
 }
+
+/* Listados compactos con retícula de lectura tipo hoja de cálculo. */
+@media (min-width: 901px) {
+  .crm-shell .table-scroll > table:not(.preview-lines),
+  .crm-shell .history-scroll > table:not(.preview-lines),
+  .crm-shell .contacts-table,
+  .crm-shell .users-table,
+  .crm-shell .trash-table,
+  .crm-shell .scheduled-list table { border-collapse: collapse; }
+
+  .crm-shell .table-scroll th,
+  .crm-shell .history-scroll th,
+  .crm-shell .contacts-table th,
+  .crm-shell .users-table th,
+  .crm-shell .trash-table th,
+  .crm-shell .scheduled-list th {
+    padding: 5px 7px;
+    border: 1px solid #c6cbce;
+    background: #e5e7e8;
+    color: #3e4a50;
+    font-size: 10px !important;
+    line-height: 1.15;
+    letter-spacing: .04em;
+  }
+
+  .crm-shell .table-scroll td,
+  .crm-shell .history-scroll td,
+  .crm-shell .contacts-table td,
+  .crm-shell .users-table td,
+  .crm-shell .trash-table td,
+  .crm-shell .scheduled-list td {
+    padding: 4px 7px;
+    border: 1px solid #d2d6d8;
+    color: #334149;
+    font-size: 12px;
+    line-height: 1.2;
+    vertical-align: middle;
+  }
+
+  .crm-shell .table-scroll .table-sort-button { min-height: 24px; line-height: 1.15; }
+  .crm-shell .table-tools { gap: 6px; padding: 7px 8px; }
+  .crm-shell .table-tools-primary,
+  .crm-shell .table-tools-filters { gap: 6px; }
+  .crm-shell .table-pagination { padding: 6px 8px; }
+  .crm-shell .table-scroll tbody tr.order-list-row td { height: 32px; }
+  .crm-shell .table-scroll .row-actions { gap: 3px; }
+  .crm-shell .table-scroll .row-action { min-height: 24px; padding: 2px 6px; }
+  .crm-shell .table-scroll .product-thumbnail-button { width: 30px; height: 30px; }
+  .crm-shell .table-scroll .product-lots-column,
+  .crm-shell .table-scroll .product-lots-cell { min-width: 145px; }
+  .crm-shell .table-scroll .stock-lots-accordion { min-width: 130px; }
+}
+
+@media (max-width: 900px) {
+  .crm-shell .table-scroll tbody { gap: 6px; }
+  .crm-shell .table-scroll > table tr,
+  .crm-shell .history-scroll > table tr { padding: 8px 10px; }
+  .crm-shell .table-scroll > table td,
+  .crm-shell .history-scroll > table td { padding-top: 3px; padding-bottom: 3px; font-size: 12px; }
+}
+
+@media (min-width: 901px) and (max-width: 1199px) {
+  .crm-shell .logistics-products-list .table-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 6px; }
+  .crm-shell .logistics-products-list .table-tools-primary,
+  .crm-shell .logistics-products-list .table-tools-filters { display: contents; }
+  .crm-shell .logistics-products-list .table-tools-primary > input { flex: 1 1 220px; min-width: 180px; }
+  .crm-shell .logistics-products-list .table-tools-primary .saved-views { flex: 0 1 auto; order: 0; width: auto; min-width: 0; overflow: visible; white-space: nowrap; }
+  .crm-shell .logistics-products-list .saved-views-label { display: none; }
+  .crm-shell .logistics-products-list .product-filters,
+  .crm-shell .logistics-products-list .product-bulk-toolbar { display: contents; }
+  .crm-shell .logistics-products-list .table-tools-filters > .deleted-toggle { flex: 0 1 auto; width: auto; min-width: 0; margin: 0 !important; padding: 0 6px; }
+  .crm-shell .logistics-products-list .product-filters select { flex: 0 1 108px; width: 108px; min-width: 92px; height: 29px; padding: 0 5px; }
+  .crm-shell .logistics-products-list .product-filters .button { flex: 0 0 auto; min-width: 82px; height: 29px; padding: 0 6px; }
+  .crm-shell .logistics-products-list .product-select-all { flex: 0 0 auto; white-space: nowrap; }
+  .crm-shell .logistics-products-list .product-bulk-toolbar > span { flex: 0 1 130px; min-width: 90px; overflow: hidden; margin: 0; text-overflow: ellipsis; white-space: nowrap; }
+  .crm-shell .logistics-products-list .product-bulk-toolbar > button { flex: 0 0 auto; min-width: 82px; min-height: 29px; padding: 3px 6px; }
+  .crm-shell .logistics-products-list .product-bulk-toolbar > .product-bulk-category { flex: 0 1 112px; min-width: 92px; height: 29px; padding: 0 5px; }
+}
+
+@media (max-width: 900px) {
+  .crm-shell .logistics-products-list .table-scroll tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 0 10px;
+  }
+  .crm-shell .logistics-products-list .table-scroll td.product-check-column { grid-column: 1; width: auto; margin: 0; }
+  .crm-shell .logistics-products-list .table-scroll td.product-image-column { grid-column: 2; width: auto; margin: 0; }
+  .crm-shell .logistics-products-list .table-scroll td.product-lots-cell { grid-column: 1 / -1; min-width: 0; }
+  .crm-shell .logistics-products-list .table-scroll td:last-child { grid-column: 1 / -1; }
+  .crm-shell .logistics-products-list .table-scroll .product-thumbnail-button { width: 36px; height: 36px; }
+}
