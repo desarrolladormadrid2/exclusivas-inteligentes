@@ -7848,6 +7848,21 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             </section>
             </>
           ) : c.fields.filter((f: string) => !(active === "Clientes" && clientComputedFields.has(f))).map((f: string) => renderFormField(f, c.fields.indexOf(f)))}
+          {(active === "Facturas" || active === "Albaranes") && (
+            <section className="gtr-inclusion-panel" aria-label="Concepto de tratamiento de residuos">
+              <label>
+                <input
+                  type="checkbox"
+                  aria-label={`Incluir GTR en ${active === "Facturas" ? "la factura" : "el albarán"}`}
+                  checked={Number(form.gtr_enabled ?? 1) !== 0}
+                  disabled={recordSaving}
+                  onChange={(event) => handleFormChange("gtr_enabled", event.target.checked ? "1" : "0")}
+                />
+                <span><b>Incluir Gestión de Tratamiento de Residuos (GTR)</b><small>Base 1,17 € · IVA 21 % (0,25 €) · total 1,42 € · cuenta contable 70500000</small></span>
+              </label>
+              <p>Se añade como concepto independiente y se recalculan la base imponible, el IVA y el total al guardar.</p>
+            </section>
+          )}
           {active === "Clientes" && editing && <ClientReceivablesPanel client={form} invoices={lookups.invoices || []} payments={lookups.payments || []} />}
           {(active === "Presupuestos" || isOrderForm || isPurchaseForm) && (
             <section className="quote-lines-editor">

@@ -396,7 +396,12 @@ function recalculateInvoiceTax(invoiceId, actor = "Sistema") {
   if (!id) return null;
   const invoice = db.prepare("SELECT i.*,c.equivalence_surcharge_enabled client_equivalence_surcharge_enabled FROM invoices i LEFT JOIN clients c ON c.id=i.client_id WHERE i.id=? AND CAST(COALESCE(i.deleted,0) AS INTEGER)=0").get(id);
   if (!invoice) return null;
-  if (!["Proforma", "Anulada"].includes(String(invoice.status || ""))) appendGtrInvoiceLine(id);
+  const gtrEnabled = Number(invoice.gtr_enabled ?? 1) !== 0;
+  if (gtrEnabled && !["Proforma", "Anulada"].includes(String(invoice.status || ""))) appendGtrInvoiceLine(id);
+  else if (!gtrEnabled) {
+    db.prepare("DELETE FROM invoice_lines WHERE invoice_id=? AND (line_type='GTR' OR product_id=(SELECT id FROM products WHERE sku='GTR-SERVICIO' LIMIT 1))").run(id);
+    invalidateReadCache("invoice_lines");
+  }
   const activeLineFilter = hasColumn("invoice_lines", "deleted") ? " AND CAST(COALESCE(deleted,0) AS INTEGER)=0" : "";
   const lines = db.prepare(`SELECT * FROM invoice_lines WHERE invoice_id=?${activeLineFilter} ORDER BY id`).all(id);
   if (!lines.length) return invoice;
@@ -494,6 +499,9 @@ function appendGtrDeliveryLine(deliveryNoteId) {
   if (existing) return;
   db.prepare("INSERT INTO delivery_note_lines(delivery_note_id,product_id,quantity,description,unit_price,vat,amount,line_type,accounting_account) VALUES(?,?,?,?,?,?,?,?,?)").run(Number(deliveryNoteId), productId, 1, "Gestión de Tratamiento de Residuos (GTR)", 1.17, 21, 1.17, "GTR", "70500000");
 }
+function removeGtrDeliveryLines(deliveryNoteId) {
+  db.prepare("DELETE FROM delivery_note_lines WHERE delivery_note_id=? AND (line_type='GTR' OR product_id=(SELECT id FROM products WHERE sku='GTR-SERVICIO' LIMIT 1))").run(Number(deliveryNoteId));
+}
 function appendGtrInvoiceLine(invoiceId) {
   const productId = ensureGtrServiceProduct();
   const activeLineFilter = hasColumn("invoice_lines", "deleted") ? " AND CAST(COALESCE(deleted,0) AS INTEGER)=0" : "";
@@ -501,9 +509,11 @@ function appendGtrInvoiceLine(invoiceId) {
   if (existing) {
     const restoreDeleted = hasColumn("invoice_lines", "deleted") ? ",deleted=0" : "";
     db.prepare(`UPDATE invoice_lines SET product_id=?,quantity=1,unit_price=1.17,discount=0,vat=21,amount=1.17,description='Gestión de Tratamiento de Residuos (GTR)',line_type='GTR',accounting_account='70500000'${restoreDeleted} WHERE id=?`).run(productId, Number(existing.id));
+    invalidateReadCache("invoice_lines");
     return;
   }
   db.prepare("INSERT INTO invoice_lines(invoice_id,product_id,quantity,unit_price,discount,vat,amount,description,line_type,accounting_account) VALUES(?,?,?,?,?,?,?,?,?,?)").run(Number(invoiceId), productId, 1, 1.17, 0, 21, 1.17, "Gestión de Tratamiento de Residuos (GTR)", "GTR", "70500000");
+  invalidateReadCache("invoice_lines");
 }
 function ensureLegacyInvoiceBaseLine(invoice) {
   const id = Number(invoice?.id || 0);
@@ -549,11 +559,15 @@ function commercialDocumentPdfData(type, documentId) {
 function createCommercialDocumentPdf(document, type) {
   const config = commercialPdfConfig(type);
   const lineRows = Array.isArray(document.lines) ? document.lines : [];
-  const lineTotal = lineRows.reduce((sum, line) => sum + Number(line.amount || Number(line.quantity || line.quantity_requested || 0) * Number(line.unit_price || 0)), 0);
   const vatRate = Number(document.vat || 21);
-  const total = lineTotal || Number(document.amount || 0);
-  const base = lineTotal ? total / (1 + vatRate / 100) : total / (1 + vatRate / 100);
-  const vat = total - base;
+  const pricedLines = lineRows.map((line) => ({ ...line, amount: Number(line.amount || Number(line.quantity || line.quantity_requested || 0) * Number(line.unit_price || 0)) }));
+  const calculated = calculateInvoiceTotals(pricedLines, false);
+  const hasPricedLines = pricedLines.some((line) => Number(line.amount || 0) !== 0);
+  const base = hasPricedLines ? calculated.base_amount : Number(document.base_amount ?? document.amount ?? 0);
+  const vatBreakdown = hasPricedLines
+    ? calculated.equivalence_surcharge_breakdown.map((row) => `IVA (${Number(row.vat_rate || 0).toFixed(0)}%): ${Number(row.vat_amount || 0).toFixed(2)} EUR`)
+    : [`IVA (${vatRate.toFixed(0)}%): ${Number(document.vat_amount || 0).toFixed(2)} EUR`];
+  const total = hasPricedLines ? calculated.total_amount : Number(document.amount || (base + Number(document.vat_amount || 0)));
   const date = config.dateFields.map((field) => document[field]).find(Boolean) || new Date().toISOString();
   const lines = [
     "EXCLUSIVAS INTELIGENTES",
@@ -577,7 +591,7 @@ function createCommercialDocumentPdf(document, type) {
     }) : ["Sin líneas de producto asociadas"]),
     "",
     `Base imponible: ${base.toFixed(2)} EUR`,
-    `IVA (${vatRate.toFixed(0)}%): ${vat.toFixed(2)} EUR`,
+    ...vatBreakdown,
     `TOTAL: ${total.toFixed(2)} EUR`,
     ...(type === "delivery" ? [
       "",
@@ -873,7 +887,7 @@ for (const column of ["return_date", "reviewed_by", "reviewed_at", "authorized_b
 }
 try { db.exec("ALTER TABLE orders ADD COLUMN stock_alert INTEGER DEFAULT 0"); } catch {}
 db.exec(
-  `CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT UNIQUE NOT NULL,password TEXT NOT NULL,role TEXT DEFAULT 'user',must_change INTEGER DEFAULT 1);CREATE TABLE IF NOT EXISTS suppliers(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,phone TEXT,email TEXT,address TEXT);CREATE TABLE IF NOT EXISTS warehouses(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,address TEXT);CREATE TABLE IF NOT EXISTS delivery_notes(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,order_id INTEGER,client_id INTEGER,status TEXT DEFAULT 'Pendiente');CREATE TABLE IF NOT EXISTS payments(id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_id INTEGER,amount REAL DEFAULT 0,payment_date TEXT DEFAULT CURRENT_DATE,method TEXT DEFAULT 'Transferencia');CREATE TABLE IF NOT EXISTS clients(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,phone TEXT,email TEXT,address TEXT);CREATE TABLE IF NOT EXISTS products(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,unit_price REAL DEFAULT 0,stock REAL DEFAULT 0);CREATE TABLE IF NOT EXISTS orders(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,client_id INTEGER,product_id INTEGER,quantity REAL DEFAULT 0,amount REAL DEFAULT 0,status TEXT DEFAULT 'Pendiente');CREATE TABLE IF NOT EXISTS quotes(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,client_id INTEGER,amount REAL DEFAULT 0,status TEXT DEFAULT 'Borrador');CREATE TABLE IF NOT EXISTS invoices(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,client_id INTEGER,amount REAL DEFAULT 0,status TEXT DEFAULT 'Pendiente');`,
+  `CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT UNIQUE NOT NULL,password TEXT NOT NULL,role TEXT DEFAULT 'user',must_change INTEGER DEFAULT 1);CREATE TABLE IF NOT EXISTS suppliers(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,phone TEXT,email TEXT,address TEXT);CREATE TABLE IF NOT EXISTS warehouses(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,address TEXT);CREATE TABLE IF NOT EXISTS delivery_notes(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,order_id INTEGER,client_id INTEGER,status TEXT DEFAULT 'Pendiente',gtr_enabled INTEGER DEFAULT 1);CREATE TABLE IF NOT EXISTS payments(id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_id INTEGER,amount REAL DEFAULT 0,payment_date TEXT DEFAULT CURRENT_DATE,method TEXT DEFAULT 'Transferencia');CREATE TABLE IF NOT EXISTS clients(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,phone TEXT,email TEXT,address TEXT);CREATE TABLE IF NOT EXISTS products(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,unit_price REAL DEFAULT 0,stock REAL DEFAULT 0);CREATE TABLE IF NOT EXISTS orders(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,client_id INTEGER,product_id INTEGER,quantity REAL DEFAULT 0,amount REAL DEFAULT 0,status TEXT DEFAULT 'Pendiente');CREATE TABLE IF NOT EXISTS quotes(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,client_id INTEGER,amount REAL DEFAULT 0,status TEXT DEFAULT 'Borrador');CREATE TABLE IF NOT EXISTS invoices(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,client_id INTEGER,amount REAL DEFAULT 0,status TEXT DEFAULT 'Pendiente',vat REAL DEFAULT 21,gtr_enabled INTEGER DEFAULT 1);`,
 );
 for (const column of ["notes TEXT", "reference TEXT", "status TEXT DEFAULT 'Aplicado'", "voided_at TEXT", "voided_by TEXT", "void_reason TEXT", "reversal_of_id INTEGER", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]) {
   try { db.exec(`ALTER TABLE payments ADD COLUMN ${column}`); } catch {}
@@ -954,7 +968,7 @@ for (const [table, columns] of [
   ["products", ["external_code TEXT", "source_system TEXT", "active INTEGER DEFAULT 1", "source_type TEXT", "source_substitute TEXT", "assembly_item INTEGER DEFAULT 0", "cost_adjusted INTEGER DEFAULT 0", "default_split_template TEXT", "source_supplier_code TEXT", "source_created_at TEXT", "source_closed_at TEXT"]],
   ["purchase_orders", ["title TEXT", "validation_status TEXT DEFAULT 'Pendiente de validar'", "request_id INTEGER", "supplier_ids TEXT", "comparison TEXT", "supplier_invoice_code TEXT", "invoice_date TEXT", "payment_terms_snapshot TEXT", "payment_due_date TEXT", "payment_status TEXT DEFAULT 'Pendiente'", "payment_paid_at TEXT", "payment_reference TEXT", "ocr_file_name TEXT", "ocr_extracted_text TEXT"]],
 ]) for (const column of columns) { try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${column}`); } catch {} }
-for (const [table, columns] of [["suppliers", ["source_dataverse_matched INTEGER DEFAULT 0"]], ["invoices", ["base_amount REAL DEFAULT 0", "vat_amount REAL DEFAULT 0", "equivalence_surcharge_enabled INTEGER DEFAULT 0", "equivalence_surcharge_amount REAL DEFAULT 0", "equivalence_surcharge_breakdown TEXT"]], ["invoice_lines", ["equivalence_surcharge_percent REAL DEFAULT 0", "equivalence_surcharge_amount REAL DEFAULT 0"]]]) {
+for (const [table, columns] of [["suppliers", ["source_dataverse_matched INTEGER DEFAULT 0"]], ["invoices", ["vat REAL DEFAULT 21", "gtr_enabled INTEGER DEFAULT 1", "base_amount REAL DEFAULT 0", "vat_amount REAL DEFAULT 0", "equivalence_surcharge_enabled INTEGER DEFAULT 0", "equivalence_surcharge_amount REAL DEFAULT 0", "equivalence_surcharge_breakdown TEXT"]], ["delivery_notes", ["delivery_date TEXT", "carrier TEXT", "notes TEXT", "gtr_enabled INTEGER DEFAULT 1"]], ["invoice_lines", ["equivalence_surcharge_percent REAL DEFAULT 0", "equivalence_surcharge_amount REAL DEFAULT 0"]]]) {
   for (const column of columns) { try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${column}`); } catch {} }
 }
 // Horarios independientes de la dirección para planificar futuras rutas.
@@ -1139,6 +1153,7 @@ try {
     LEFT JOIN payments p ON p.invoice_id=i.id
     WHERE CAST(COALESCE(i.deleted,0) AS INTEGER)=0
       AND COALESCE(i.status,'Pendiente') NOT IN ('Anulada','Proforma','Cobrada','Pagada')
+      AND COALESCE(i.gtr_enabled,1)=1
       AND (EXISTS(SELECT 1 FROM invoice_lines l WHERE l.invoice_id=i.id AND ${invoiceLineDeletedFilter} COALESCE(l.line_type,'')<>'GTR')
         OR NOT EXISTS(SELECT 1 FROM invoice_lines l WHERE l.invoice_id=i.id${invoiceLineActiveCondition}))
       AND NOT EXISTS(SELECT 1 FROM invoice_lines g LEFT JOIN products gp ON gp.id=g.product_id WHERE g.invoice_id=i.id AND ${invoiceGtrDeletedFilter} (g.line_type='GTR' OR gp.sku='GTR-SERVICIO'))
@@ -1919,7 +1934,7 @@ const lookupFields = {
   orders: ["id", "code", "client_id", "status", "amount", "created_at", "updated_at", "delivery_date", "preparation_date", "shipping_date", "address", "delivery_city", "collection_point_id", "urgent", "stock_alert", "loading_notes", "driver_notes"],
   shipments: ["id", "code", "order_id", "client_id", "collection_point_id", "status", "expected_delivery_at", "preparation_date", "address", "delivery_city", "delivery_window_start", "delivery_window_end", "carrier", "packages", "incidents", "notes", "driver_notes", "invoice_delivery_method", "prepared_at", "prepared_by", "preparation_closed_at", "preparation_closed_by", "shipped_at", "shipped_by", "departure_at", "delivered_at", "delivered_by", "delivery_signature_status", "delivery_recipient_name", "delivery_signature_at", "delivery_signature_by", "delivery_signature_note", "payment_received_status", "payment_received_amount", "payment_received_method", "payment_received_reference", "payment_received_note", "payment_received_at", "payment_received_by", "public_tracking_token"],
   order_lines: ["id", "order_id", "product_id", "quantity", "quantity_requested", "quantity_unit", "prepared", "prepared_quantity", "preparation_status", "incident_resolution"],
-  invoices: ["id", "code", "order_id", "client_id", "amount", "base_amount", "vat_amount", "equivalence_surcharge_enabled", "equivalence_surcharge_amount", "equivalence_surcharge_breakdown", "status", "created_at", "issue_date", "due_date", "client_name_snapshot", "client_legal_name_snapshot", "client_tax_id_snapshot", "client_billing_address_snapshot", "client_billing_city_snapshot", "client_delivery_address_snapshot", "client_delivery_city_snapshot"],
+  invoices: ["id", "code", "order_id", "client_id", "amount", "vat", "base_amount", "vat_amount", "equivalence_surcharge_enabled", "equivalence_surcharge_amount", "equivalence_surcharge_breakdown", "gtr_enabled", "status", "created_at", "issue_date", "due_date", "client_name_snapshot", "client_legal_name_snapshot", "client_tax_id_snapshot", "client_billing_address_snapshot", "client_billing_city_snapshot", "client_delivery_address_snapshot", "client_delivery_city_snapshot"],
   purchase_orders: ["id", "code", "title", "supplier_id", "status", "order_date", "expected_date", "amount", "validation_status", "supplier_invoice_code", "invoice_date", "payment_terms_snapshot", "payment_due_date", "payment_status", "payment_paid_at", "payment_reference"],
   goods_receipts: ["id", "code", "counterparty_type", "client_id", "supplier_id", "purchase_order_id", "purchase_invoice_id", "warehouse_id", "receipt_date", "status", "validation_status", "validated_by", "validated_at", "stock_applied", "stock_on_validation", "stock_added_quantity", "stock_applied_at", "stock_applied_by", "line_count", "incident_count", "received_by", "notes"],
   goods_receipt_lines: ["id", "receipt_id", "product_id", "product_name_snapshot", "expected_quantity", "received_quantity", "quantity_unit", "damaged_quantity", "substituted_quantity", "substitute_product_id", "unit_cost", "expected_value", "received_value", "economic_difference", "status", "lot_id", "lot_code", "expiry_date", "notes", "location_verified_status", "location_verified_code", "location_verified_reason", "location_verified_by", "location_verified_at"],
@@ -4459,6 +4474,7 @@ export async function crmApiHandler(req, res) {
           "INSERT INTO invoices(code,order_id,delivery_note_id,client_id,amount,status,issue_date,created_at,updated_at,client_name_snapshot,client_legal_name_snapshot,client_tax_id_snapshot,client_billing_address_snapshot,client_billing_city_snapshot,client_delivery_address_snapshot,client_delivery_city_snapshot,client_email_snapshot,client_phone_snapshot,equivalence_surcharge_enabled,customer_snapshot_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         ).run(code, delivery.order_id || null, delivery.id, delivery.client_id, order?.amount || 0, "Pendiente", new Date().toISOString().slice(0, 10), new Date().toISOString(), new Date().toISOString(), snapshot.client_name_snapshot, snapshot.client_legal_name_snapshot, snapshot.client_tax_id_snapshot, snapshot.client_billing_address_snapshot, snapshot.client_billing_city_snapshot, snapshot.client_delivery_address_snapshot, snapshot.client_delivery_city_snapshot, snapshot.client_email_snapshot, snapshot.client_phone_snapshot, snapshot.equivalence_surcharge_enabled, snapshot.customer_snapshot_json);
         const invoiceId = Number(created.lastInsertRowid);
+        db.prepare("UPDATE invoices SET gtr_enabled=? WHERE id=?").run(Number(delivery.gtr_enabled ?? 1) !== 0 ? 1 : 0, invoiceId);
         db.prepare(
           "INSERT INTO invoice_lines(invoice_id,product_id,quantity,unit_price,discount,vat,amount,description,line_type,accounting_account) SELECT ?,d.product_id,d.quantity,COALESCE(d.unit_price,o.unit_price,0),COALESCE(o.discount,0),COALESCE(d.vat,o.vat,21),COALESCE(d.amount,o.amount,d.quantity*COALESCE(d.unit_price,o.unit_price,0)),d.description,d.line_type,d.accounting_account FROM delivery_note_lines d LEFT JOIN order_lines o ON o.order_id=? AND o.product_id=d.product_id WHERE d.delivery_note_id=?",
         ).run(invoiceId, delivery.order_id || 0, delivery.id);
@@ -5095,8 +5111,13 @@ export async function crmApiHandler(req, res) {
           db.prepare("INSERT INTO notes(title,content,priority,module,record_id,important,completed,created_at) VALUES(?,?,?,?,?,?,?,?)").run(`Revisar stock · ${d.code || "Nuevo pedido"}`, `El pedido queda reservado, pero ${names.join(", ")} quedará por debajo del stock mínimo o sin unidades suficientes. Revisa reposición antes de preparar.`, stockShortages.length ? "Urgente" : "Alta", "Stock", Number(r.lastInsertRowid), 1, 0, now);
         }
         if (t === "invoices") {
+          ensureLegacyInvoiceBaseLine(db.prepare("SELECT * FROM invoices WHERE id=?").get(Number(r.lastInsertRowid)));
           const totals = recalculateInvoiceTax(Number(r.lastInsertRowid), actor);
           if (totals) Object.assign(d, { amount: totals.amount, base_amount: totals.base_amount, vat_amount: totals.vat_amount, equivalence_surcharge_amount: totals.equivalence_surcharge_amount, equivalence_surcharge_breakdown: JSON.stringify(totals.equivalence_surcharge_breakdown || []) });
+        }
+        if (t === "delivery_notes" && Number(d.gtr_enabled ?? 1) !== 0) {
+          appendGtrDeliveryLine(Number(r.lastInsertRowid));
+          invalidateReadCache("delivery_note_lines");
         }
         if (t === "invoice_lines" && d.invoice_id) { recalculateInvoiceTax(d.invoice_id, actor); markInvoicePdfStale(d.invoice_id); }
         if (t === "order_lines" && d.order_id) markCommercialDocumentPdfStale("order", d.order_id);
@@ -5350,6 +5371,10 @@ export async function crmApiHandler(req, res) {
         }
         d.updated_at = new Date().toISOString();
         for (const key of ["stock_alerts", "client_name", "client_city", "billed", "billing_status", "available_stock", "stock_status", "product_name", "warehouse_name"]) delete d[key];
+        if (t === "invoices") {
+          for (const key of ["client_legal_name", "client_tax_id", "client_address", "client_email", "client_phone", "paid_amount", "outstanding_amount"]) delete d[key];
+        }
+        if (t === "delivery_notes") delete d.shipment_id;
         if (t === "returns") {
           const currentReturn = db.prepare("SELECT * FROM returns WHERE id=?").get(Number(p[2]));
           if (!currentReturn) return send(res, 404, { error: "Devolución no encontrada" });
@@ -5571,6 +5596,13 @@ export async function crmApiHandler(req, res) {
           const totals = recalculateInvoiceTax(Number(p[2]), actor);
           if (totals) Object.assign(d, { amount: totals.amount, base_amount: totals.base_amount, vat_amount: totals.vat_amount, equivalence_surcharge_amount: totals.equivalence_surcharge_amount, equivalence_surcharge_breakdown: JSON.stringify(totals.equivalence_surcharge_breakdown || []) });
           recalculateInvoicePaymentStatus(Number(p[2]), actor);
+        }
+        if (t === "delivery_notes") {
+          const deliveryNote = db.prepare("SELECT gtr_enabled FROM delivery_notes WHERE id=?").get(Number(p[2]));
+          if (Number(deliveryNote?.gtr_enabled ?? 1) !== 0) appendGtrDeliveryLine(Number(p[2]));
+          else removeGtrDeliveryLines(Number(p[2]));
+          invalidateReadCache("delivery_note_lines");
+          markCommercialDocumentPdfStale("delivery", Number(p[2]));
         }
         if (t === "order_lines" && normalizedLotAllocations) {
           db.prepare("DELETE FROM order_line_lots WHERE order_line_id=?").run(Number(p[2]));
