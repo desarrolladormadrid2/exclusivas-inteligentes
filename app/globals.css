@@ -3303,30 +3303,34 @@ footer span {
 .pending-supplier-receipts-tools { display:flex; align-items:center; justify-content:space-between; gap:10px; }
 .pending-supplier-receipts-tools input { box-sizing:border-box; width:min(440px,100%); min-height:34px; padding:6px 9px; border:1px solid #cbd7dc; background:#fff; color:#26343d; font:inherit; }
 .pending-supplier-receipts-tools > span { padding:7px 10px; border:1px solid #d5dfe3; background:#fff; color:#536873; font-size:11px; font-weight:600; white-space:nowrap; }
-.pending-supplier-order-list { display:grid; gap:8px; }
-.pending-supplier-order { min-width:0; border:1px solid #cfd9de; background:#fff; }
-.pending-supplier-order > header { align-items:center; padding:9px 11px; border-bottom:1px solid #d4dde1; }
-.pending-supplier-order-identity { min-width:0; display:grid; gap:5px; }
-.pending-supplier-order-title { min-width:0; display:flex; align-items:baseline; flex-wrap:wrap; gap:8px; }
-.pending-supplier-order-title > b { color:#9f1d20; font-size:11px; white-space:nowrap; }
-.pending-supplier-order-title > strong { color:#26343d; font-size:14px; }
-.pending-supplier-order-meta { display:flex; align-items:center; flex-wrap:wrap; gap:4px 16px; color:#5f717a; font-size:11px; }
+.pending-supplier-order-list { display:grid; gap:12px; }
+.pending-supplier-order { min-width:0; border:1px solid #aebbc2; border-left:4px solid #647b86; background:#fff; box-shadow:0 1px 2px rgba(28,45,54,.08); }
+.pending-supplier-order > header { align-items:center; padding:9px 12px; border-bottom:1px solid #c5d0d5; background:#edf1f3; }
+.pending-supplier-order-identity { min-width:0; display:flex; align-items:center; flex-wrap:wrap; gap:5px 9px; }
+.pending-supplier-order-title { min-width:0; display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.pending-supplier-order-title > b { padding:3px 6px; border:1px solid #c4cfd4; background:#fff; color:#8f1d21; font-size:11px; white-space:nowrap; }
+.pending-supplier-order-title > strong { color:#26343d; font-size:15px; }
+.pending-supplier-order-meta { display:flex; align-items:center; flex-wrap:wrap; gap:4px 10px; color:#5f717a; font-size:11px; }
+.pending-supplier-order-meta > span { display:inline-flex; align-items:baseline; gap:4px; min-width:0; white-space:nowrap; }
+.pending-supplier-order-meta small { color:#647781; font-size:10px; font-weight:600; line-height:1.1; }
+.pending-supplier-order-meta b { color:#344850; font-size:11px; font-weight:600; }
 .pending-supplier-order-actions { flex-shrink:0; display:flex; align-items:center; justify-content:flex-end; gap:10px; }
 .pending-supplier-order-actions .supplier-order-status { white-space:nowrap; }
-.pending-supplier-order-notes { margin:0; padding:5px 8px; border-left:2px solid #c6d0d5; background:#f7f8f9; color:#526670; font-size:11px; overflow-wrap:anywhere; }
-.pending-supplier-order-lines-wrap { overflow-x:auto; }
+.pending-supplier-order-notes { min-width:0; max-width:260px; margin:0; padding:0; color:#526670; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pending-supplier-order-lines-wrap { overflow-x:auto; padding:0 8px 7px; background:#f8fafb; }
 .pending-supplier-order-lines { width:100%; table-layout:fixed; border-collapse:collapse; font-size:12px; }
-.pending-supplier-order-lines th, .pending-supplier-order-lines td { padding:6px 10px; border-bottom:1px solid #e1e6e9; text-align:left; }
+.pending-supplier-order-lines th, .pending-supplier-order-lines td { padding:7px 10px; border:1px solid #d4dde1; text-align:left; }
 .pending-supplier-order-lines th:first-child { width:48%; }
 .pending-supplier-order-lines th:not(:first-child) { width:17.33%; }
 .pending-supplier-order-lines th:not(:first-child), .pending-supplier-order-lines td:not(:first-child) { text-align:right; }
-.pending-supplier-order-lines th { background:#f1f4f5; color:#596a73; font-size:10px; font-weight:700; }
+.pending-supplier-order-lines th { background:#dfe6e9; color:#43555e; font-size:10px; font-weight:700; }
 .pending-supplier-order-lines tbody tr { background:#fff; }
-.pending-supplier-order-lines tbody tr:hover { background:#f7f9fa; }
+.pending-supplier-order-lines tbody tr:nth-child(even) { background:#f0f3f4; }
+.pending-supplier-order-lines tbody tr:hover { background:#e8eff2; }
 .pending-supplier-order-lines td:first-child { display:grid; gap:2px; }
-.pending-supplier-order-lines td:first-child b { color:#26343d; font-size:12px; }
+.pending-supplier-order-lines td:first-child b { color:#26343d; font-size:13px; }
 .pending-supplier-order-lines td:first-child small { color:#647781; font-size:10px; }
-.pending-supplier-order-lines td:not(:first-child) { white-space:nowrap; color:#344850; font-variant-numeric:tabular-nums; }
+.pending-supplier-order-lines td:not(:first-child) { white-space:nowrap; color:#344850; font-size:12px; font-variant-numeric:tabular-nums; }
 .pending-supplier-order-lines td:last-child strong { display:inline-block; padding:3px 7px; border:1px solid #f1d6b8; background:#fff8ef; color:#9a4e08; white-space:nowrap; }
 .pending-supplier-receipts-empty { margin:0; padding:16px 10px; color:#687782; font-size:12px; }
 @media (max-width: 720px) {
@@ -3344,12 +3348,14 @@ footer span {
   .pending-supplier-order-lines thead { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); }
   .pending-supplier-order-lines tbody, .pending-supplier-order-lines tbody tr { display:grid; }
   .pending-supplier-order-lines tbody { gap:5px; padding:6px; }
-  .pending-supplier-order-lines tbody tr { grid-template-columns:1fr 1fr; gap:0 10px; padding:6px 8px; border:1px solid #d4dde1; background:#fff; }
-  .pending-supplier-order-lines td { display:grid; grid-template-columns:minmax(90px,38%) minmax(0,1fr); gap:7px; padding:4px 0; border:0; overflow-wrap:anywhere; }
-  .pending-supplier-order-lines td::before { content:attr(data-label); color:#687782; font-size:9px; font-weight:700; text-transform:uppercase; }
-  .pending-supplier-order-lines td:first-child { grid-column:1 / -1; }
+  .pending-supplier-order-lines tbody tr { grid-template-columns:1fr 1fr; gap:0 10px; padding:6px 8px; border:1px solid #c5d0d5; border-left:3px solid #b6c3c9; background:#fff; }
+  .pending-supplier-order-lines tbody tr:nth-child(even) { background:#f1f4f5; }
+  .pending-supplier-order-lines td { display:flex; min-width:0; flex-direction:column; align-items:flex-start; gap:2px; padding:4px 0; border:0; overflow-wrap:anywhere; text-align:left; }
+  .pending-supplier-order-lines td::before { display:block; content:attr(data-label); color:#687782; font-size:9px; font-weight:700; line-height:1.2; text-transform:uppercase; }
+  .pending-supplier-order-lines td:first-child { grid-column:1 / -1; text-align:left; }
   .pending-supplier-order-lines td:first-child::before { content:""; }
   .pending-supplier-order-lines td:not(:first-child) { text-align:left; }
+  .pending-supplier-order-lines-wrap { padding:0 6px 6px; }
 }
 .goods-receipt-location-check .goods-receipt-location-inputs,
 .goods-receipt-location-check .goods-receipt-location-actions,
