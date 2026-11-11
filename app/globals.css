@@ -7072,6 +7072,15 @@ body.reparto-modal-open {
 }
 .supplier-recurrent-panel { display: grid; gap: 8px; border: 1px solid #e1e5e8; padding: 10px; }
 .supplier-recurrent-panel > div:first-child { display: grid; gap: 3px; }
+.supplier-recurrent-products { display: grid; grid-template-columns: repeat(auto-fill,minmax(250px,1fr)); gap: 6px; }
+.supplier-recurrent-product { display: grid; grid-template-columns: 48px minmax(0,1fr) auto; gap: 9px; align-items: center; min-width: 0; min-height: 60px; padding: 5px 7px; border: 1px solid #dce2e5; background: #fff; }
+.supplier-recurrent-product:nth-child(even) { background: #f1f3f4; }
+.supplier-recurrent-product > b { min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
+.supplier-recurrent-product .button { min-height: 32px; padding: 0 9px; }
+.supplier-recurrent-product-image { position: relative; display: grid; place-items: center; width: 48px; height: 48px; overflow: hidden; border: 1px solid #e1e5e8; background: #f7f8f9; color: #89949a; }
+.supplier-recurrent-product-image > span { position: absolute; font-size: 20px; }
+.supplier-recurrent-product-image img { position: relative; width: 100%; height: 100%; object-fit: contain; background: #fff; }
+.supplier-history-error { display: flex; align-items: center; gap: 8px; margin: 0; color: #a52323; font-size: 12px; }
 .supplier-recurrent-new { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: end; gap: 8px; margin-top: 8px; padding: 10px; border: 1px solid #e1e5e8; background: #fafbfc; }
 .supplier-recurrent-new > b { grid-column: 1 / -1; }
 .supplier-recurrent-new label { display: grid; gap: 4px; min-width: 0; color: #3f4851; font-size: 12px; font-weight: 700; }

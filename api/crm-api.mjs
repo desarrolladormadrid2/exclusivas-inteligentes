@@ -2558,6 +2558,47 @@ export async function crmApiHandler(req, res) {
           throw error;
         }
       }
+      if (p[1] === "supplier_purchase_history" && req.method === "GET") {
+        const supplierId = Number(new URL(req.url, "http://local").searchParams.get("supplier_id") || 0);
+        if (!Number.isInteger(supplierId) || supplierId <= 0) return send(res, 400, { error: "Selecciona un proveedor válido." });
+        if (!db.prepare("SELECT id FROM suppliers WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(supplierId)) return send(res, 404, { error: "El proveedor no existe." });
+        const rows = db.prepare(`
+          WITH ranked_history AS (
+            SELECT pol.product_id,pol.quantity,pol.quantity_unit,pol.unit_cost,po.order_date,po.id AS order_id,pol.id AS line_id,
+              ROW_NUMBER() OVER (PARTITION BY pol.product_id ORDER BY COALESCE(po.order_date,'') DESC,po.id DESC,pol.id DESC) AS line_rank
+            FROM purchase_order_lines pol
+            JOIN purchase_orders po ON po.id=pol.purchase_order_id
+            WHERE po.supplier_id=?
+              AND po.status IN ('Enviado','Pedido','En tránsito','Parcialmente recibido','Recibido con incidencia','Recibido','Recibida')
+              AND CAST(COALESCE(po.deleted,0) AS INTEGER)=0
+              AND CAST(COALESCE(pol.deleted,0) AS INTEGER)=0
+          ), purchase_history AS (
+            SELECT product_id,COUNT(DISTINCT order_id) AS purchase_count,MAX(order_date) AS last_order_date
+            FROM ranked_history GROUP BY product_id
+          ), candidates AS (
+            SELECT product_id FROM purchase_history
+            UNION
+            SELECT product_id FROM supplier_recurrent_items WHERE supplier_id=? AND CAST(COALESCE(active,1) AS INTEGER)=1
+          )
+          SELECT p.id AS product_id,p.name,p.sku,
+            COALESCE(NULLIF(p.photo_thumbnail_url,''),NULLIF(p.photo_url,''),NULLIF(p.photo_web_url,''),NULLIF(p.photo_data,'')) AS photo_source,
+            COALESCE(r.quantity,latest.quantity,1) AS quantity,
+            COALESCE(NULLIF(r.quantity_unit,''),NULLIF(latest.quantity_unit,''),NULLIF(p.purchase_format,''),NULLIF(p.unit,''),'unidad') AS quantity_unit,
+            COALESCE(r.unit_cost,latest.unit_cost,p.cost_price,0) AS unit_cost,
+            r.supplier_alias_id,r.id AS recurrence_id,
+            COALESCE(history.purchase_count,0) AS purchase_count,history.last_order_date
+          FROM candidates candidate
+          JOIN products p ON p.id=candidate.product_id
+          LEFT JOIN purchase_history history ON history.product_id=p.id
+          LEFT JOIN ranked_history latest ON latest.product_id=p.id AND latest.line_rank=1
+          LEFT JOIN supplier_recurrent_items r ON r.supplier_id=? AND r.product_id=p.id AND CAST(COALESCE(r.active,1) AS INTEGER)=1
+          WHERE CAST(COALESCE(p.deleted,0) AS INTEGER)=0 AND CAST(COALESCE(p.active,1) AS INTEGER)=1
+            AND LOWER(COALESCE(p.product_status,'Activo')) NOT IN ('inactivo','baja','descatalogado')
+          ORDER BY CASE WHEN COALESCE(history.purchase_count,0)>0 THEN 0 ELSE 1 END,history.last_order_date DESC,history.purchase_count DESC,p.name COLLATE NOCASE
+          LIMIT 200
+        `).all(supplierId, supplierId, supplierId);
+        return send(res, 200, rows);
+      }
       if (p[1] === "supplier_product_aliases" && p[2] && req.method === "PUT") {
         const id = Number(p[2]);
         const existing = db.prepare("SELECT * FROM supplier_product_aliases WHERE id=?").get(id);
