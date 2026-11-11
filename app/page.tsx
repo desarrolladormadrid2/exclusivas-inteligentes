@@ -1201,7 +1201,7 @@ export function Sidebar({
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={() => drop(m)}
                   className={active === m ? "nav-item active" : "nav-item"}
-                  onClick={() => { setMobileOpen(false); if (m === "Reparto") { window.location.href = "/reparto"; return; } setActive(m); }}
+                  onClick={() => { setMobileOpen(false); if (m === "Reparto") { window.open("/reparto", "_blank", "noopener,noreferrer"); return; } setActive(m); }}
                 >
                   {m}
                 </button>
