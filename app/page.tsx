@@ -912,6 +912,7 @@ const cfg: any = {
       "due_date",
       "amount",
       "vat",
+      "gtr_enabled",
       "status",
       "notes",
     ],
@@ -922,6 +923,7 @@ const cfg: any = {
       "Vencimiento",
       "Importe",
       "IVA %",
+      "Tratamiento de residuos",
       "Estado",
       "Notas",
     ],
@@ -4785,9 +4787,11 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         const storedFields = JSON.parse(saved);
         const nextFields = c.api === "clients"
           ? Array.from(new Set([...storedFields, "pending_invoice_count", "pending_invoice_total"]))
-          : storedFields;
+          : c.api === "invoices"
+            ? Array.from(new Set([...storedFields, "gtr_enabled"]))
+            : storedFields;
         setVisibleFields(nextFields);
-        if (c.api === "clients" && JSON.stringify(nextFields) !== JSON.stringify(storedFields)) {
+        if (["clients", "invoices"].includes(c.api) && JSON.stringify(nextFields) !== JSON.stringify(storedFields)) {
           localStorage.setItem(`excluvas.columns.${c.api}`, JSON.stringify(nextFields));
         }
       }
@@ -8142,7 +8146,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                 {visibleFields.map((f: string, fieldIndex: number) => (
                   <Fragment key={f}>
                     <th className={isDateField(f) ? "sortable-date-column" : undefined}>
-                      <button type="button" className="table-sort-button" onClick={() => { setStockSort("none"); setDateSort(null); setTableSort((current) => current?.field === f ? { field: f, direction: current.direction === "asc" ? "desc" : "asc" } : { field: f, direction: "asc" }); }} aria-label={`Ordenar ${active === "Entradas" && f === "code" ? "Entrada" : active === "Entradas" && f === "purchase_order_code" ? "Pedido relacionado" : compactFieldLabels[f] || c.labels[c.fields.indexOf(f)] || f}`} title="Ordenar columna">{active === "Entradas" && f === "code" ? "Entrada" : active === "Entradas" && f === "purchase_order_code" ? "Pedido relacionado" : compactFieldLabels[f] || c.labels[c.fields.indexOf(f)] || f}<span aria-hidden="true">{tableSort?.field === f ? (tableSort.direction === "asc" ? " ↑" : " ↓") : " ↕"}</span></button>
+                      <button type="button" className="table-sort-button" onClick={() => { setStockSort("none"); setDateSort(null); setTableSort((current) => current?.field === f ? { field: f, direction: current.direction === "asc" ? "desc" : "asc" } : { field: f, direction: "asc" }); }} aria-label={`Ordenar ${active === "Entradas" && f === "code" ? "Entrada" : active === "Entradas" && f === "purchase_order_code" ? "Pedido relacionado" : compactFieldLabels[f] || c.labels[c.fields.indexOf(f)] || f}`} title={f === "gtr_enabled" ? "Tratamiento de residuos" : "Ordenar columna"}>{active === "Entradas" && f === "code" ? "Entrada" : active === "Entradas" && f === "purchase_order_code" ? "Pedido relacionado" : f === "gtr_enabled" ? "GTR" : compactFieldLabels[f] || c.labels[c.fields.indexOf(f)] || f}<span aria-hidden="true">{tableSort?.field === f ? (tableSort.direction === "asc" ? " ↑" : " ↓") : " ↕"}</span></button>
                     </th>
                     {active === "Stock" && fieldIndex === 0 && <th className="product-lots-column">LOTES</th>}
                   </Fragment>
@@ -8172,6 +8176,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                               ? <span className={`payment-status payment-status-${getOrderPaymentStatus(r).toLowerCase().replaceAll(" ", "-")}`}>{getOrderPaymentStatus(r)}</span>
                               : f === "shipping_status"
                               ? <span className={`shipping-status shipping-status-${getOrderShippingStatus(r).toLowerCase().replaceAll(" ", "-")}`}>{getOrderShippingStatus(r)}</span>
+                              : f === "gtr_enabled"
+                              ? <span className={`invoice-gtr-status${Number(r.gtr_enabled ?? 1) !== 0 ? " is-included" : " is-excluded"}`}>{Number(r.gtr_enabled ?? 1) !== 0 ? "Incluido" : "No incluido"}</span>
                               : f === "client_id" && r.client_name
                               ? `${r.client_name}${r.client_city ? ` · ${r.client_city}` : ""}`
                               : f === "supplier_id" && r.supplier_name
