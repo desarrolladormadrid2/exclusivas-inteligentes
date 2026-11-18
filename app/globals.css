@@ -1732,6 +1732,15 @@ body {
 .header-quick-actions .quick-icon-action { display: inline-grid; place-items: center; width: 34px; min-width: 34px; height: 32px; padding: 0; }
 .header-quick-actions .quick-icon-action:hover, .header-quick-actions .quick-icon-action:focus-visible { background: #991b1b; border-color: #991b1b; }
 .app-route-shortcut { text-decoration: none; }
+.navbar-section-search { position: relative; flex: 0 1 190px; width: 190px; min-width: 135px; }
+.navbar-section-search > input { display: block; width: 100%; height: 32px; padding: 0 9px; border: 1px solid #cbd5db; background: #fff; color: #26343d; font: inherit; font-size: 11px; }
+.navbar-section-search > input:focus { border-color: #b91c1c; outline: 2px solid rgba(185, 28, 28, .14); outline-offset: 1px; }
+.navbar-section-search-results, .navbar-section-search-empty { position: absolute; z-index: 100; top: calc(100% + 5px); left: 0; width: max(100%, 220px); max-height: min(60vh, 340px); overflow-y: auto; border: 1px solid #cbd5db; background: #fff; box-shadow: 0 8px 18px rgba(24, 39, 48, .18); }
+.navbar-section-search-results button { display: block; width: 100%; min-height: 32px; padding: 6px 10px; border: 0; border-bottom: 1px solid #edf0f2; background: #fff; color: #26343d; text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
+.navbar-section-search-results button:hover, .navbar-section-search-results button.is-active { background: #f1f2f3; color: #991b1b; }
+.navbar-section-search-empty { padding: 9px 10px; color: #687782; font-size: 11px; }
+@media (max-width: 1100px) and (min-width: 901px) { .navbar-section-search { flex-basis: 150px; min-width: 125px; } }
+@media (max-width: 900px) { .header-quick-actions { overflow: visible; } }
 .icon-button {
   border: 0;
   background: none;
@@ -3218,7 +3227,9 @@ footer span {
   .assistant-global-input input { min-width: 0; }
   /* En móvil el menú hamburguesa ya contiene todas las secciones; los accesos
      duplicados de la barra superior solo roban ancho y terminan cortándose. */
-  .header-quick-actions { display: none; }
+  .header-quick-actions { display: flex; gap: 0; margin-left: 0; }
+  .header-quick-actions > :not(.navbar-section-search) { display: none !important; }
+  .navbar-section-search { flex: 0 1 clamp(110px, 22vw, 170px); width: clamp(110px, 22vw, 170px); min-width: 110px; }
   .appbar-actions { justify-content: flex-end; overflow: visible; }
   /* El desplegable de usuario no puede quedar recortado por la cabecera en
      vertical: se posiciona respecto a la ventana y conserva el cierre de
@@ -7062,6 +7073,10 @@ body.reparto-modal-open {
 .supplier-order-fields label, .supplier-line-adder label, .supplier-alias-manager form label, .supplier-order-line label { display: grid; align-content: start; gap: 4px; min-width: 0; color: #3f4851; font-size: 12px; font-weight: 700; }
 .supplier-order-fields .supplier-order-notes { grid-column: span 3; }
 .supplier-order-fields textarea { min-height: 60px; resize: vertical; }
+.supplier-delivery-destination > select { min-width: 0; }
+.supplier-delivery-address-preview { display: block; min-width: 0; overflow-wrap: anywhere; color: #687781; font-size: 10px; font-weight: 400; }
+.supplier-delivery-custom { display: grid; grid-template-columns:minmax(0,1.35fr) minmax(100px,.8fr); gap:5px; }
+.supplier-delivery-custom input { min-width: 0; }
 .supplier-line-adder { display: grid; grid-template-columns: minmax(170px, 1.4fr) minmax(140px, 1.2fr) minmax(100px, .8fr) minmax(110px, .9fr) minmax(85px, .6fr) minmax(95px, .7fr) auto auto; align-items: end; gap: 8px; }
 .supplier-line-adder .supplier-product-search { position: relative; }
 .supplier-product-suggestions { position: absolute; z-index: 30; top: calc(100% + 2px); left: 0; right: 0; display: grid; max-height: 250px; overflow: auto; border: 1px solid #c9d0d6; background: #fff; box-shadow: 0 6px 18px #0002; }
@@ -7092,11 +7107,27 @@ body.reparto-modal-open {
 .supplier-recurrent-products { display: grid; grid-template-columns: repeat(auto-fill,minmax(250px,1fr)); gap: 6px; }
 .supplier-recurrent-product { display: grid; grid-template-columns: 48px minmax(0,1fr) auto; gap: 9px; align-items: center; min-width: 0; min-height: 60px; padding: 5px 7px; border: 1px solid #dce2e5; background: #fff; }
 .supplier-recurrent-product:nth-child(even) { background: #f1f3f4; }
-.supplier-recurrent-product > b { min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
+.supplier-recurrent-product-names { display:grid; gap:2px; min-width:0; }
+.supplier-recurrent-product-names > b { min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
+.supplier-recurrent-product-names > small { color:#687781; font-size:10px; line-height:1.2; overflow-wrap:anywhere; }
 .supplier-recurrent-product .button { min-height: 32px; padding: 0 9px; }
 .supplier-recurrent-product-image { position: relative; display: grid; place-items: center; width: 48px; height: 48px; overflow: hidden; border: 1px solid #e1e5e8; background: #f7f8f9; color: #89949a; }
 .supplier-recurrent-product-image > span { position: absolute; font-size: 20px; }
 .supplier-recurrent-product-image img { position: relative; width: 100%; height: 100%; object-fit: contain; background: #fff; }
+.supplier-invoice-attachments { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px 14px; align-items:center; margin-top:12px; padding:10px; border:1px solid #d8e1e5; background:#f7f9fa; }
+.supplier-invoice-attachments > div:first-child { display:grid; gap:3px; min-width:0; }
+.supplier-invoice-attachments > div:first-child b { color:#26343d; font-size:12px; }
+.supplier-invoice-attachments > div:first-child small, .supplier-invoice-attachments-empty { color:#687781; font-size:10px; }
+.supplier-invoice-attachments > label { cursor:pointer; }
+.supplier-invoice-attachments input[type="file"] { display:none; }
+.supplier-invoice-attachment-list, .supplier-invoice-attachments-empty { grid-column:1 / -1; }
+.supplier-invoice-attachment-list { display:grid; gap:5px; }
+.supplier-invoice-attachment-list article { display:grid; grid-template-columns:22px minmax(0,1fr) auto auto; align-items:center; gap:8px; min-width:0; padding:6px 8px; border:1px solid #dce2e5; background:#fff; }
+.supplier-invoice-attachment-list article > div { display:grid; gap:2px; min-width:0; }
+.supplier-invoice-attachment-list article b { overflow-wrap:anywhere; color:#26343d; font-size:11px; }
+.supplier-invoice-attachment-list article small { color:#687781; font-size:10px; }
+.supplier-invoice-attachments-empty { margin:0; }
+@media (max-width:620px) { .supplier-invoice-attachments { grid-template-columns:minmax(0,1fr); }.supplier-invoice-attachment-list article { grid-template-columns:22px minmax(0,1fr); }.supplier-invoice-attachment-list article > a,.supplier-invoice-attachment-list article > button { grid-column:2; justify-self:start; } }
 .supplier-history-error { display: flex; align-items: center; gap: 8px; margin: 0; color: #a52323; font-size: 12px; }
 .supplier-recurrent-new { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: end; gap: 8px; margin-top: 8px; padding: 10px; border: 1px solid #e1e5e8; background: #fafbfc; }
 .supplier-recurrent-new > b { grid-column: 1 / -1; }
@@ -7161,7 +7192,7 @@ body.reparto-modal-open {
   .supplier-table-tools > .table-tools-filters { display:contents; }
   .supplier-table-tools > .table-tools-primary > input { min-width:300px; }
   .supplier-table-tools .deleted-toggle { width:auto; min-width:145px; margin-left:0 !important; }
-  .supplier-order-fields { grid-template-columns:minmax(200px,1.15fr) minmax(210px,1.2fr) minmax(150px,.8fr) minmax(150px,.8fr) minmax(250px,1.35fr) minmax(150px,.8fr); gap:8px; }
+  .supplier-order-fields { grid-template-columns:minmax(160px,1.2fr) minmax(170px,1.3fr) minmax(125px,.85fr) minmax(125px,.85fr) minmax(185px,1.5fr) minmax(120px,1fr); gap:6px; }
   .supplier-order-fields .supplier-order-notes { grid-column:auto; }
   .supplier-order-fields textarea { min-height:36px; max-height:44px; }
   .supplier-catalog-link-form { grid-template-columns:minmax(120px,1.2fr) minmax(140px,1.25fr) minmax(90px,.9fr) minmax(90px,.8fr) minmax(105px,.9fr) minmax(85px,.8fr) minmax(70px,.7fr) minmax(150px,1.15fr) auto; gap:8px; }
@@ -7540,6 +7571,14 @@ body.reparto-modal-open {
 .supplier-purchasing-page .supplier-order-builder-head { display: none; }
 .supplier-purchasing-page .supplier-line-adder { margin-top: 10px; padding-top: 10px; border-top: 1px solid #d7dce1; }
 .supplier-purchasing-page .supplier-line-adder { grid-template-columns: minmax(180px, 1.45fr) minmax(150px, 1.1fr) minmax(100px, .8fr) minmax(90px, .65fr) minmax(110px, .8fr) auto auto; }
+@media (max-width: 1399px) {
+  .supplier-purchasing-page .supplier-line-adder { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .supplier-purchasing-page .supplier-line-adder .supplier-product-search { grid-column: span 2; }
+}
+@media (max-width: 640px) {
+  .supplier-purchasing-page .supplier-line-adder { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .supplier-purchasing-page .supplier-line-adder .supplier-product-search { grid-column: 1 / -1; }
+}
 .supplier-manager-head { display: grid; grid-template-columns: minmax(180px, auto) minmax(0, 1fr) auto; align-items: center; gap: 10px; margin-bottom: 0; }
 .supplier-manager-title .eyebrow { margin-bottom: 2px; }
 .supplier-manager-title h2 { margin: 0; }
@@ -7954,3 +7993,5 @@ body.reparto-modal-open {
   .crm-shell .logistics-products-list .table-scroll td:last-child { grid-column: 1 / -1; }
   .crm-shell .logistics-products-list .table-scroll .product-thumbnail-button { width: 36px; height: 36px; }
 }
+
+@media (max-width: 900px) { .header-quick-actions { overflow: visible !important; } }

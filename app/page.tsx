@@ -4297,7 +4297,7 @@ function GoodsReceiptForm({ lookups, actor, initialPurchaseOrderId = "", onIniti
       const response = await fetch(`/api/purchase_orders/${purchaseOrderId}/detail`);
       const purchase = await response.json();
       if (!response.ok) throw new Error(purchase.error || "No se pudo cargar el pedido vinculado.");
-      setHeader((current) => ({ ...current, supplier_id: String(purchase.supplier_id || current.supplier_id), purchase_order_id: purchaseOrderId }));
+      setHeader((current) => ({ ...current, supplier_id: String(purchase.supplier_id || current.supplier_id), purchase_order_id: purchaseOrderId, warehouse_id: String(purchase.delivery_warehouse_id || current.warehouse_id) }));
       const remainingLines = (purchase.lines || []).filter((line: any) => Number(line.remaining_quantity ?? line.quantity) > 0);
       if (!remainingLines.length) { setLines([]); setMessage(`${purchase.code}: no quedan cantidades pendientes de recibir.`); return; }
       setLines(remainingLines.map((line: any) => {
@@ -6083,7 +6083,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       setQuoteLines([]);
       setQuoteProductSearch("");
       const defaultOrderDate = nextOrderWorkingDate();
-      beginForm({ code: nextOrderCode(), status: "Nuevo", created_by: user?.username || "Usuario local", quantity: 1, preparation_date: defaultOrderDate, shipping_date: defaultOrderDate, delivery_date: defaultOrderDate });
+      beginForm({ code: nextOrderCode(), status: "Nuevo", created_at: tabletTodayInput(), created_by: user?.username || "Usuario local", quantity: 1, preparation_date: defaultOrderDate, shipping_date: defaultOrderDate, delivery_date: defaultOrderDate });
       setFormOpen(true);
     }
     window.addEventListener("crm:nuevo-pedido", newOrderRequested);
@@ -7685,7 +7685,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                   : isPurchaseForm
                     ? { code: `COM-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`, status: "Borrador", order_date: tabletTodayInput(), invoice_date: tabletTodayInput(), payment_status: "Pendiente", expected_date: "", amount: 0 }
                   : isOrderForm || active === "Pedidos"
-                    ? (() => { const defaultOrderDate = nextOrderWorkingDate(); return { code: nextOrderCode(), status: "Nuevo", created_by: user?.username || "Usuario local", preparation_date: defaultOrderDate, shipping_date: defaultOrderDate, delivery_date: defaultOrderDate }; })()
+                    ? (() => { const defaultOrderDate = nextOrderWorkingDate(); return { code: nextOrderCode(), status: "Nuevo", created_at: tabletTodayInput(), created_by: user?.username || "Usuario local", preparation_date: defaultOrderDate, shipping_date: defaultOrderDate, delivery_date: defaultOrderDate }; })()
                     : {}
               );
               beginForm(nextForm);
@@ -7833,7 +7833,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                 {c.fields.filter((f: string) => !["product_id", "quantity", "unit_price", "discount", "amount", "billing_status", "payment_status", "shipping_status", "prepared_by", "shipped_by", "delivered_by", "delivery_date", "notes", ...orderScheduleFields].includes(f)).map((f: string) => renderFormField(f, c.fields.indexOf(f)))}
               </div>
             </details>
-            <section className="order-schedule-panel" aria-labelledby="order-schedule-title">
+            {editing && <section className="order-schedule-panel" aria-labelledby="order-schedule-title">
               <div className="order-schedule-head">
                 <div>
                   <b id="order-schedule-title">Planificación del pedido</b>
@@ -7849,7 +7849,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                   </div>
                 ))}
               </div>
-            </section>
+            </section>}
             </>
           ) : c.fields.filter((f: string) => !(active === "Clientes" && clientComputedFields.has(f))).map((f: string) => renderFormField(f, c.fields.indexOf(f)))}
           {(active === "Facturas" || active === "Albaranes") && (
@@ -12930,6 +12930,9 @@ function CrmHome({ routeMode = "crm" }: { routeMode?: keyof typeof routeModuleSc
       return routeModules.includes(stored) ? stored : routeModules[0];
     } catch { return routeModules[0]; }
   });
+  const [navSearch, setNavSearch] = useState("");
+  const [navSearchOpen, setNavSearchOpen] = useState(false);
+  const [navSearchActiveIndex, setNavSearchActiveIndex] = useState(0);
   const [assistantFormIntent, setAssistantFormIntent] = useState<any>(null);
   useEffect(() => {
     function assistantFormRequested(event: Event) {
@@ -12954,6 +12957,30 @@ function CrmHome({ routeMode = "crm" }: { routeMode?: keyof typeof routeModuleSc
     permissions: "*",
   });
   const allowedModules = allowedModulesFor(currentUser).filter((module) => routeModules.includes(module));
+  const navSearchTerms: Record<string, string> = {
+    "Entradas": "recepcion mercancia compras proveedor",
+    "Salidas": "expediciones",
+    "Reparto": "rutas entregas transporte",
+    "Preparación de pedidos": "preparacion almacen picking",
+    "Compras a proveedores": "pedidos compra proveedor",
+    "Facturas": "facturacion factura",
+    "Albaranes": "albaran entrega",
+    "Stock": "inventario existencias",
+    "Productos": "catalogo articulos",
+    "Compras": "proveedores pedidos pedido compra",
+    "Pedidos": "ventas clientes comercial",
+    "Almacenes": "naves ubicaciones",
+  };
+  const navSearchResults = navSearch.trim()
+    ? allowedModules.filter((module) => matchesSearch(`${module} ${navSearchTerms[module] || ""}`, navSearch)).slice(0, 7)
+    : [];
+  const openNavSearchResult = (module: string) => {
+    if (module === "Reparto") window.open("/reparto", "_blank", "noopener,noreferrer");
+    else setActive(module);
+    setNavSearch("");
+    setNavSearchOpen(false);
+    setNavSearchActiveIndex(0);
+  };
   const canOpenCommercialView = currentUser.role === "admin" || allowedModules.includes("Pedidos");
   const canOpenWarehouseView = currentUser.role === "admin" || allowedModules.includes("Preparación de pedidos");
   const canOpenWebView = currentUser.role === "admin" || allowedModules.includes("Clientes");
@@ -13456,6 +13483,31 @@ function CrmHome({ routeMode = "crm" }: { routeMode?: keyof typeof routeModuleSc
         )}
         <div className="appbar-actions">
           <div className="header-quick-actions" aria-label="Accesos rápidos">
+            <div className="navbar-section-search">
+              <input
+                type="search"
+                role="combobox"
+                aria-label="Buscar una sección"
+                aria-autocomplete="list"
+                aria-expanded={navSearchOpen && navSearchResults.length > 0}
+                aria-controls="navbar-section-search-results"
+                placeholder="Ir a sección…"
+                value={navSearch}
+                onFocus={() => setNavSearchOpen(true)}
+                onChange={(event) => { setNavSearch(event.target.value); setNavSearchActiveIndex(0); setNavSearchOpen(true); }}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") { setNavSearchOpen(false); setNavSearch(""); }
+                  if (event.key === "ArrowDown" && navSearchResults.length) { event.preventDefault(); setNavSearchActiveIndex((index) => (index + 1) % navSearchResults.length); }
+                  if (event.key === "ArrowUp" && navSearchResults.length) { event.preventDefault(); setNavSearchActiveIndex((index) => (index - 1 + navSearchResults.length) % navSearchResults.length); }
+                  if (event.key === "Enter" && navSearchResults.length) { event.preventDefault(); openNavSearchResult(navSearchResults[navSearchActiveIndex] || navSearchResults[0]); }
+                }}
+                onBlur={() => window.setTimeout(() => setNavSearchOpen(false), 120)}
+              />
+              {navSearchOpen && navSearchResults.length > 0 && <div className="navbar-section-search-results" id="navbar-section-search-results" role="listbox" aria-label="Secciones">
+                {navSearchResults.map((module, index) => <button key={module} type="button" role="option" aria-selected={index === navSearchActiveIndex} className={index === navSearchActiveIndex ? "is-active" : ""} onMouseDown={(event) => event.preventDefault()} onClick={() => openNavSearchResult(module)}>{module}</button>)}
+              </div>}
+              {navSearchOpen && navSearch.trim() && navSearchResults.length === 0 && <div className="navbar-section-search-empty" role="status">No hay secciones que coincidan</div>}
+            </div>
             {canOpenWarehouseView && <>
               <button
                 className="button primary quick-icon-action"

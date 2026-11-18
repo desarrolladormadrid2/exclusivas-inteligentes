@@ -237,6 +237,7 @@ function createPurchaseOrderPdf(order, lines) {
     ...(order.title ? [`Título: ${order.title}`] : []),
     `Proveedor: ${order.supplier_name || "Proveedor"}`,
     `Fecha: ${order.order_date || "—"} · Entrega prevista: ${order.expected_date || "—"}`,
+    ...(order.delivery_address ? [`Dirección de entrega: ${order.delivery_address}${order.delivery_city ? ` · ${order.delivery_city}` : ""}`] : []),
     `Estado: ${order.status || "Borrador"}`,
     "",
     "PRODUCTOS",
@@ -761,7 +762,7 @@ function selectDatabaseMode(mode) {
 // Ajustes de SQLite para el uso local habitual: lecturas ágiles, escrituras
 // concurrentes sin bloquear la aplicación y menos trabajo de disco.
 db.exec(`CREATE TABLE IF NOT EXISTS purchase_orders(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,supplier_id INTEGER,status TEXT DEFAULT 'Borrador',order_date TEXT DEFAULT CURRENT_DATE,expected_date TEXT,amount REAL DEFAULT 0,notes TEXT);`);
-for (const column of ["updated_at TEXT", "stock_applied_at TEXT", "stock_applied_by TEXT", "supplier_invoice_code TEXT", "invoice_date TEXT", "payment_terms_snapshot TEXT", "payment_due_date TEXT", "payment_status TEXT DEFAULT 'Pendiente'", "payment_paid_at TEXT", "payment_reference TEXT", "ocr_file_name TEXT", "ocr_extracted_text TEXT"] ) {
+for (const column of ["updated_at TEXT", "stock_applied_at TEXT", "stock_applied_by TEXT", "supplier_invoice_code TEXT", "invoice_date TEXT", "payment_terms_snapshot TEXT", "payment_due_date TEXT", "payment_status TEXT DEFAULT 'Pendiente'", "payment_paid_at TEXT", "payment_reference TEXT", "ocr_file_name TEXT", "ocr_extracted_text TEXT", "delivery_warehouse_id INTEGER", "delivery_address TEXT", "delivery_city TEXT"] ) {
   try { db.exec(`ALTER TABLE purchase_orders ADD COLUMN ${column}`); } catch {}
 }
 db.exec(`CREATE TABLE IF NOT EXISTS purchase_order_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,purchase_order_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity REAL DEFAULT 0,unit_cost REAL DEFAULT 0,amount REAL DEFAULT 0);`);
@@ -771,6 +772,7 @@ for (const column of ["quantity_unit TEXT DEFAULT 'unidad'", "supplier_product_n
 db.exec(`CREATE TABLE IF NOT EXISTS supplier_product_aliases(id INTEGER PRIMARY KEY AUTOINCREMENT,supplier_id INTEGER NOT NULL,product_id INTEGER NOT NULL,alias_name TEXT NOT NULL,normalized_alias TEXT NOT NULL,supplier_ref TEXT,quantity_unit TEXT DEFAULT 'unidad',units_per_order REAL DEFAULT 1,source TEXT DEFAULT 'Manual',active INTEGER DEFAULT 1,created_by TEXT,created_at TEXT,updated_at TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS supplier_recurrent_items(id INTEGER PRIMARY KEY AUTOINCREMENT,supplier_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity REAL DEFAULT 1,quantity_unit TEXT DEFAULT 'unidad',unit_cost REAL DEFAULT 0,supplier_alias_id INTEGER,active INTEGER DEFAULT 1,created_by TEXT,created_at TEXT,updated_at TEXT);`);
 db.exec(`CREATE TABLE IF NOT EXISTS purchase_order_observations(id INTEGER PRIMARY KEY AUTOINCREMENT,purchase_order_id INTEGER NOT NULL,observation TEXT NOT NULL,created_by TEXT,created_at TEXT);`);
+db.exec(`CREATE TABLE IF NOT EXISTS purchase_order_attachments(id INTEGER PRIMARY KEY AUTOINCREMENT,purchase_order_id INTEGER NOT NULL,file_name TEXT NOT NULL,mime_type TEXT NOT NULL,file_data TEXT NOT NULL,file_size INTEGER DEFAULT 0,uploaded_by TEXT,created_at TEXT NOT NULL);`);
 try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_supplier_alias_normalized ON supplier_product_aliases(supplier_id,normalized_alias)"); } catch {}
 try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_supplier_recurrent_product ON supplier_recurrent_items(supplier_id,product_id)"); } catch {}
 db.exec(`CREATE TABLE IF NOT EXISTS goods_receipts(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT UNIQUE NOT NULL,supplier_id INTEGER NOT NULL,purchase_order_id INTEGER,purchase_invoice_id INTEGER,warehouse_id INTEGER,receipt_date TEXT NOT NULL,status TEXT DEFAULT 'Borrador',validation_status TEXT DEFAULT 'Pendiente',validated_by TEXT,validated_at TEXT,notes TEXT,created_by TEXT,received_by TEXT,created_at TEXT,updated_at TEXT,deleted TEXT DEFAULT '0',deleted_at TEXT,deleted_by TEXT);`);
@@ -1935,7 +1937,7 @@ const lookupFields = {
   shipments: ["id", "code", "order_id", "client_id", "collection_point_id", "status", "expected_delivery_at", "preparation_date", "address", "delivery_city", "delivery_window_start", "delivery_window_end", "carrier", "packages", "incidents", "notes", "driver_notes", "invoice_delivery_method", "prepared_at", "prepared_by", "preparation_closed_at", "preparation_closed_by", "shipped_at", "shipped_by", "departure_at", "delivered_at", "delivered_by", "delivery_signature_status", "delivery_recipient_name", "delivery_signature_at", "delivery_signature_by", "delivery_signature_note", "payment_received_status", "payment_received_amount", "payment_received_method", "payment_received_reference", "payment_received_note", "payment_received_at", "payment_received_by", "public_tracking_token"],
   order_lines: ["id", "order_id", "product_id", "quantity", "quantity_requested", "quantity_unit", "prepared", "prepared_quantity", "preparation_status", "incident_resolution"],
   invoices: ["id", "code", "order_id", "client_id", "amount", "vat", "base_amount", "vat_amount", "equivalence_surcharge_enabled", "equivalence_surcharge_amount", "equivalence_surcharge_breakdown", "gtr_enabled", "status", "created_at", "issue_date", "due_date", "client_name_snapshot", "client_legal_name_snapshot", "client_tax_id_snapshot", "client_billing_address_snapshot", "client_billing_city_snapshot", "client_delivery_address_snapshot", "client_delivery_city_snapshot"],
-  purchase_orders: ["id", "code", "title", "supplier_id", "status", "order_date", "expected_date", "amount", "validation_status", "supplier_invoice_code", "invoice_date", "payment_terms_snapshot", "payment_due_date", "payment_status", "payment_paid_at", "payment_reference"],
+  purchase_orders: ["id", "code", "title", "supplier_id", "status", "order_date", "expected_date", "amount", "validation_status", "supplier_invoice_code", "invoice_date", "payment_terms_snapshot", "payment_due_date", "payment_status", "payment_paid_at", "payment_reference", "delivery_warehouse_id", "delivery_address", "delivery_city"],
   goods_receipts: ["id", "code", "counterparty_type", "client_id", "supplier_id", "purchase_order_id", "purchase_invoice_id", "warehouse_id", "receipt_date", "status", "validation_status", "validated_by", "validated_at", "stock_applied", "stock_on_validation", "stock_added_quantity", "stock_applied_at", "stock_applied_by", "line_count", "incident_count", "received_by", "notes"],
   goods_receipt_lines: ["id", "receipt_id", "product_id", "product_name_snapshot", "expected_quantity", "received_quantity", "quantity_unit", "damaged_quantity", "substituted_quantity", "substitute_product_id", "unit_cost", "expected_value", "received_value", "economic_difference", "status", "lot_id", "lot_code", "expiry_date", "notes", "location_verified_status", "location_verified_code", "location_verified_reason", "location_verified_by", "location_verified_at"],
   goods_receipt_incidents: ["id", "receipt_id", "receipt_line_id", "supplier_id", "type", "description", "expected_quantity", "received_quantity", "damaged_quantity", "substituted_quantity", "substitute_product_id", "economic_difference", "status", "claim_status", "attachment_name", "attachment_mime", "created_by", "created_at"],
@@ -2192,7 +2194,7 @@ function getPendingPurchaseReceiptOrders() {
       GROUP BY gr.purchase_order_id,gl.product_id,COALESCE(NULLIF(TRIM(gl.quantity_unit),''),NULLIF(TRIM(p.unit),''),'unidad')
     )
     SELECT po.id,po.code,po.title,po.supplier_id,s.name AS supplier_name,po.status,
-      po.order_date,po.expected_date,po.notes,ordered.product_id,p.name AS product_name,p.sku,
+      po.order_date,po.expected_date,po.notes,po.delivery_warehouse_id,po.delivery_address,po.delivery_city,ordered.product_id,p.name AS product_name,p.sku,
       ordered.quantity_unit,ordered.ordered_quantity,COALESCE(received.received_good_quantity,0) AS received_good_quantity,
       MAX(0,ordered.ordered_quantity-COALESCE(received.received_good_quantity,0)) AS remaining_quantity,
       ordered.unit_cost,pending_receipt.id AS pending_receipt_id,pending_receipt.code AS pending_receipt_code
@@ -2218,7 +2220,7 @@ function getPendingPurchaseReceiptOrders() {
   for (const row of rows) {
     let order = orders.get(Number(row.id));
     if (!order) {
-      order = { id: Number(row.id), code: row.code, title: row.title, supplier_id: Number(row.supplier_id), supplier_name: row.supplier_name, status: row.status, order_date: row.order_date, expected_date: row.expected_date, notes: row.notes, pending_receipt_id: row.pending_receipt_id ? Number(row.pending_receipt_id) : null, pending_receipt_code: row.pending_receipt_code || "", lines: [], remaining_units: 0 };
+      order = { id: Number(row.id), code: row.code, title: row.title, supplier_id: Number(row.supplier_id), supplier_name: row.supplier_name, status: row.status, order_date: row.order_date, expected_date: row.expected_date, notes: row.notes, delivery_warehouse_id: row.delivery_warehouse_id ? Number(row.delivery_warehouse_id) : null, delivery_address: row.delivery_address || "", delivery_city: row.delivery_city || "", pending_receipt_id: row.pending_receipt_id ? Number(row.pending_receipt_id) : null, pending_receipt_code: row.pending_receipt_code || "", lines: [], remaining_units: 0 };
       orders.set(Number(row.id), order);
     }
     const line = { product_id: Number(row.product_id), product_name: row.product_name, sku: row.sku, quantity_unit: row.quantity_unit, ordered_quantity: Number(row.ordered_quantity || 0), received_good_quantity: Number(row.received_good_quantity || 0), remaining_quantity: Number(row.remaining_quantity || 0), unit_cost: Number(row.unit_cost || 0) };
@@ -2564,7 +2566,7 @@ export async function crmApiHandler(req, res) {
         if (!db.prepare("SELECT id FROM suppliers WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(supplierId)) return send(res, 404, { error: "El proveedor no existe." });
         const rows = db.prepare(`
           WITH ranked_history AS (
-            SELECT pol.product_id,pol.quantity,pol.quantity_unit,pol.unit_cost,po.order_date,po.id AS order_id,pol.id AS line_id,
+            SELECT pol.product_id,pol.quantity,pol.quantity_unit,pol.unit_cost,pol.supplier_product_name,pol.supplier_ref,pol.supplier_alias_id,po.order_date,po.id AS order_id,pol.id AS line_id,
               ROW_NUMBER() OVER (PARTITION BY pol.product_id ORDER BY COALESCE(po.order_date,'') DESC,po.id DESC,pol.id DESC) AS line_rank
             FROM purchase_order_lines pol
             JOIN purchase_orders po ON po.id=pol.purchase_order_id
@@ -2585,7 +2587,7 @@ export async function crmApiHandler(req, res) {
             COALESCE(r.quantity,latest.quantity,1) AS quantity,
             COALESCE(NULLIF(r.quantity_unit,''),NULLIF(latest.quantity_unit,''),NULLIF(p.purchase_format,''),NULLIF(p.unit,''),'unidad') AS quantity_unit,
             COALESCE(r.unit_cost,latest.unit_cost,p.cost_price,0) AS unit_cost,
-            r.supplier_alias_id,r.id AS recurrence_id,
+            r.supplier_alias_id,r.id AS recurrence_id,latest.supplier_product_name,latest.supplier_ref,
             COALESCE(history.purchase_count,0) AS purchase_count,history.last_order_date
           FROM candidates candidate
           JOIN products p ON p.id=candidate.product_id
@@ -2630,7 +2632,42 @@ export async function crmApiHandler(req, res) {
         if (!order) return send(res, 404, { error: "Pedido de compra no encontrado" });
         const lines = db.prepare("SELECT pol.*,p.name product_name,p.sku,MAX(0,pol.quantity-COALESCE((SELECT SUM(CASE WHEN gl.status='Producto equivocado' THEN 0 ELSE MAX(0,COALESCE(gl.received_quantity,0)-COALESCE(gl.damaged_quantity,0)-COALESCE(gl.substituted_quantity,0)) END) FROM goods_receipt_lines gl JOIN goods_receipts gr ON gr.id=gl.receipt_id WHERE gr.purchase_order_id=pol.purchase_order_id AND gl.product_id=pol.product_id AND gr.validation_status='Validada' AND CAST(COALESCE(gr.deleted,0) AS INTEGER)=0 AND CAST(COALESCE(gl.deleted,0) AS INTEGER)=0),0)) remaining_quantity FROM purchase_order_lines pol LEFT JOIN products p ON p.id=pol.product_id WHERE pol.purchase_order_id=? AND CAST(COALESCE(pol.deleted,0) AS INTEGER)=0 ORDER BY pol.id").all(Number(p[2]));
         const observations = db.prepare("SELECT * FROM purchase_order_observations WHERE purchase_order_id=? ORDER BY id DESC LIMIT 100").all(Number(p[2]));
-        return send(res, 200, { ...enrichPurchaseOrder(order), lines, observations });
+        const attachments = db.prepare("SELECT id,purchase_order_id,file_name,mime_type,file_size,uploaded_by,created_at FROM purchase_order_attachments WHERE purchase_order_id=? ORDER BY id DESC").all(Number(p[2]));
+        return send(res, 200, { ...enrichPurchaseOrder(order), lines, observations, attachments });
+      }
+      if (p[1] === "purchase_orders" && p[2] && p[3] === "attachments" && req.method === "POST") {
+        const purchaseOrderId = Number(p[2]);
+        const order = db.prepare("SELECT id FROM purchase_orders WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(purchaseOrderId);
+        if (!order) return send(res, 404, { error: "Pedido de compra no encontrado" });
+        const body = await read(req);
+        const fileName = String(body.file_name || "factura-proveedor.pdf").replace(/[<>:\"/\\|?*\x00-\x1f]/g, "_").slice(0, 180);
+        const fileData = String(body.file_data || "");
+        const match = fileData.match(/^data:application\/pdf;base64,([a-z0-9+/=]+)$/i);
+        if (!match || !fileName.toLowerCase().endsWith(".pdf")) return send(res, 400, { error: "Adjunta un archivo PDF válido." });
+        const file = Buffer.from(match[1], "base64");
+        if (!file.length || file.length > 15 * 1024 * 1024) return send(res, 413, { error: "El PDF debe pesar menos de 15 MB." });
+        if (file.subarray(0, 5).toString("ascii") !== "%PDF-") return send(res, 400, { error: "El archivo no contiene un PDF válido." });
+        const now = new Date().toISOString();
+        const created = db.prepare("INSERT INTO purchase_order_attachments(purchase_order_id,file_name,mime_type,file_data,file_size,uploaded_by,created_at) VALUES(?,?,?,?,?,?,?)").run(purchaseOrderId, fileName, "application/pdf", match[1], file.length, actor, now);
+        const attachment = { id: Number(created.lastInsertRowid), purchase_order_id: purchaseOrderId, file_name: fileName, mime_type: "application/pdf", file_size: file.length, uploaded_by: actor, created_at: now };
+        recordAudit(actor, "POST", `purchase_orders/${purchaseOrderId}/attachments/${attachment.id}`, "Adjuntar factura de proveedor", JSON.stringify({ file_name: fileName, file_size: file.length }));
+        return send(res, 201, attachment);
+      }
+      if (p[1] === "purchase_order_attachments" && p[2] && p[3] === "file" && req.method === "GET") {
+        const attachment = db.prepare("SELECT file_name,mime_type,file_data FROM purchase_order_attachments WHERE id=?").get(Number(p[2]));
+        if (!attachment) return send(res, 404, { error: "Adjunto no encontrado" });
+        const file = Buffer.from(String(attachment.file_data || ""), "base64");
+        const safeName = String(attachment.file_name || "factura-proveedor.pdf").replace(/[\r\n\"]+/g, "_");
+        res.writeHead(200, { "Content-Type": "application/pdf", "Content-Length": file.length, "Content-Disposition": `inline; filename="${safeName}"`, "X-Content-Type-Options": "nosniff" });
+        res.end(file);
+        return;
+      }
+      if (p[1] === "purchase_order_attachments" && p[2] && req.method === "DELETE") {
+        const attachment = db.prepare("SELECT id,purchase_order_id,file_name FROM purchase_order_attachments WHERE id=?").get(Number(p[2]));
+        if (!attachment) return send(res, 404, { error: "Adjunto no encontrado" });
+        db.prepare("DELETE FROM purchase_order_attachments WHERE id=?").run(Number(p[2]));
+        recordAudit(actor, "DELETE", `purchase_orders/${Number(attachment.purchase_order_id)}/attachments/${Number(attachment.id)}`, "Eliminar factura adjunta del proveedor", String(attachment.file_name || ""));
+        return send(res, 200, { ok: true });
       }
       if (p[1] === "purchase_orders" && p[2] && p[3] === "pdf" && req.method === "GET") {
         const order = db.prepare("SELECT po.*,s.name supplier_name FROM purchase_orders po LEFT JOIN suppliers s ON s.id=po.supplier_id WHERE po.id=? AND CAST(COALESCE(po.deleted,0) AS INTEGER)=0").get(Number(p[2]));

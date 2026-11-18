@@ -303,6 +303,12 @@ const migrationsByTable = {
     ["payment_status", "ALTER TABLE purchase_orders ADD COLUMN payment_status TEXT DEFAULT 'Pendiente'"],
     ["payment_paid_at", "ALTER TABLE purchase_orders ADD COLUMN payment_paid_at TEXT"],
     ["payment_reference", "ALTER TABLE purchase_orders ADD COLUMN payment_reference TEXT"],
+    ["delivery_warehouse_id", "ALTER TABLE purchase_orders ADD COLUMN delivery_warehouse_id INTEGER"],
+    ["delivery_address", "ALTER TABLE purchase_orders ADD COLUMN delivery_address TEXT"],
+    ["delivery_city", "ALTER TABLE purchase_orders ADD COLUMN delivery_city TEXT"],
+  ],
+  purchase_order_attachments: [
+    ["table", "CREATE TABLE IF NOT EXISTS purchase_order_attachments(id INTEGER PRIMARY KEY AUTOINCREMENT,purchase_order_id INTEGER NOT NULL,file_name TEXT NOT NULL,mime_type TEXT NOT NULL,file_data TEXT NOT NULL,file_size INTEGER DEFAULT 0,uploaded_by TEXT,created_at TEXT NOT NULL)"],
   ],
   returns: [
     ["return_date", "ALTER TABLE returns ADD COLUMN return_date TEXT"],
