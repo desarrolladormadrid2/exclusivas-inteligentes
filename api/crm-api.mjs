@@ -1,12 +1,12 @@
 import http from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { deflateSync, gunzipSync, gzipSync } from "node:zlib";
+import { gunzipSync, gzipSync } from "node:zlib";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { PNG } from "pngjs";
 import { createRemoteDatabaseSync } from "../remote-db-sync.mjs";
 import { calculateInvoiceTotals } from "./invoice-totals.mjs";
+import { createCommercialDocumentPdf as renderCommercialDocumentPdf, createSupplierPurchasePdf } from "./document-pdf.mjs";
 const APP_VERSION = (() => {
   try {
     return String(JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version || "desconocida");
@@ -149,132 +149,11 @@ function pdfSafeText(value) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^\x20-\x7E]/g, "?");
 }
-function pdfLiteral(value) {
-  return `(${pdfSafeText(value).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)")})`;
-}
 function createInvoicePdf(invoice) {
-  const lineRows = Array.isArray(invoice.lines) ? invoice.lines : [];
-  const routeAssignments = Array.isArray(invoice.route_assignments) ? invoice.route_assignments : [];
-  const calculated = lineRows.length ? calculateInvoiceTotals(lineRows, Boolean(Number(invoice.equivalence_surcharge_enabled || 0))) : null;
-  const vatRate = Number(invoice.vat || 21);
-  const base = Number(invoice.base_amount ?? calculated?.base_amount ?? 0) || (Number(invoice.amount || 0) / (1 + vatRate / 100));
-  const vat = Number(invoice.vat_amount ?? calculated?.vat_amount ?? 0) || (lineRows.length ? Number(calculated?.vat_amount || 0) : Number(invoice.amount || 0) - base);
-  const surcharge = Number(invoice.equivalence_surcharge_amount ?? calculated?.equivalence_surcharge_amount ?? 0);
-  const total = lineRows.length ? Number(calculated?.total_amount || base + vat + surcharge) : Number(invoice.amount || 0) || base + vat + surcharge;
-  const breakdown = calculated?.equivalence_surcharge_breakdown || (() => { try { return JSON.parse(invoice.equivalence_surcharge_breakdown || "[]"); } catch { return []; } })();
-  const lines = [
-    "EXCLUSIVAS INTELIGENTES",
-    "DISTRIBUIDORA DE BEBIDAS",
-    "",
-    `FACTURA ${invoice.code || `#${invoice.id}`}`,
-    `Fecha: ${String(invoice.issue_date || invoice.created_at || new Date().toISOString()).slice(0, 10)}`,
-    "",
-    `Cliente: ${invoice.client_name || "Cliente no indicado"}`,
-    ...(invoice.client_legal_name && invoice.client_legal_name !== invoice.client_name ? [`Razón social: ${invoice.client_legal_name}`] : []),
-    `NIF/CIF: ${invoice.client_tax_id || "No indicado"}`,
-    `Direccion: ${invoice.client_address || "No indicada"}`,
-    `Ciudad: ${invoice.client_city || "No indicada"}`,
-    `Correo: ${invoice.client_email || "No indicado"}`,
-    ...(routeAssignments.length ? ["", "REPARTO", ...routeAssignments.map((assignment) => `Camion: ${assignment.vehicle_label || "Sin camión"} · Ruta: ${assignment.route_code || "Sin ruta"}${assignment.driver ? ` · Conductor: ${assignment.driver}` : ""}`)] : []),
-    "",
-    "CONCEPTOS",
-    ...(lineRows.length ? lineRows.flatMap((line) => {
-      const description = line.description || line.product_name || `Producto #${line.product_id || ""}`;
-      const quantity = Number(line.quantity || 0);
-      const amount = Number(line.amount || quantity * Number(line.unit_price || 0));
-      return [`${description} · ${quantity} uds. · ${amount.toFixed(2)} EUR${line.line_type === "GTR" ? " · IVA 21% · Cuenta 70500000" : ""}`];
-    }) : ["Sin lineas de producto asociadas"]),
-    "",
-    `Base imponible: ${base.toFixed(2)} EUR`,
-    ...(breakdown.length ? breakdown.map((row) => `IVA (${Number(row.vat_rate || 0).toFixed(0)}%): ${Number(row.vat_amount || 0).toFixed(2)} EUR`) : [`IVA: ${vat.toFixed(2)} EUR`]),
-    ...(Number(invoice.equivalence_surcharge_enabled || 0) && surcharge > 0 ? [`Recargo de equivalencia: ${surcharge.toFixed(2)} EUR`] : []),
-    `TOTAL: ${total.toFixed(2)} EUR`,
-    "",
-    "Documento generado por Exclusivas Inteligentes.",
-  ];
-  const wrapped = [];
-  for (const line of lines) {
-    const text = pdfSafeText(line);
-    if (!text) { wrapped.push(""); continue; }
-    for (let offset = 0; offset < text.length; offset += 92) wrapped.push(text.slice(offset, offset + 92));
-  }
-  const pages = [];
-  for (let offset = 0; offset < wrapped.length; offset += 38) pages.push(wrapped.slice(offset, offset + 38));
-  if (!pages.length) pages.push(["Factura sin contenido"]);
-  const objects = [];
-  const addObject = (value) => { objects.push(value); return objects.length; };
-  const catalogId = addObject("");
-  const pagesId = addObject("");
-  const fontId = addObject("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
-  const pageIds = [];
-  for (const pageLines of pages) {
-    const commands = ["BT", "/F1 10 Tf", "50 790 Td"];
-    pageLines.forEach((line, index) => {
-      if (index) commands.push("0 -18 Td");
-      commands.push(`${pdfLiteral(line)} Tj`);
-    });
-    commands.push("ET");
-    const contentId = addObject(`<< /Length ${Buffer.byteLength(commands.join("\n"), "ascii")} >>\nstream\n${commands.join("\n")}\nendstream`);
-    const pageId = addObject("");
-    objects[pageId - 1] = `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 ${fontId} 0 R >> >> /Contents ${contentId} 0 R >>`;
-    pageIds.push(pageId);
-  }
-  objects[catalogId - 1] = `<< /Type /Catalog /Pages ${pagesId} 0 R >>`;
-  objects[pagesId - 1] = `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pageIds.length} >>`;
-  let pdf = "%PDF-1.4\n%âãÏÓ\n";
-  const offsets = [0];
-  objects.forEach((object, index) => { offsets.push(Buffer.byteLength(pdf, "binary")); pdf += `${index + 1} 0 obj\n${object}\nendobj\n`; });
-  const xref = Buffer.byteLength(pdf, "binary");
-  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  offsets.slice(1).forEach((offset) => { pdf += `${String(offset).padStart(10, "0")} 00000 n \n`; });
-  pdf += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogId} 0 R >>\nstartxref\n${xref}\n%%EOF`;
-  return Buffer.from(pdf, "binary");
+  return renderCommercialDocumentPdf(invoice || {}, "invoice");
 }
 function createPurchaseOrderPdf(order, lines) {
-  const content = [
-    "EXCLUSIVAS INTELIGENTES · PEDIDO A PROVEEDOR",
-    `Pedido: ${order.code || `#${order.id}`}`,
-    ...(order.title ? [`Título: ${order.title}`] : []),
-    `Proveedor: ${order.supplier_name || "Proveedor"}`,
-    `Fecha: ${order.order_date || "—"} · Entrega prevista: ${order.expected_date || "—"}`,
-    ...(order.delivery_address ? [`Dirección de entrega: ${order.delivery_address}${order.delivery_city ? ` · ${order.delivery_city}` : ""}`] : []),
-    `Estado: ${order.status || "Borrador"}`,
-    "",
-    "PRODUCTOS",
-    ...lines.map((line) => `${line.product_name || `Producto #${line.product_id}`} · ${line.supplier_product_name || line.supplier_ref || ""} · ${line.quantity} ${line.quantity_unit || "unidad"} · ${(Number(line.amount || 0)).toFixed(2)} EUR`),
-    "",
-    `TOTAL: ${Number(order.amount || 0).toFixed(2)} EUR`,
-    ...(order.notes ? ["", `Observaciones: ${order.notes}`] : []),
-    "Documento generado por Exclusivas Inteligentes.",
-  ];
-  const wrapped = content.flatMap((line) => {
-    const text = pdfSafeText(line);
-    return text ? Array.from({ length: Math.ceil(text.length / 92) }, (_, index) => text.slice(index * 92, (index + 1) * 92)) : [""];
-  });
-  const pages = [];
-  for (let offset = 0; offset < wrapped.length; offset += 38) pages.push(wrapped.slice(offset, offset + 38));
-  const objects = [];
-  const addObject = (value) => { objects.push(value); return objects.length; };
-  const catalogId = addObject(""), pagesId = addObject(""), fontId = addObject("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"), pageIds = [];
-  for (const pageLines of pages) {
-    const commands = ["BT", "/F1 10 Tf", "50 790 Td"];
-    pageLines.forEach((line, index) => { if (index) commands.push("0 -18 Td"); commands.push(`${pdfLiteral(line)} Tj`); });
-    commands.push("ET");
-    const contentId = addObject(`<< /Length ${Buffer.byteLength(commands.join("\n"), "ascii")} >>\nstream\n${commands.join("\n")}\nendstream`);
-    const pageId = addObject("");
-    objects[pageId - 1] = `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 ${fontId} 0 R >> >> /Contents ${contentId} 0 R >>`;
-    pageIds.push(pageId);
-  }
-  objects[catalogId - 1] = `<< /Type /Catalog /Pages ${pagesId} 0 R >>`;
-  objects[pagesId - 1] = `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pageIds.length} >>`;
-  let pdf = "%PDF-1.4\n%âãÏÓ\n";
-  const offsets = [0];
-  objects.forEach((object, index) => { offsets.push(Buffer.byteLength(pdf, "binary")); pdf += `${index + 1} 0 obj\n${object}\nendobj\n`; });
-  const xref = Buffer.byteLength(pdf, "binary");
-  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  offsets.slice(1).forEach((offset) => { pdf += `${String(offset).padStart(10, "0")} 00000 n \n`; });
-  pdf += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogId} 0 R >>\nstartxref\n${xref}\n%%EOF`;
-  return Buffer.from(pdf, "binary");
+  return createSupplierPurchasePdf(order || {}, lines);
 }
 function invoiceRouteAssignments(invoice) {
   const orderIds = [...new Set([
@@ -303,7 +182,8 @@ function invoicePdfData(invoiceId) {
     COALESCE(NULLIF(TRIM(i.client_billing_address_snapshot),''),NULLIF(TRIM(c.billing_address),''),c.address) client_address,
     COALESCE(NULLIF(TRIM(i.client_billing_city_snapshot),''),NULLIF(TRIM(c.billing_city),''),c.city) client_city,
     COALESCE(NULLIF(TRIM(i.client_email_snapshot),''),c.email) client_email,
-    COALESCE(NULLIF(TRIM(i.client_phone_snapshot),''),c.phone) client_phone
+    COALESCE(NULLIF(TRIM(i.client_phone_snapshot),''),c.phone) client_phone,c.external_code client_code,
+    c.payment_terms_code invoice_payment_terms,c.payment_method_code invoice_payment_method
     FROM invoices i LEFT JOIN clients c ON c.id=i.client_id
     WHERE i.id=? AND CAST(COALESCE(i.deleted,0) AS INTEGER)=0`).get(Number(invoiceId));
   if (!invoice) return null;
@@ -548,7 +428,7 @@ function commercialPdfConfig(type) {
 function commercialDocumentPdfData(type, documentId) {
   const config = commercialPdfConfig(type);
   const clientNameExpression = ["invoices", "delivery_notes", "shipments"].includes(config.table) ? "COALESCE(NULLIF(TRIM(d.client_name_snapshot),''),c.name)" : "c.name";
-  const document = db.prepare(`SELECT d.*,${clientNameExpression} client_name,c.address client_address,c.city client_city,c.email client_email,c.phone client_phone FROM ${config.table} d LEFT JOIN clients c ON c.id=d.client_id WHERE d.id=? AND CAST(COALESCE(d.deleted,0) AS INTEGER)=0`).get(Number(documentId));
+  const document = db.prepare(`SELECT d.*,${clientNameExpression} client_name,c.legal_name client_legal_name,c.tax_id client_tax_id,c.external_code client_code,c.address client_address,c.city client_city,c.email client_email,c.phone client_phone FROM ${config.table} d LEFT JOIN clients c ON c.id=d.client_id WHERE d.id=? AND CAST(COALESCE(d.deleted,0) AS INTEGER)=0`).get(Number(documentId));
   if (!document) return null;
   const productNameExpression = ["delivery_note_lines", "order_lines"].includes(config.lines) ? "COALESCE(NULLIF(TRIM(l.product_name_snapshot),''),p.name)" : "p.name";
   const lines = db.prepare(`SELECT l.*,${productNameExpression} product_name,p.sku FROM ${config.lines} l LEFT JOIN products p ON p.id=l.product_id WHERE l.${config.foreignKey}=? ORDER BY l.id`).all(Number(documentId));
@@ -558,112 +438,8 @@ function commercialDocumentPdfData(type, documentId) {
   return { ...document, ...(proof || {}), lines };
 }
 function createCommercialDocumentPdf(document, type) {
-  const config = commercialPdfConfig(type);
-  const lineRows = Array.isArray(document.lines) ? document.lines : [];
-  const vatRate = Number(document.vat || 21);
-  const pricedLines = lineRows.map((line) => ({ ...line, amount: Number(line.amount || Number(line.quantity || line.quantity_requested || 0) * Number(line.unit_price || 0)) }));
-  const calculated = calculateInvoiceTotals(pricedLines, false);
-  const hasPricedLines = pricedLines.some((line) => Number(line.amount || 0) !== 0);
-  const base = hasPricedLines ? calculated.base_amount : Number(document.base_amount ?? document.amount ?? 0);
-  const vatBreakdown = hasPricedLines
-    ? calculated.equivalence_surcharge_breakdown.map((row) => `IVA (${Number(row.vat_rate || 0).toFixed(0)}%): ${Number(row.vat_amount || 0).toFixed(2)} EUR`)
-    : [`IVA (${vatRate.toFixed(0)}%): ${Number(document.vat_amount || 0).toFixed(2)} EUR`];
-  const total = hasPricedLines ? calculated.total_amount : Number(document.amount || (base + Number(document.vat_amount || 0)));
-  const date = config.dateFields.map((field) => document[field]).find(Boolean) || new Date().toISOString();
-  const lines = [
-    "EXCLUSIVAS INTELIGENTES",
-    "DISTRIBUIDORA DE BEBIDAS",
-    "",
-    `${config.label} ${document.code || `#${document.id}`}`,
-    `Fecha: ${String(date).slice(0, 10)}`,
-    `Estado: ${document.status || "Pendiente"}`,
-    "",
-    `Cliente: ${document.client_name || "Cliente no indicado"}`,
-    `Direccion: ${document.client_address || document.address || "No indicada"}`,
-    `Ciudad: ${document.client_city || document.city || "No indicada"}`,
-    `Correo: ${document.client_email || "No indicado"}`,
-    "",
-    "CONCEPTOS",
-    ...(lineRows.length ? lineRows.flatMap((line) => {
-      const description = line.description || line.product_name || `Producto #${line.product_id || ""}`;
-      const quantity = Number(line.quantity || line.quantity_requested || 0);
-      const amount = Number(line.amount || quantity * Number(line.unit_price || 0));
-      return [`${description} · ${quantity} uds. · ${amount.toFixed(2)} EUR${line.line_type === "GTR" ? " · IVA 21% · Cuenta 70500000" : ""}`];
-    }) : ["Sin líneas de producto asociadas"]),
-    "",
-    `Base imponible: ${base.toFixed(2)} EUR`,
-    ...vatBreakdown,
-    `TOTAL: ${total.toFixed(2)} EUR`,
-    ...(type === "delivery" ? [
-      "",
-      "JUSTIFICANTE DE ENTREGA",
-      `Recepcion: ${document.delivery_signature_status === "Firmado" ? "Firmada" : document.delivery_signature_status || "Pendiente"}`,
-      `Recibe: ${document.delivery_recipient_name || "No indicado"}`,
-      `Fecha de recepcion: ${document.delivery_signature_at ? String(document.delivery_signature_at).slice(0, 16).replace("T", " ") : "No indicada"}`,
-      `Registrado por: ${document.delivery_signature_by || "No indicado"}`,
-      `Observaciones: ${document.delivery_signature_note || "Sin observaciones"}`,
-      document.delivery_signature_status === "Firmado" ? "Firma digital de recepcion registrada en el sistema." : "La entrega todavía no consta como firmada.",
-    ] : []),
-    "",
-    "Documento generado por Exclusivas Inteligentes.",
-  ];
-  const wrapped = [];
-  for (const line of lines) {
-    const text = pdfSafeText(line);
-    if (!text) { wrapped.push(""); continue; }
-    for (let offset = 0; offset < text.length; offset += 92) wrapped.push(text.slice(offset, offset + 92));
-  }
-  const pages = [];
-  for (let offset = 0; offset < wrapped.length; offset += 38) pages.push(wrapped.slice(offset, offset + 38));
-  if (!pages.length) pages.push([`${config.label} sin contenido`]);
-  let signatureImage = null;
-  if (type === "delivery" && document.delivery_signature_status === "Firmado" && String(document.delivery_signature_data || "").startsWith("data:image/png;base64,")) {
-    try {
-      const png = PNG.sync.read(Buffer.from(String(document.delivery_signature_data).split(",", 2)[1], "base64"));
-      const rgb = Buffer.alloc(png.width * png.height * 3);
-      for (let source = 0, target = 0; source < png.data.length; source += 4, target += 3) {
-        const alpha = png.data[source + 3] / 255;
-        rgb[target] = Math.round(png.data[source] * alpha + 255 * (1 - alpha));
-        rgb[target + 1] = Math.round(png.data[source + 1] * alpha + 255 * (1 - alpha));
-        rgb[target + 2] = Math.round(png.data[source + 2] * alpha + 255 * (1 - alpha));
-      }
-      signatureImage = { width: png.width, height: png.height, compressed: deflateSync(rgb) };
-    } catch {}
-  }
-  const objects = [];
-  const addObject = (value) => { objects.push(value); return objects.length; };
-  const catalogId = addObject("");
-  const pagesId = addObject("");
-  const fontId = addObject("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
-  const signatureImageId = signatureImage
-    ? addObject(`<< /Type /XObject /Subtype /Image /Width ${signatureImage.width} /Height ${signatureImage.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length ${signatureImage.compressed.length} >>\nstream\n${signatureImage.compressed.toString("binary")}\nendstream`)
-    : null;
-  const pageIds = [];
-  for (let pageIndex = 0; pageIndex < pages.length; pageIndex += 1) {
-    const pageLines = pages[pageIndex];
-    const commands = ["BT", "/F1 10 Tf", "50 790 Td"];
-    pageLines.forEach((line, index) => {
-      if (index) commands.push("0 -18 Td");
-      commands.push(`${pdfLiteral(line)} Tj`);
-    });
-    commands.push("ET");
-    if (signatureImageId && pageIndex === pages.length - 1) commands.push("q", "280 0 0 105 50 70 cm", "/Im1 Do", "Q");
-    const contentId = addObject(`<< /Length ${Buffer.byteLength(commands.join("\n"), "ascii")} >>\nstream\n${commands.join("\n")}\nendstream`);
-    const pageId = addObject("");
-    const xObject = signatureImageId ? ` /XObject << /Im1 ${signatureImageId} 0 R >>` : "";
-    objects[pageId - 1] = `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 ${fontId} 0 R >>${xObject} >> /Contents ${contentId} 0 R >>`;
-    pageIds.push(pageId);
-  }
-  objects[catalogId - 1] = `<< /Type /Catalog /Pages ${pagesId} 0 R >>`;
-  objects[pagesId - 1] = `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pageIds.length} >>`;
-  let pdf = "%PDF-1.4\n%âãÏÓ\n";
-  const offsets = [0];
-  objects.forEach((object, index) => { offsets.push(Buffer.byteLength(pdf, "binary")); pdf += `${index + 1} 0 obj\n${object}\nendobj\n`; });
-  const xref = Buffer.byteLength(pdf, "binary");
-  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  offsets.slice(1).forEach((offset) => { pdf += `${String(offset).padStart(10, "0")} 00000 n \n`; });
-  pdf += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogId} 0 R >>\nstartxref\n${xref}\n%%EOF`;
-  return Buffer.from(pdf, "binary");
+  commercialPdfConfig(type);
+  return renderCommercialDocumentPdf(document || {}, type);
 }
 async function uploadCommercialDocumentPdf(buffer, document, type) {
   if (!cloudinaryReady()) return null;
@@ -2706,7 +2482,7 @@ export async function crmApiHandler(req, res) {
         return send(res, 200, { ok: true });
       }
       if (p[1] === "purchase_orders" && p[2] && p[3] === "pdf" && req.method === "GET") {
-        const order = db.prepare("SELECT po.*,s.name supplier_name FROM purchase_orders po LEFT JOIN suppliers s ON s.id=po.supplier_id WHERE po.id=? AND CAST(COALESCE(po.deleted,0) AS INTEGER)=0").get(Number(p[2]));
+        const order = db.prepare("SELECT po.*,s.name supplier_name,s.tax_id supplier_tax_id,s.external_code supplier_code,s.address supplier_address,s.city supplier_city,s.phone supplier_phone,s.contact supplier_contact,s.email supplier_email,w.name warehouse_name,w.address warehouse_address FROM purchase_orders po LEFT JOIN suppliers s ON s.id=po.supplier_id LEFT JOIN warehouses w ON w.id=po.delivery_warehouse_id WHERE po.id=? AND CAST(COALESCE(po.deleted,0) AS INTEGER)=0").get(Number(p[2]));
         if (!order) return send(res, 404, { error: "Pedido de compra no encontrado" });
         const lines = db.prepare("SELECT pol.*,p.name product_name FROM purchase_order_lines pol LEFT JOIN products p ON p.id=pol.product_id WHERE pol.purchase_order_id=? AND CAST(COALESCE(pol.deleted,0) AS INTEGER)=0 ORDER BY pol.id").all(Number(p[2]));
         return sendPdf(res, createPurchaseOrderPdf(order, lines), `${String(order.code || "pedido-compra").replace(/[^a-zA-Z0-9_-]/g, "_")}.pdf`, "attachment");
@@ -2725,7 +2501,7 @@ export async function crmApiHandler(req, res) {
         return send(res, 201, { id: Number(created.lastInsertRowid), purchase_order_id: Number(p[2]), observation, created_by: actor, created_at: now });
       }
       if (p[1] === "purchase_orders" && p[2] && p[3] === "email" && req.method === "POST") {
-        const order = db.prepare("SELECT po.*,s.name supplier_name,s.email supplier_email FROM purchase_orders po LEFT JOIN suppliers s ON s.id=po.supplier_id WHERE po.id=? AND CAST(COALESCE(po.deleted,0) AS INTEGER)=0").get(Number(p[2]));
+        const order = db.prepare("SELECT po.*,s.name supplier_name,s.tax_id supplier_tax_id,s.external_code supplier_code,s.address supplier_address,s.city supplier_city,s.phone supplier_phone,s.contact supplier_contact,s.email supplier_email,w.name warehouse_name,w.address warehouse_address FROM purchase_orders po LEFT JOIN suppliers s ON s.id=po.supplier_id LEFT JOIN warehouses w ON w.id=po.delivery_warehouse_id WHERE po.id=? AND CAST(COALESCE(po.deleted,0) AS INTEGER)=0").get(Number(p[2]));
         if (!order) return send(res, 404, { error: "Pedido de compra no encontrado" });
         const to = String(order.supplier_email || "").trim();
         if (!to || !to.includes("@")) return send(res, 400, { error: "Añade un email válido a la ficha del proveedor" });
