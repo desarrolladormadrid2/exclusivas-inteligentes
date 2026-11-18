@@ -7938,18 +7938,21 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                 {form.client_id && customerRecurrentLoading && <p className="customer-recurrent-message" role="status">Buscando productos de pedidos anteriores…</p>}
                 {form.client_id && customerRecurrentError && <p className="customer-recurrent-message is-error" role="alert">{customerRecurrentError}</p>}
                 {form.client_id && !customerRecurrentLoading && !customerRecurrentError && customerRecurrentItems.length === 0 && <p className="customer-recurrent-message">Este cliente aún no tiene productos en pedidos anteriores.</p>}
-                {customerRecurrentItems.length > 0 && <div className="customer-recurrent-grid">{customerRecurrentItems.map((item: any) => {
+                {customerRecurrentItems.length > 0 && <div className="customer-recurrent-list">
+                  <div className="customer-recurrent-list-head" aria-hidden="true"><span>Producto</span><span>Últimos pedidos</span><span>Unidades</span><span></span></div>
+                  {customerRecurrentItems.map((item: any) => {
                   const imageSource = productDisplayImageSource(item);
                   const hasProductPhoto = Boolean(productImageSource(item));
                   const recentQuantity = Number(item.last_quantity_requested || item.suggested_units || 0);
                   const recentUnits = Number(item.suggested_units || 0);
                   return <article className="customer-recurrent-card" key={item.product_id}>
                     <div className={`customer-recurrent-image${hasProductPhoto ? "" : " is-reference"}`}><img src={imageSource} alt={hasProductPhoto ? `Foto de ${item.name}` : `Imagen de referencia para ${item.name}`} />{!hasProductPhoto && <small>Referencia</small>}</div>
-                    <div className="customer-recurrent-info"><b title={item.name}>{item.name}</b><small>{item.sku || "Sin SKU"} · {item.order_count} {Number(item.order_count) === 1 ? "pedido anterior" : "pedidos anteriores"}</small><span>Última vez: {recentQuantity} {quantityUnitLabel(item.last_quantity_unit)} · {recentUnits} unidades</span></div>
+                    <div className="customer-recurrent-info"><b title={item.name}>{item.name}</b><small title={`${item.sku || "Sin SKU"} · ${item.order_count} ${Number(item.order_count) === 1 ? "pedido anterior" : "pedidos anteriores"} · Última vez: ${recentQuantity} ${quantityUnitLabel(item.last_quantity_unit)} · ${recentUnits} unidades`}>{item.sku || "Sin SKU"} · {item.order_count} {Number(item.order_count) === 1 ? "pedido anterior" : "pedidos anteriores"} · Última vez: {recentQuantity} {quantityUnitLabel(item.last_quantity_unit)} ({recentUnits} uds.)</small></div>
                     <label className="customer-recurrent-quantity">Unidades<input type="number" min="1" step="any" aria-label={`Unidades de ${item.name}`} value={customerRecurrentQuantities[String(item.product_id)] ?? String(Math.max(1, recentUnits))} onChange={(event) => setCustomerRecurrentQuantities((current) => ({ ...current, [String(item.product_id)]: event.target.value }))} /></label>
                     <button type="button" className="button secondary customer-recurrent-add" onClick={() => addCustomerRecurrentItem(item)}>Añadir</button>
                   </article>;
-                })}</div>}
+                  })}
+                </div>}
                 {customerRecurrentError && customerRecurrentItems.length > 0 && <p className="customer-recurrent-message is-error" role="alert">{customerRecurrentError}</p>}
               </section>}
               <div className="quote-line-add">
