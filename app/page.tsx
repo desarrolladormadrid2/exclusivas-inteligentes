@@ -4642,6 +4642,10 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const [quoteLineDraft, setQuoteLineDraft] = useState({ product_id: "", quantity: "1", quantity_unit: "unidad", total_units: "", unit_price: "0", discount: "0", vat: "21" });
   const [quoteLineEditingIndex, setQuoteLineEditingIndex] = useState<number | null>(null);
   const [quoteProductSearch, setQuoteProductSearch] = useState("");
+  const [customerRecurrentItems, setCustomerRecurrentItems] = useState<any[]>([]);
+  const [customerRecurrentQuantities, setCustomerRecurrentQuantities] = useState<Record<string, string>>({});
+  const [customerRecurrentLoading, setCustomerRecurrentLoading] = useState(false);
+  const [customerRecurrentError, setCustomerRecurrentError] = useState("");
   const [newShippingLocationOpen, setNewShippingLocationOpen] = useState(false);
   const [newShippingLocation, setNewShippingLocation] = useState({ name: "", address: "", city: "", opening_time: "", closing_time: "", notes: "" });
   const [clientSearch, setClientSearch] = useState("");
@@ -5268,6 +5272,33 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   }
   function quoteUnitsFactor(product: any, unit: string) {
     return unit === "caja" ? Number(product?.units_per_case || 1) : unit === "pack_4" ? 4 : unit === "pack_6" ? 6 : unit === "palet" ? Number(product?.units_per_pallet || 0) : 1;
+  }
+  function addCustomerRecurrentItem(item: any) {
+    const productId = Number(item.product_id || 0);
+    const quantity = Number(customerRecurrentQuantities[String(productId)] || item.suggested_units || 0);
+    if (!productId || !Number.isFinite(quantity) || quantity <= 0) {
+      setCustomerRecurrentError("Indica una cantidad de unidades mayor que cero.");
+      return;
+    }
+    const unitPrice = Number(item.unit_price || 0);
+    const discount = Number(item.discount || 0);
+    const product = (lookups.products || []).find((entry: any) => Number(entry.id) === productId);
+    const nextLine = {
+      product_id: productId,
+      product_name: item.name || product?.name || "Producto",
+      quantity,
+      quantity_requested: quantity,
+      quantity_unit: "unidad",
+      units_factor: 1,
+      format_price: unitPrice,
+      unit_price: unitPrice,
+      discount,
+      vat: Number(item.vat ?? 21),
+      amount: quantity * unitPrice * (1 - discount / 100),
+    };
+    setQuoteLines((current) => [...current, nextLine]);
+    setCustomerRecurrentError("");
+    setError("");
   }
   const selectedQuoteProduct = (lookups.products || []).find((item: any) => Number(item.id) === Number(quoteLineDraft.product_id));
   const quoteTotalUnits = quoteLineDraft.total_units;
@@ -7647,6 +7678,36 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   }
   const isOrderForm = c.api === "orders";
   const isPurchaseForm = c.api === "purchase_orders";
+  useEffect(() => {
+    if (active !== "Pedidos" || !formOpen || !form.client_id) {
+      setCustomerRecurrentItems([]);
+      setCustomerRecurrentQuantities({});
+      setCustomerRecurrentLoading(false);
+      setCustomerRecurrentError("");
+      return;
+    }
+    const controller = new AbortController();
+    setCustomerRecurrentLoading(true);
+    setCustomerRecurrentError("");
+    fetch(`/api/customer_recurrent_items?client_id=${encodeURIComponent(form.client_id)}`, { headers: actorHeaders, signal: controller.signal })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data?.error || "No se pudo cargar el historial de productos del cliente.");
+        return Array.isArray(data) ? data : [];
+      })
+      .then((items) => {
+        setCustomerRecurrentItems(items);
+        setCustomerRecurrentQuantities(Object.fromEntries(items.map((item: any) => [String(item.product_id), String(Math.max(1, Number(item.suggested_units || 1)))])));
+      })
+      .catch((loadError: any) => {
+        if (loadError?.name !== "AbortError") {
+          setCustomerRecurrentItems([]);
+          setCustomerRecurrentError(loadError?.message || "No se pudo cargar el historial de productos del cliente.");
+        }
+      })
+      .finally(() => { if (!controller.signal.aborted) setCustomerRecurrentLoading(false); });
+    return () => controller.abort();
+  }, [active, formOpen, form.client_id]);
   const purchaseLinesCanEdit = !isPurchaseForm || !editing || String(form.status || editing.status || "Borrador") === "Borrador";
   const clientComputedFields = new Set(["pending_invoice_count", "pending_invoice_total"]);
   const formEntity = active === "Facturas" && form.status === "Proforma" ? "proforma" : (isOrderForm ? "pedido" : (createActionLabels[active] || "Crear registro").replace(/^Crear /, ""));
@@ -7871,6 +7932,26 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           {(active === "Presupuestos" || isOrderForm || isPurchaseForm) && (
             <section className="quote-lines-editor">
               <div className="quote-lines-head"><div><b>{isOrderForm ? "Líneas del pedido" : isPurchaseForm ? "Líneas de la compra" : "Líneas del presupuesto"}</b><small>{isPurchaseForm ? "Añade, revisa o elimina los productos y las unidades compradas." : "Busca y añade varios productos como en un carrito."}</small>{isPurchaseForm && editing && !purchaseLinesCanEdit && <em className="quote-lines-readonly">Las líneas solo se pueden cambiar mientras la compra está en borrador.</em>}</div></div>
+              {isOrderForm && !editing && <section className="customer-recurrent-panel" aria-label="Productos pedidos anteriormente por el cliente">
+                <div className="customer-recurrent-head"><div><b>Pedidos recurrentes del cliente</b><small>Productos de pedidos anteriores, con foto y unidades habituales. Ajusta la cantidad y añádelos al pedido.</small></div>{form.client_id && !customerRecurrentLoading && !customerRecurrentError && <span>{customerRecurrentItems.length} productos</span>}</div>
+                {!form.client_id && <p className="customer-recurrent-message">Selecciona un cliente para consultar sus productos habituales.</p>}
+                {form.client_id && customerRecurrentLoading && <p className="customer-recurrent-message" role="status">Buscando productos de pedidos anteriores…</p>}
+                {form.client_id && customerRecurrentError && <p className="customer-recurrent-message is-error" role="alert">{customerRecurrentError}</p>}
+                {form.client_id && !customerRecurrentLoading && !customerRecurrentError && customerRecurrentItems.length === 0 && <p className="customer-recurrent-message">Este cliente aún no tiene productos en pedidos anteriores.</p>}
+                {customerRecurrentItems.length > 0 && <div className="customer-recurrent-grid">{customerRecurrentItems.map((item: any) => {
+                  const imageSource = productDisplayImageSource(item);
+                  const hasProductPhoto = Boolean(productImageSource(item));
+                  const recentQuantity = Number(item.last_quantity_requested || item.suggested_units || 0);
+                  const recentUnits = Number(item.suggested_units || 0);
+                  return <article className="customer-recurrent-card" key={item.product_id}>
+                    <div className={`customer-recurrent-image${hasProductPhoto ? "" : " is-reference"}`}><img src={imageSource} alt={hasProductPhoto ? `Foto de ${item.name}` : `Imagen de referencia para ${item.name}`} />{!hasProductPhoto && <small>Referencia</small>}</div>
+                    <div className="customer-recurrent-info"><b title={item.name}>{item.name}</b><small>{item.sku || "Sin SKU"} · {item.order_count} {Number(item.order_count) === 1 ? "pedido anterior" : "pedidos anteriores"}</small><span>Última vez: {recentQuantity} {quantityUnitLabel(item.last_quantity_unit)} · {recentUnits} unidades</span></div>
+                    <label className="customer-recurrent-quantity">Unidades<input type="number" min="1" step="any" aria-label={`Unidades de ${item.name}`} value={customerRecurrentQuantities[String(item.product_id)] ?? String(Math.max(1, recentUnits))} onChange={(event) => setCustomerRecurrentQuantities((current) => ({ ...current, [String(item.product_id)]: event.target.value }))} /></label>
+                    <button type="button" className="button secondary customer-recurrent-add" onClick={() => addCustomerRecurrentItem(item)}>Añadir</button>
+                  </article>;
+                })}</div>}
+                {customerRecurrentError && customerRecurrentItems.length > 0 && <p className="customer-recurrent-message is-error" role="alert">{customerRecurrentError}</p>}
+              </section>}
               <div className="quote-line-add">
                 <label className="quote-line-field quote-line-product"><span>Producto</span><div className="quote-product-picker"><input aria-label="Buscar producto" autoComplete="off" placeholder="Buscar por nombre o SKU…" value={quoteProductSearch} onChange={(event) => { const value = event.target.value; const product = (lookups.products || []).find((item: any) => String(item.name).toLowerCase() === value.trim().toLowerCase() || String(item.sku || "").toLowerCase() === value.trim().toLowerCase()); const factor = quoteUnitsFactor(product, quoteLineDraft.quantity_unit); setQuoteProductSearch(value); setQuoteLineDraft({ ...quoteLineDraft, product_id: product ? String(product.id) : "", total_units: product && factor > 0 ? String(Number(quoteLineDraft.quantity || 1) * factor) : "", unit_price: product ? String(Number(product.unit_price || 0) * factor) : quoteLineDraft.unit_price }); }} />{quoteProductSearch && <button type="button" className="quote-product-clear" aria-label="Limpiar producto" onClick={() => { setQuoteProductSearch(""); setQuoteLineDraft({ ...quoteLineDraft, product_id: "", total_units: "", unit_price: "0" }); }}>×</button>}{quoteProductSearch.trim() && !quoteLineDraft.product_id && <div className="quote-product-suggestions">{(lookups.products || []).filter((item: any) => `${item.name || ""} ${item.sku || ""} ${item.brand || ""}`.toLowerCase().includes(quoteProductSearch.trim().toLowerCase())).slice(0, 8).map((item: any) => <button type="button" key={item.id} onClick={() => { const factor = quoteUnitsFactor(item, quoteLineDraft.quantity_unit); setQuoteProductSearch(`${item.name}${item.sku ? ` · ${item.sku}` : ""}`); setQuoteLineDraft({ ...quoteLineDraft, product_id: String(item.id), total_units: factor > 0 ? String(Number(quoteLineDraft.quantity || 1) * factor) : "", unit_price: String(Number(item.unit_price || 0) * factor) }); }}><b>{item.name}</b><small>{[item.sku, item.brand, item.category].filter(Boolean).join(" · ") || "Sin referencia"}</small></button>)}{!(lookups.products || []).some((item: any) => `${item.name || ""} ${item.sku || ""} ${item.brand || ""}`.toLowerCase().includes(quoteProductSearch.trim().toLowerCase())) && <span className="quote-product-no-results">No hay productos que coincidan.</span>}</div>}</div></label>
                 <label className="quote-line-field"><span>Tipo de cantidad</span><select aria-label="Tipo de cantidad" value={quoteLineDraft.quantity_unit} onChange={(event) => { const value = event.target.value; const product = (lookups.products || []).find((item: any) => Number(item.id) === Number(quoteLineDraft.product_id)); const factor = quoteUnitsFactor(product, value); setQuoteLineDraft({ ...quoteLineDraft, quantity_unit: value, total_units: product && factor > 0 ? String(Number(quoteLineDraft.quantity || 1) * factor) : "", unit_price: product ? String(Number(product.unit_price || 0) * factor) : quoteLineDraft.unit_price }); }}><option value="unidad">Unidad</option><option value="caja">Caja</option><option value="pack_4">Pack de 4</option><option value="pack_6">Pack de 6</option><option value="palet">Palé</option></select></label>

@@ -2560,6 +2560,42 @@ export async function crmApiHandler(req, res) {
           throw error;
         }
       }
+      if (p[1] === "customer_recurrent_items" && req.method === "GET") {
+        const clientId = Number(new URL(req.url, "http://local").searchParams.get("client_id") || 0);
+        if (!Number.isInteger(clientId) || clientId <= 0) return send(res, 400, { error: "Selecciona un cliente válido." });
+        if (!db.prepare("SELECT id FROM clients WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(clientId)) return send(res, 404, { error: "El cliente no existe." });
+        const rows = db.prepare(`
+          WITH ranked_history AS (
+            SELECT ol.product_id,ol.quantity,ol.quantity_requested,ol.quantity_unit,ol.units_factor,ol.unit_price,ol.discount,ol.vat,
+              COALESCE(o.delivery_date,o.created_at) AS order_date,o.id AS order_id,ol.id AS line_id,
+              ROW_NUMBER() OVER (PARTITION BY ol.product_id ORDER BY COALESCE(o.delivery_date,o.created_at,'') DESC,o.id DESC,ol.id DESC) AS line_rank
+            FROM order_lines ol
+            JOIN orders o ON o.id=ol.order_id
+            WHERE o.client_id=?
+              AND CAST(COALESCE(o.deleted,0) AS INTEGER)=0
+              AND COALESCE(o.status,'') NOT IN ('Cancelado','Anulado','Borrador')
+              AND CAST(COALESCE(ol.deleted,0) AS INTEGER)=0
+              AND COALESCE(ol.quantity,0)>0
+          ), order_history AS (
+            SELECT product_id,COUNT(DISTINCT order_id) AS order_count,MAX(order_date) AS last_order_date
+            FROM ranked_history GROUP BY product_id
+          )
+          SELECT p.id AS product_id,p.name,p.sku,p.photo_url,p.photo_thumbnail_url,p.photo_web_url,p.photo_data,
+            latest.quantity AS suggested_units,latest.quantity_requested AS last_quantity_requested,
+            latest.quantity_unit AS last_quantity_unit,latest.units_factor AS last_units_factor,
+            latest.unit_price,latest.discount,latest.vat,
+            history.order_count,history.last_order_date
+          FROM order_history history
+          JOIN ranked_history latest ON latest.product_id=history.product_id AND latest.line_rank=1
+          JOIN products p ON p.id=history.product_id
+          WHERE CAST(COALESCE(p.deleted,0) AS INTEGER)=0
+            AND CAST(COALESCE(p.active,1) AS INTEGER)=1
+            AND LOWER(COALESCE(p.product_status,'Activo')) NOT IN ('inactivo','baja','descatalogado')
+          ORDER BY history.last_order_date DESC,history.order_count DESC,p.name COLLATE NOCASE
+          LIMIT 200
+        `).all(clientId);
+        return send(res, 200, rows);
+      }
       if (p[1] === "supplier_purchase_history" && req.method === "GET") {
         const supplierId = Number(new URL(req.url, "http://local").searchParams.get("supplier_id") || 0);
         if (!Number.isInteger(supplierId) || supplierId <= 0) return send(res, 400, { error: "Selecciona un proveedor válido." });
