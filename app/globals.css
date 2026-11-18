@@ -1543,7 +1543,24 @@ table:not(.preview-lines) tbody > tr:nth-child(even),
   cursor: pointer;
   white-space: nowrap;
 }
-.row-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 410px; padding: 2px 0; }
+.row-actions { display: flex; align-items: center; align-content: center; flex-wrap: wrap; gap: 4px; min-width: 410px; min-height: 28px; padding: 0; }
+.row-action { display: inline-flex; box-sizing: border-box; align-items: center; justify-content: center; height: 26px; min-height: 26px; line-height: 1; vertical-align: middle; }
+.table-panel tbody td:last-child .button,
+.table-scroll tbody td:last-child .button,
+.contacts-table-wrap tbody td:last-child .button,
+.users-table-wrap tbody td:last-child .button,
+.trash-table-wrap tbody td:last-child .button {
+  display: inline-flex;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  min-height: 26px;
+  padding: 0 7px;
+  line-height: 1;
+  vertical-align: middle;
+}
+.table-action { display: inline-flex; box-sizing: border-box; align-items: center; justify-content: center; height: 26px; min-height: 26px; line-height: 1; vertical-align: middle; }
 .row-action:hover { border-color: var(--red); color: var(--red); background: #fff7f7; }
 .row-action.primary { color: #fff; background: var(--red); border-color: var(--red); }
 .row-action.primary:hover { color: #fff; background: #991b1b; }
