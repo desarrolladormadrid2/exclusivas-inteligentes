@@ -8032,3 +8032,61 @@ body.reparto-modal-open {
   .customer-recurrent-quantity input { height: 32px; }
   .customer-recurrent-add { width: 100%; min-width: 0; padding: 0 4px; }
 }
+
+/* Entradas registradas: cabecera, vistas y filtros en grupos visibles. */
+.manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+}
+.manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head > div:last-child {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 5px;
+  white-space: nowrap;
+}
+.manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel { display: block; min-width: 0; }
+.manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .panel.table-panel > .table-tools {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  padding: 7px 8px;
+  border-bottom: 1px solid #d1d5db;
+  background: #fafbfc;
+}
+.manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary > input { flex: 1 1 260px; width: auto; min-width: 180px; max-width: 380px; }
+.manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary .saved-views { display: flex; flex: 0 1 auto; width: auto; min-width: 0; max-width: 100%; overflow-x: auto; white-space: nowrap; }
+.manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 9px; min-width: 0; padding: 5px 0 0; border-top: 1px solid #e1e6e9; }
+.manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field { display: inline-flex; align-items: center; gap: 5px; width: auto; white-space: nowrap; font-size: 10px; }
+.manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field select,
+.manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field input { width: 132px; min-width: 110px; height: 29px; }
+.manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field input[type="date"] { width: 132px; min-width: 120px; }
+.manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters > .deleted-toggle { flex: 0 0 auto; width: auto; min-width: 126px; min-height: 29px; margin: 0 !important; }
+.manager.logistics-receipts-list .goods-receipt-tabs { margin: 0; }
+@media (max-width: 1199px) {
+  .manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head { align-items: flex-start; }
+  .manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary > input { max-width: none; }
+}
+@media (max-width: 650px) {
+  .manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) > .manager-head > div:last-child { justify-content: flex-start; }
+  .manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary > input { flex-basis: 100%; min-width: 0; }
+  .manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-primary .saved-views { flex: 1 1 100%; }
+  .manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; gap: 3px; white-space: normal; }
+  .manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field select,
+  .manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field input,
+  .manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters .list-filter-field input[type="date"] { width: 100%; min-width: 0; }
+  .manager.logistics-receipts-list:has(> .manager-head):has(> .panel.table-panel > .table-tools) .table-tools-filters > .deleted-toggle { width: 100%; min-width: 0; }
+}

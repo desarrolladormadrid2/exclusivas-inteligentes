@@ -4544,6 +4544,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const [inlineDraft, setInlineDraft] = useState<any>({});
   const [search, setSearch] = useState("");
   const [preview, setPreview] = useState<any>(null);
+  const [previewSourceOrder, setPreviewSourceOrder] = useState<any>(null);
   const [preparationOrderEdit, setPreparationOrderEdit] = useState<any>(null);
   const [preparationOrderEditLines, setPreparationOrderEditLines] = useState<any[]>([]);
   const [preparationOrderEditLoading, setPreparationOrderEditLoading] = useState(false);
@@ -4964,7 +4965,10 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         setRows(applyList(cached));
         setLoadedListKey(listKey);
         setLoading(false);
-        hasCachedRows = true;
+        // Una lista vacía puede haberse guardado antes de crear registros en
+        // otra sesión. Se muestra como caché provisional, pero se revalida con
+        // el servidor para que los pedidos recién creados no queden ocultos.
+        hasCachedRows = cached.length > 0;
       }
     } catch { /* Si la caché está dañada, se ignora y se consulta la API. */ }
     const forceRefresh = manualListRefreshRef.current;
@@ -6388,6 +6392,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     closeOrderEditorIfOpen(row);
     setShipmentLabelOpen(false);
     setPreview(row);
+    setPreviewSourceOrder(active === "Pedidos" ? row : null);
     if (active === "Preparación de pedidos") {
       setPreparationAnnotation("");
       setPreparationAnnotationMessage("");
@@ -6452,6 +6457,14 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         ? fetch(`/api/order_lines?order_ids=${encodeURIComponent(row.order_id)}`).then((r) => r.json())
         : Promise.resolve([]),
     ]);
+    if (["Preparación de pedidos", "Envíos"].includes(active) && Number(row.order_id) > 0) {
+      try {
+        const response = await fetch(`/api/orders/${encodeURIComponent(row.order_id)}`);
+        setPreviewSourceOrder(response.ok ? await response.json() : null);
+      } catch {
+        setPreviewSourceOrder(null);
+      }
+    }
     setPreviewClient(
       clients.find((x: any) => Number(x.id) === Number(row.client_id)) || null,
     );
@@ -7405,7 +7418,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const preparationStatusGroup = (row: any) => {
     const status = String(row.status || "Pendiente");
     if (["Preparado", "Preparado con incidencia"].includes(status)) return "prepared";
-    if (["Preparando", "En preparación"].includes(status) && (row.prepared_by || row.preparation_started_at || row.preparation_started_by)) return "preparing";
+    if (["Preparando", "En preparación"].includes(status)) return "preparing";
     return "pending";
   };
   const crmPreparationColumns = [
@@ -8562,7 +8575,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
               <div><b>Recepción del cliente</b><strong className={previewClosedOnDate ? "is-closed" : "is-open"}>{previewClosedOnDate ? `Cerrado el ${previewWeekday || "ese día"}` : `Abierto · ${formatReceptionWindow(previewReceptionStart, previewReceptionEnd)}`}</strong></div>
               <small>{previewReceptionDate ? `Para el ${formatSpanishDateValue(previewReceptionDate, false)}${previewWeekday ? ` · ${previewWeekday}` : ""}` : "Día de recepción pendiente"}{effectivePreviewClient?.weekly_closed_day && !previewClosedOnDate ? ` · Cierre semanal: ${WEEKDAY_OPTIONS.find((option) => Number(option.value) === parseWeeklyClosedDay(effectivePreviewClient.weekly_closed_day))?.label || "indicado"}` : ""}</small>
             </section>}
-            {active === "Pedidos" && <OrderWorkflowPanel order={preview} shipment={getOrderShipment(preview)} billingStatus={getOrderBillingStatus(preview)} paymentStatus={getOrderPaymentStatus(preview)} invoice={previewInvoice || getOrderInvoice(preview)} onOpenPayment={() => openPaymentFromOrder(preview)} onNavigate={onNavigate} />}
+            {(active === "Pedidos" || ((active === "Preparación de pedidos" || active === "Envíos") && previewSourceOrder)) && <OrderWorkflowPanel order={previewSourceOrder || preview} shipment={active === "Pedidos" ? getOrderShipment(preview) : preview} billingStatus={getOrderBillingStatus(previewSourceOrder || preview)} paymentStatus={getOrderPaymentStatus(previewSourceOrder || preview)} invoice={previewInvoice || getOrderInvoice(previewSourceOrder || preview)} onOpenPayment={() => active === "Pedidos" ? openPaymentFromOrder(preview) : onNavigate?.("Cobros")} onNavigate={onNavigate} />}
             {(active === "Pedidos" || active === "Envíos") && (() => {
               const deliveryShipment = active === "Envíos" ? preview : getOrderShipment(preview);
               if (!deliveryShipment) return null;
