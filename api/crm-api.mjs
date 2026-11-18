@@ -51,6 +51,38 @@ function slugifyProductName(value) {
     .replace(/^-+|-+$/g, "")
     .slice(0, 80) || "producto";
 }
+
+function synchronizeProductPricing(input, previous = null, isCreate = false) {
+  const number = (value) => {
+    const parsed = Number(String(value ?? "").replace(",", "."));
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const changed = (field) => isCreate
+    ? input[field] !== undefined && String(input[field] ?? "").trim() !== ""
+    : input[field] !== undefined && String(input[field] ?? "") !== String(previous?.[field] ?? "");
+  const cost = number(input.cost_price ?? previous?.cost_price);
+  let price = number(input.unit_price ?? previous?.unit_price);
+  let markup = number(input.markup_percent ?? previous?.markup_percent);
+  let margin = number(input.margin_percent ?? previous?.margin_percent);
+
+  if (changed("unit_price") && !changed("markup_percent") && !changed("cost_price")) {
+    price = Number(price.toFixed(2));
+    markup = cost > 0 ? (price / cost - 1) * 100 : 0;
+    margin = price > 0 ? (price - cost) / price * 100 : 0;
+  } else if (changed("margin_percent") && !changed("markup_percent") && !changed("cost_price")) {
+    price = cost > 0 && margin < 100 ? Number((cost / (1 - margin / 100)).toFixed(2)) : 0;
+    markup = cost > 0 ? (price / cost - 1) * 100 : 0;
+    margin = price > 0 ? (price - cost) / price * 100 : 0;
+  } else if (input.markup_percent !== undefined || input.cost_price !== undefined) {
+    price = Number((cost * (1 + markup / 100)).toFixed(2));
+    margin = price > 0 ? (price - cost) / price * 100 : 0;
+  }
+
+  input.unit_price = Number(price.toFixed(2));
+  input.markup_percent = Number(markup.toFixed(2));
+  input.margin_percent = Number(margin.toFixed(2));
+  input.real_cost = Number((cost + number(input.freight_cost ?? previous?.freight_cost) + number(input.handling_cost ?? previous?.handling_cost)).toFixed(2));
+}
 function parseImageDataUrl(value) {
   const match = String(value || "").match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=]+)$/i);
   if (!match) return null;
@@ -740,7 +772,7 @@ db.exec(
 try { db.exec("ALTER TABLE inventory_movements ADD COLUMN receipt_id INTEGER"); } catch {}
 try { db.exec("ALTER TABLE inventory_movements ADD COLUMN stock_effect REAL"); } catch {}
 for (const [table, columns] of [
-  ["products", ["photo_name TEXT", "photo_mime TEXT", "photo_data TEXT", "photo_url TEXT", "photo_public_id TEXT", "photo_thumbnail_url TEXT", "photo_web_url TEXT", "photo_bytes INTEGER DEFAULT 0", "photo_width INTEGER DEFAULT 0", "photo_height INTEGER DEFAULT 0", "photo_format TEXT", "description TEXT", "category_code TEXT", "warehouse_id INTEGER", "preorder INTEGER DEFAULT 1", "product_tracking_code TEXT DEFAULT 'Sin seguimiento'", "inventory_valuation_method TEXT DEFAULT 'FIFO'", "last_direct_cost REAL DEFAULT 0", "accounting_product_group TEXT DEFAULT 'Mercaderías'", "accounting_vat_group TEXT DEFAULT '21%'", "inventory_register_group TEXT DEFAULT 'Mercaderías'", "created_at TEXT", "created_by TEXT", "family TEXT", "subfamily TEXT", "purchase_format TEXT", "sale_format TEXT", "cases_per_pallet REAL DEFAULT 0", "units_per_pallet REAL DEFAULT 0", "weight_kg REAL DEFAULT 0", "volume_m3 REAL DEFAULT 0", "warehouse_location TEXT", "picking_order INTEGER DEFAULT 0", "product_status TEXT DEFAULT 'Activo'", "primary_supplier_id INTEGER", "fixed_supplier INTEGER DEFAULT 0", "target_margin_percent REAL DEFAULT 0", "min_margin_percent REAL DEFAULT 0", "stock_min REAL DEFAULT 0", "stock_target REAL DEFAULT 0", "stock_safety REAL DEFAULT 0", "lot_tracking INTEGER DEFAULT 0", "expiry_tracking INTEGER DEFAULT 0", "returnable_packaging INTEGER DEFAULT 0", "tax_surcharge_percent REAL DEFAULT 0", "extra_tax_name TEXT", "extra_tax_percent REAL DEFAULT 0", "freight_cost REAL DEFAULT 0", "handling_cost REAL DEFAULT 0", "real_cost REAL DEFAULT 0"]],
+  ["products", ["photo_name TEXT", "photo_mime TEXT", "photo_data TEXT", "photo_url TEXT", "photo_public_id TEXT", "photo_thumbnail_url TEXT", "photo_web_url TEXT", "photo_bytes INTEGER DEFAULT 0", "photo_width INTEGER DEFAULT 0", "photo_height INTEGER DEFAULT 0", "photo_format TEXT", "description TEXT", "category_code TEXT", "warehouse_id INTEGER", "preorder INTEGER DEFAULT 1", "product_tracking_code TEXT DEFAULT 'Sin seguimiento'", "inventory_valuation_method TEXT DEFAULT 'FIFO'", "last_direct_cost REAL DEFAULT 0", "markup_percent REAL DEFAULT 0", "margin_percent REAL DEFAULT 0", "accounting_product_group TEXT DEFAULT 'Mercaderías'", "accounting_vat_group TEXT DEFAULT '21%'", "inventory_register_group TEXT DEFAULT 'Mercaderías'", "created_at TEXT", "created_by TEXT", "family TEXT", "subfamily TEXT", "purchase_format TEXT", "sale_format TEXT", "cases_per_pallet REAL DEFAULT 0", "units_per_pallet REAL DEFAULT 0", "weight_kg REAL DEFAULT 0", "volume_m3 REAL DEFAULT 0", "warehouse_location TEXT", "picking_order INTEGER DEFAULT 0", "product_status TEXT DEFAULT 'Activo'", "primary_supplier_id INTEGER", "fixed_supplier INTEGER DEFAULT 0", "target_margin_percent REAL DEFAULT 0", "min_margin_percent REAL DEFAULT 0", "stock_min REAL DEFAULT 0", "stock_target REAL DEFAULT 0", "stock_safety REAL DEFAULT 0", "lot_tracking INTEGER DEFAULT 0", "expiry_tracking INTEGER DEFAULT 0", "returnable_packaging INTEGER DEFAULT 0", "tax_surcharge_percent REAL DEFAULT 0", "extra_tax_name TEXT", "extra_tax_percent REAL DEFAULT 0", "freight_cost REAL DEFAULT 0", "handling_cost REAL DEFAULT 0", "real_cost REAL DEFAULT 0"]],
   ["suppliers", ["tax_id TEXT", "contact TEXT", "payment_terms TEXT", "city TEXT", "latitude REAL", "longitude REAL", "geocoding_status TEXT DEFAULT 'Pendiente'", "minimum_order REAL DEFAULT 0", "transport_cost REAL DEFAULT 0", "lead_time_days INTEGER DEFAULT 0", "reliability_percent REAL DEFAULT 0", "promotions TEXT", "rappel_percent REAL DEFAULT 0", "active INTEGER DEFAULT 1", "external_code TEXT", "source_system TEXT", "source_warehouse_code TEXT", "source_created_at TEXT", "source_closed_at TEXT", "source_balance REAL DEFAULT 0", "source_overdue_balance REAL DEFAULT 0", "source_payments REAL DEFAULT 0"]],
   ["clients", ["city TEXT", "tax_id TEXT", "external_code TEXT", "source_system TEXT", "active INTEGER DEFAULT 1", "billing_address TEXT", "billing_city TEXT", "opening_time TEXT", "closing_time TEXT", "weekly_closed_day TEXT", "invoice_delivery_method TEXT", "equivalence_surcharge_enabled INTEGER DEFAULT 0", "latitude REAL", "longitude REAL", "geocoded_at TEXT", "geocoding_status TEXT DEFAULT 'Pendiente'", "payment_method_code TEXT", "payment_terms_code TEXT", "source_warehouse_code TEXT", "source_created_at TEXT", "source_closed_at TEXT", "source_balance REAL DEFAULT 0", "source_overdue_balance REAL DEFAULT 0", "source_sales REAL DEFAULT 0", "source_payments REAL DEFAULT 0"]],
   ["products", ["external_code TEXT", "source_system TEXT", "active INTEGER DEFAULT 1", "source_type TEXT", "source_substitute TEXT", "assembly_item INTEGER DEFAULT 0", "cost_adjusted INTEGER DEFAULT 0", "default_split_template TEXT", "source_supplier_code TEXT", "source_created_at TEXT", "source_closed_at TEXT"]],
@@ -4885,18 +4917,8 @@ export async function crmApiHandler(req, res) {
           const sign = ["salida", "ajuste negativo", "devolución"].includes(String(d.movement_type || "").toLowerCase()) ? -1 : 1;
           db.prepare("UPDATE products SET stock=COALESCE(stock,0)+? WHERE id=?").run(sign * Number(d.quantity), Number(d.product_id));
         }
-        if (
-          t === "products" &&
-          d.cost_price !== undefined &&
-          d.markup_percent !== undefined
-        ) {
-          d.unit_price =
-            Number(d.cost_price) * (1 + Number(d.markup_percent) / 100);
-          d.margin_percent = d.unit_price
-            ? ((d.unit_price - Number(d.cost_price)) / d.unit_price) * 100
-            : 0;
-        }
         if (t === "products") {
+          synchronizeProductPricing(d, null, true);
           if (!String(d.warehouse_location || "").trim()) {
             const nextPickingOrder = Number(db.prepare("SELECT COALESCE(MAX(picking_order),0)+1 next FROM products").get().next || 1);
             const aisle = String.fromCharCode(65 + (Math.floor((nextPickingOrder - 1) / 200) % 26));
@@ -4904,7 +4926,6 @@ export async function crmApiHandler(req, res) {
             d.picking_order = nextPickingOrder;
           }
           d.stock_min = d.stock_min === undefined ? Number(d.min_stock || 0) : Number(d.stock_min || 0);
-          d.real_cost = Number(d.cost_price || 0) + Number(d.freight_cost || 0) + Number(d.handling_cost || 0);
         }
         if (t === "orders" && d.product_id && d.quantity && !orderLines) {
           const product = db
@@ -5422,21 +5443,10 @@ export async function crmApiHandler(req, res) {
             db.prepare("UPDATE shipments SET status=?,updated_at=? WHERE id=?").run(d.status, new Date().toISOString(), linked.id);
           }
         }
-        if (
-          t === "products" &&
-          d.cost_price !== undefined &&
-          d.markup_percent !== undefined
-        ) {
-          d.unit_price =
-            Number(d.cost_price) * (1 + Number(d.markup_percent) / 100);
-          d.margin_percent = d.unit_price
-            ? ((d.unit_price - Number(d.cost_price)) / d.unit_price) * 100
-            : 0;
-        }
         if (t === "products") {
           const previous = db.prepare("SELECT * FROM products WHERE id=?").get(Number(p[2]));
+          synchronizeProductPricing(d, previous);
           d.stock_min = d.stock_min === undefined ? Number(d.min_stock ?? previous?.min_stock ?? 0) : Number(d.stock_min || 0);
-          d.real_cost = Number(d.cost_price ?? previous?.cost_price ?? 0) + Number(d.freight_cost ?? previous?.freight_cost ?? 0) + Number(d.handling_cost ?? previous?.handling_cost ?? 0);
           if (d.warehouse_location !== undefined && String(d.warehouse_location || "").trim() !== String(previous?.warehouse_location || "").trim()) {
             const changedAt = new Date().toISOString();
             db.prepare("INSERT INTO product_location_history(product_id,previous_location,current_location,changed_by,changed_at,source) VALUES(?,?,?,?,?,?)").run(Number(p[2]), String(previous?.warehouse_location || ""), String(d.warehouse_location || "").trim().toUpperCase(), actor, changedAt, "Nota de carga");

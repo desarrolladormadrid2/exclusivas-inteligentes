@@ -39,6 +39,19 @@ function dateInputFromLocalDate(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+function nextCalendarDate(value?: unknown) {
+  const match = String(value ?? "").slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const date = match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12) : new Date();
+  if (Number.isNaN(date.getTime())) {
+    const tomorrow = new Date();
+    tomorrow.setHours(12, 0, 0, 0);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return dateInputFromLocalDate(tomorrow);
+  }
+  date.setDate(date.getDate() + 1);
+  return dateInputFromLocalDate(date);
+}
+
 function nextOrderWorkingDate(closedDay?: unknown) {
   const date = new Date();
   date.setHours(12, 0, 0, 0);
@@ -5145,10 +5158,24 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           if (!String(current.last_direct_cost || "").trim()) next.last_direct_cost = value;
           const cost = Number(value || 0), markup = Number(current.markup_percent || 0);
           next.unit_price = (cost * (1 + markup / 100)).toFixed(2);
+          next.margin_percent = Number(next.unit_price) > 0 ? ((Number(next.unit_price) - cost) / Number(next.unit_price) * 100).toFixed(2) : "0";
         }
         if (field === "markup_percent") {
           const cost = Number(current.cost_price || 0), markup = Number(value || 0);
           next.unit_price = (cost * (1 + markup / 100)).toFixed(2);
+          next.margin_percent = Number(next.unit_price) > 0 ? ((Number(next.unit_price) - cost) / Number(next.unit_price) * 100).toFixed(2) : "0";
+        }
+        if (field === "unit_price") {
+          const price = Number(value || 0), cost = Number(current.cost_price || 0);
+          next.markup_percent = cost > 0 ? ((price / cost - 1) * 100).toFixed(2) : "0";
+          next.margin_percent = price > 0 ? ((price - cost) / price * 100).toFixed(2) : "0";
+        }
+        if (field === "margin_percent") {
+          const cost = Number(current.cost_price || 0), margin = Number(value || 0);
+          const price = margin < 100 ? cost / (1 - margin / 100) : 0;
+          next.unit_price = price.toFixed(2);
+          next.markup_percent = cost > 0 ? ((price / cost - 1) * 100).toFixed(2) : "0";
+          next.margin_percent = Number(next.unit_price) > 0 ? ((Number(next.unit_price) - cost) / Number(next.unit_price) * 100).toFixed(2) : "0";
         }
         if (field === "product_tracking_code") {
           next.lot_tracking = value === "Seguimiento de lote" || value === "Lote y fecha de caducidad" ? "1" : "0";
@@ -5173,7 +5200,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         collection_point_id: usePrimaryAddress ? "__client_address__" : "",
         address: usePrimaryAddress ? primaryAddress : "",
         delivery_city: usePrimaryAddress ? primaryCity : "",
-        ...(!editing ? { preparation_date: defaultOrderDate, shipping_date: defaultOrderDate, delivery_date: defaultOrderDate } : {}),
+        ...(!editing ? { preparation_date: current.preparation_date || nextCalendarDate(current.created_at), shipping_date: defaultOrderDate, delivery_date: defaultOrderDate } : {}),
       }));
       setClientSearch(client ? `${client.name}${client.city ? ` · ${client.city}` : ""}` : "");
       setNewShippingLocationOpen(false);
@@ -5324,7 +5351,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const selectedQuoteProduct = (lookups.products || []).find((item: any) => Number(item.id) === Number(quoteLineDraft.product_id));
   const quoteTotalUnits = quoteLineDraft.total_units;
   const orderPrimaryAddressSelected = form.collection_point_id === "__client_address__";
-  const orderGeneralComplete = Boolean(String(form.code || "").trim() && form.client_id && form.collection_point_id && (!orderPrimaryAddressSelected || String(form.address || "").trim()));
+  const orderGeneralComplete = Boolean(String(form.code || "").trim() && form.client_id && form.collection_point_id && String(form.preparation_date || "").trim() && String(form.delivery_date || "").trim() && (!orderPrimaryAddressSelected || String(form.address || "").trim()));
   async function saveNewSupplier(event: any) {
     event.preventDefault();
     if (!String(newSupplier.name || "").trim()) return;
@@ -5361,8 +5388,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       return;
     }
     const orderUsesPrimaryAddress = currentForm.collection_point_id === "__client_address__";
-    if (isOrderForm && (!String(currentForm.code || "").trim() || !currentForm.client_id || !currentForm.collection_point_id || (orderUsesPrimaryAddress && !String(currentForm.address || "").trim()))) {
-      setError("Completa el código, el cliente y el lugar de envío antes de guardar el pedido.");
+    if (isOrderForm && (!String(currentForm.code || "").trim() || !currentForm.client_id || !currentForm.collection_point_id || !String(currentForm.preparation_date || "").trim() || !String(currentForm.delivery_date || "").trim() || (orderUsesPrimaryAddress && !String(currentForm.address || "").trim()))) {
+      setError("Completa el código, el cliente, el lugar de envío y las fechas de preparación y reparto antes de guardar el pedido.");
       return;
     }
     const isPurchaseDraft = isPurchaseForm && String(currentForm.status || "Borrador") === "Borrador";
@@ -5373,15 +5400,6 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     if (isPurchaseForm && !isPurchaseDraft && !quoteLines.length) {
       setError("Añade al menos una línea con producto y unidades compradas antes de guardar.");
       return;
-    }
-    if (active === "Productos") {
-      const requiredProductFields = ["name", "sku", "description", "category", "unit", "created_at", "warehouse_id", "warehouse_location", "inventory_valuation_method", "cost_price", "last_direct_cost", "markup_percent", "unit_price", "accounting_product_group", "accounting_vat_group", "inventory_register_group", "product_tracking_code", "supplier_id"];
-      const productFieldLabels: Record<string, string> = { name: "Producto", sku: "Número proveedor", description: "Descripción", category: "Categoría", unit: "Unidad de medida base", created_at: "Fecha de alta", warehouse_id: "Código de almacén", warehouse_location: "Número de estante", inventory_valuation_method: "Valoración de existencias", cost_price: "Coste unitario", last_direct_cost: "Coste último directo", markup_percent: "Porcentaje de incremento de venta", unit_price: "Precio de venta", accounting_product_group: "Grupo contable prod. gen.", accounting_vat_group: "Grupo contable IVA", inventory_register_group: "Grupo registro inventario", product_tracking_code: "Código seguimiento producto", supplier_id: "Nombre proveedor" };
-      const missing = requiredProductFields.filter((field) => !String(currentForm[field] ?? "").trim());
-      if (missing.length) {
-        setError(`Completa los campos obligatorios del producto: ${missing.map((field) => productFieldLabels[field] || field).join(", ")}.`);
-        return;
-      }
     }
     const method = editing ? "PUT" : "POST",
       url =
@@ -6137,8 +6155,9 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     function newOrderRequested() {
       setQuoteLines([]);
       setQuoteProductSearch("");
+      const createdDate = tabletTodayInput();
       const defaultOrderDate = nextOrderWorkingDate();
-      beginForm({ code: nextOrderCode(), status: "Nuevo", created_at: tabletTodayInput(), created_by: user?.username || "Usuario local", quantity: 1, preparation_date: defaultOrderDate, shipping_date: defaultOrderDate, delivery_date: defaultOrderDate });
+      beginForm({ code: nextOrderCode(), status: "Nuevo", created_at: createdDate, created_by: user?.username || "Usuario local", quantity: 1, preparation_date: nextCalendarDate(createdDate), shipping_date: defaultOrderDate, delivery_date: defaultOrderDate });
       setFormOpen(true);
     }
     window.addEventListener("crm:nuevo-pedido", newOrderRequested);
@@ -7516,7 +7535,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   };
   const renderFormField = (f: string, i: number) => (
     <label key={f}>
-      <span className={(active === "Pedidos" && ["client_id", "collection_point_id", "delivery_date"].includes(f)) || (active === "Productos" && ["name", "sku", "description", "category", "unit", "created_at", "warehouse_id", "warehouse_location", "inventory_valuation_method", "cost_price", "last_direct_cost", "markup_percent", "unit_price", "accounting_product_group", "accounting_vat_group", "inventory_register_group", "product_tracking_code", "supplier_id"].includes(f)) ? "field-label-required" : undefined}>{active === "Pedidos" && f === "collection_point_id" ? "Lugar de envío" : active === "Pedidos" && f === "delivery_date" ? "Fecha de reparto" : active === "Productos" && f === "unit" ? "Unidad de medida base" : c.labels[i]}</span>
+      <span className={(active === "Pedidos" && ["client_id", "collection_point_id", "preparation_date", "delivery_date"].includes(f)) || (active === "Productos" && f === "name") ? "field-label-required" : undefined}>{active === "Pedidos" && f === "collection_point_id" ? "Lugar de envío" : active === "Pedidos" && f === "delivery_date" ? "Fecha de reparto" : active === "Productos" && f === "unit" ? "Unidad de medida base" : c.labels[i]}</span>
       {active === "Pedidos" && f === "client_id" ? (
         <>
           <div className="smart-client-picker"><input aria-label="Cliente" autoComplete="off" placeholder={lookups.clients?.length ? "Buscar cliente por nombre, ciudad, teléfono o email…" : "Cargando clientes…"} value={clientSearch} onChange={(event) => { const value = event.target.value; setClientSearch(value); if (!value) handleFormChange("client_id", ""); }} />{lookups.clients?.length > 0 && <button type="button" className="smart-client-clear" onClick={() => { setClientSearch(""); handleFormChange("client_id", ""); }} aria-label="Limpiar cliente" title="Limpiar cliente">×</button>}{!form.client_id && clientSearch.trim().length > 0 && <div className="smart-client-suggestions">{(lookups.clients || []).filter((item: any) => `${item.name || ""} ${item.city || ""} ${item.phone || ""} ${item.email || ""}`.toLowerCase().includes(clientSearch.trim().toLowerCase())).slice(0, 8).map((item: any) => <button type="button" key={item.id} onClick={() => { setClientSearch(`${item.name}${item.city ? ` · ${item.city}` : ""}`); handleFormChange("client_id", String(item.id)); }}><b>{item.name}{item.city ? ` · ${item.city}` : ""}</b><small>{[item.phone, item.email].filter(Boolean).join(" · ") || "Sin datos de contacto"}</small></button>)}{!(lookups.clients || []).some((item: any) => `${item.name || ""} ${item.city || ""} ${item.phone || ""} ${item.email || ""}`.toLowerCase().includes(clientSearch.trim().toLowerCase())) && <span className="smart-client-no-results">No hay clientes que coincidan.</span>}</div>}</div>
@@ -7590,7 +7609,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       ) : f === "client_id" || f === "product_id" || f === "warehouse_id" || f === "supplier_id" || f === "primary_supplier_id" || f === "collection_point_id" || f === "order_id" || f === "shipment_id" ? (
         <select
           aria-label={c.labels[i]}
-          required={active === "Productos" ? ["warehouse_id", "supplier_id"].includes(f) : c.api === "orders" ? f === "client_id" : !['warehouse_id', 'order_id', 'shipment_id', 'supplier_id', 'primary_supplier_id'].includes(f)}
+          required={active === "Productos" ? false : c.api === "orders" ? f === "client_id" : !['warehouse_id', 'order_id', 'shipment_id', 'supplier_id', 'primary_supplier_id'].includes(f)}
           value={form[f] ?? ""}
           onChange={(e) => handleFormChange(f, e.target.value)}
         >
@@ -7610,17 +7629,17 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       ) : active === "Productos" && f === "preorder" ? (
         <select aria-label={c.labels[i]} value={String(form[f] ?? "1")} onChange={(e) => handleFormChange(f, e.target.value)}><option value="1">Sí</option><option value="0">No</option></select>
       ) : active === "Productos" && f === "inventory_valuation_method" ? (
-        <select aria-label={c.labels[i]} required value={form[f] ?? "FIFO"} onChange={(e) => handleFormChange(f, e.target.value)}>{["FIFO", "LIFO", "PMP", "Identificación específica"].map((value) => <option key={value}>{value}</option>)}</select>
+        <select aria-label={c.labels[i]} value={form[f] ?? "FIFO"} onChange={(e) => handleFormChange(f, e.target.value)}>{["FIFO", "LIFO", "PMP", "Identificación específica"].map((value) => <option key={value}>{value}</option>)}</select>
       ) : active === "Productos" && f === "accounting_product_group" ? (
-        <select aria-label={c.labels[i]} required value={form[f] ?? "Mercaderías"} onChange={(e) => handleFormChange(f, e.target.value)}>{["Mercaderías", "Productos terminados", "Materias primas", "Otro"].map((value) => <option key={value}>{value}</option>)}</select>
+        <select aria-label={c.labels[i]} value={form[f] ?? "Mercaderías"} onChange={(e) => handleFormChange(f, e.target.value)}>{["Mercaderías", "Productos terminados", "Materias primas", "Otro"].map((value) => <option key={value}>{value}</option>)}</select>
       ) : active === "Productos" && f === "accounting_vat_group" ? (
-        <select aria-label={c.labels[i]} required value={form[f] ?? "21%"} onChange={(e) => handleFormChange(f, e.target.value)}>{["21%", "10%", "4%", "2%", "0%", "Otro"].map((value) => <option key={value}>{value}</option>)}</select>
+        <select aria-label={c.labels[i]} value={form[f] ?? "21%"} onChange={(e) => handleFormChange(f, e.target.value)}>{["21%", "10%", "4%", "2%", "0%", "Otro"].map((value) => <option key={value}>{value}</option>)}</select>
       ) : active === "Productos" && f === "inventory_register_group" ? (
-        <select aria-label={c.labels[i]} required value={form[f] ?? "Mercaderías"} onChange={(e) => handleFormChange(f, e.target.value)}>{["Mercaderías", "Inventario general", "Otro"].map((value) => <option key={value}>{value}</option>)}</select>
+        <select aria-label={c.labels[i]} value={form[f] ?? "Mercaderías"} onChange={(e) => handleFormChange(f, e.target.value)}>{["Mercaderías", "Inventario general", "Otro"].map((value) => <option key={value}>{value}</option>)}</select>
       ) : active === "Productos" && ["unit", "purchase_format", "sale_format"].includes(f) ? (
-        <select aria-label={c.labels[i]} required={f === "unit"} value={form[f] ?? ""} onChange={(e) => handleFormChange(f, e.target.value)}><option value="">Seleccionar...</option>{["unidad", "caja de 4", "caja de 6", "caja de 8", "caja de 10", "caja de 12", "caja de 15", "caja de 16", "palet"].map((value) => <option key={value}>{value}</option>)}</select>
+        <select aria-label={c.labels[i]} value={form[f] ?? ""} onChange={(e) => handleFormChange(f, e.target.value)}><option value="">Seleccionar...</option>{["unidad", "caja de 4", "caja de 6", "caja de 8", "caja de 10", "caja de 12", "caja de 15", "caja de 16", "palet"].map((value) => <option key={value}>{value}</option>)}</select>
       ) : active === "Productos" && f === "product_tracking_code" ? (
-        <select aria-label={c.labels[i]} required value={form[f] ?? "Sin seguimiento"} onChange={(e) => handleFormChange(f, e.target.value)}><option>Sin seguimiento</option><option>Seguimiento de lote</option><option>Lote y fecha de caducidad</option></select>
+        <select aria-label={c.labels[i]} value={form[f] ?? "Sin seguimiento"} onChange={(e) => handleFormChange(f, e.target.value)}><option>Sin seguimiento</option><option>Seguimiento de lote</option><option>Lote y fecha de caducidad</option></select>
       ) : active === "Productos" && ["fixed_supplier", "lot_tracking", "expiry_tracking", "returnable_packaging"].includes(f) ? (
         <select aria-label={c.labels[i]} value={String(form[f] ?? "0")} onChange={(e) => handleFormChange(f, e.target.value)}><option value="0">No</option><option value="1">Sí</option></select>
       ) : active === "Documentos" && f === "type" ? (
@@ -7648,13 +7667,13 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           {(active === "Compras" ? ["Borrador", "Enviado", "En tránsito", "Parcialmente recibido", "Recibido", "Recibido con incidencia", "Cancelado"] : active === "Facturas" ? ["Proforma", "Pendiente", "Parcial", "Cobrada", "Vencida", "Anulada"] : [...(active === "Documentos" ? ["Activa", "Borrador", "Archivada"] : []), ...(active === "Pedidos" ? ["Nuevo"] : []), "Pendiente", "Confirmado", "Preparando", "Preparado", "Enviado", "Entregado", "Cancelado", "Cobrada"]).map((s) => <option key={s}>{s}</option>)}
         </select>
       ) : ["content", "description"].includes(f) || (active === "Pedidos" && ["loading_notes", "driver_notes", "notes"].includes(f)) ? (
-        <textarea aria-label={c.labels[i]} required={active === "Productos" && f === "description" ? true : !["description", "notes", "loading_notes", "driver_notes"].includes(f)} value={form[f] ?? ""} onChange={(e) => handleFormChange(f, e.target.value)} />
+        <textarea aria-label={c.labels[i]} required={active === "Productos" ? false : !["description", "notes", "loading_notes", "driver_notes"].includes(f)} value={form[f] ?? ""} onChange={(e) => handleFormChange(f, e.target.value)} />
       ) : (
         <input
           required={active === "Productos"
-            ? ["name", "sku", "category", "created_at", "warehouse_location", "cost_price", "last_direct_cost", "markup_percent", "unit_price"].includes(f)
+            ? f === "name"
             : c.api === "orders"
-            ? ["code", "client_id", "delivery_date"].includes(f)
+            ? ["code", "client_id", "preparation_date", "delivery_date"].includes(f)
             : active === "Notas"
             ? ["title", "content"].includes(f)
             : active === "Productos"
@@ -7779,7 +7798,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                   : isPurchaseForm
                     ? { code: `COM-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`, status: "Borrador", order_date: tabletTodayInput(), invoice_date: tabletTodayInput(), payment_status: "Pendiente", expected_date: "", amount: 0 }
                   : isOrderForm || active === "Pedidos"
-                    ? (() => { const defaultOrderDate = nextOrderWorkingDate(); return { code: nextOrderCode(), status: "Nuevo", created_at: tabletTodayInput(), created_by: user?.username || "Usuario local", preparation_date: defaultOrderDate, shipping_date: defaultOrderDate, delivery_date: defaultOrderDate }; })()
+                    ? (() => { const createdDate = tabletTodayInput(); const defaultOrderDate = nextOrderWorkingDate(); return { code: nextOrderCode(), status: "Nuevo", created_at: createdDate, created_by: user?.username || "Usuario local", preparation_date: nextCalendarDate(createdDate), shipping_date: defaultOrderDate, delivery_date: defaultOrderDate }; })()
                     : {}
               );
               beginForm(nextForm);
@@ -7926,6 +7945,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
               <summary><b>Datos generales del pedido</b><span><em className="order-created-date">Fecha del pedido: {formatSpanishDateValue(String(form.created_at || tabletTodayInput()).slice(0, 10), false)}</em> · {orderGeneralComplete ? <em className="accordion-complete" title="Campos obligatorios completos">✓ Completo</em> : <em className="accordion-pending">Pendiente de completar</em>} · Mostrar más/menos</span></summary>
               <div className="order-general-fields">
                 {c.fields.filter((f: string) => !["product_id", "quantity", "unit_price", "discount", "amount", "billing_status", "payment_status", "shipping_status", "prepared_by", "shipped_by", "delivered_by", "delivery_date", "notes", ...orderScheduleFields].includes(f)).map((f: string) => renderFormField(f, c.fields.indexOf(f)))}
+                {!editing && renderFormField("preparation_date", c.fields.indexOf("preparation_date"))}
                 {renderFormField("delivery_date", c.fields.indexOf("delivery_date"))}
               </div>
             </details>
@@ -7974,7 +7994,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                 {form.client_id && customerRecurrentError && <p className="customer-recurrent-message is-error" role="alert">{customerRecurrentError}</p>}
                 {form.client_id && !customerRecurrentLoading && !customerRecurrentError && customerRecurrentItems.length === 0 && <p className="customer-recurrent-message">Este cliente aún no tiene productos en pedidos anteriores.</p>}
                 {customerRecurrentItems.length > 0 && <div className="customer-recurrent-list">
-                  <div className="customer-recurrent-list-head" aria-hidden="true"><span>Producto</span><span>Últimos pedidos</span><span>Unidades</span><span></span></div>
+                  <div className="customer-recurrent-list-head" aria-hidden="true"><span>Producto</span><span>Unidades</span><span></span></div>
                   {customerRecurrentItems.map((item: any) => {
                   const imageSource = productDisplayImageSource(item);
                   const hasProductPhoto = Boolean(productImageSource(item));
@@ -7983,7 +8003,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                   return <article className="customer-recurrent-card" key={item.product_id}>
                     <div className={`customer-recurrent-image${hasProductPhoto ? "" : " is-reference"}`}><img src={imageSource} alt={hasProductPhoto ? `Foto de ${item.name}` : `Imagen de referencia para ${item.name}`} />{!hasProductPhoto && <small>Referencia</small>}</div>
                     <div className="customer-recurrent-info"><b title={item.name}>{item.name}</b><small title={`${item.sku || "Sin SKU"} · ${item.order_count} ${Number(item.order_count) === 1 ? "pedido anterior" : "pedidos anteriores"} · Última vez: ${recentQuantity} ${quantityUnitLabel(item.last_quantity_unit)} · ${recentUnits} unidades`}>{item.sku || "Sin SKU"} · {item.order_count} {Number(item.order_count) === 1 ? "pedido anterior" : "pedidos anteriores"} · Última vez: {recentQuantity} {quantityUnitLabel(item.last_quantity_unit)} ({recentUnits} uds.)</small></div>
-                    <label className="customer-recurrent-quantity">Unidades<input type="number" min="1" step="any" aria-label={`Unidades de ${item.name}`} value={customerRecurrentQuantities[String(item.product_id)] ?? String(Math.max(1, recentUnits))} onChange={(event) => setCustomerRecurrentQuantities((current) => ({ ...current, [String(item.product_id)]: event.target.value }))} /></label>
+                    <div className="customer-recurrent-quantity"><input type="number" min="1" step="any" aria-label={`Unidades de ${item.name}`} value={customerRecurrentQuantities[String(item.product_id)] ?? String(Math.max(1, recentUnits))} onChange={(event) => setCustomerRecurrentQuantities((current) => ({ ...current, [String(item.product_id)]: event.target.value }))} /></div>
                     <button type="button" className="button secondary customer-recurrent-add" onClick={() => addCustomerRecurrentItem(item)}>Añadir</button>
                   </article>;
                   })}
