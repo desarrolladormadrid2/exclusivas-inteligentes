@@ -4685,6 +4685,8 @@ export async function crmApiHandler(req, res) {
         const limitValue = query.has("limit") ? Math.min(parsePageValue(query.get("limit"), 0), 5000) : null;
         const offsetValue = query.has("offset") ? parsePageValue(query.get("offset"), 0) : 0;
         const bypassReadCache = query.has("refresh") || query.get("cache") === "no-store";
+        const cacheSafeQuery = [...query.keys()].every((key) => ["include_deleted", "include_inactive", "refresh", "cache"].includes(key));
+        const canUseListCache = cacheSafeQuery && !isLookup && !isPublicCatalog && limitValue === null && offsetValue === 0;
         if (t === "purchase_orders" && p[2] === "pending-receipt") {
           return send(res, 200, getPendingPurchaseReceiptOrders());
         }
@@ -4716,7 +4718,7 @@ export async function crmApiHandler(req, res) {
         if (t === "purchase_orders" && !isLookup && !includeDeleted && limitValue === null && offsetValue === 0) {
           return send(res, 200, getPurchaseOrderRows());
         }
-        const cached = !bypassReadCache && !isLookup && limitValue === null && offsetValue === 0
+        const cached = !bypassReadCache && canUseListCache
           ? cachedRows(t, includeDeleted, includeInactive)
           : null;
         if (cached) return send(res, 200, t === "shipments" ? cached.map(attachShipmentTrackingToken) : t === "order_lines" ? attachOrderLineLotsBatch(cached) : cached);
@@ -4816,7 +4818,7 @@ export async function crmApiHandler(req, res) {
         return send(
           res,
           200,
-          !isLookup && limitValue === null && offsetValue === 0
+          canUseListCache
             ? storeRows(t, includeDeleted, includeInactive, responseRows)
             : responseRows,
         );
