@@ -4646,8 +4646,8 @@ export async function crmApiHandler(req, res) {
           const defaultOrderDate = nextOrderWorkingDate(client?.weekly_closed_day);
           d.preparation_date = d.preparation_date || defaultOrderDate;
           d.shipping_date = d.shipping_date || defaultOrderDate;
-          // Se conserva para compatibilidad con listados y documentos antiguos,
-          // aunque ya no se solicita este campo al crear el pedido.
+          // Mantiene la fecha de reparto en el pedido para listados, documentos
+          // y el envío vinculado; usa la fecha de salida como valor compatible.
           d.delivery_date = d.delivery_date || d.shipping_date;
         }
         if (t === "delivery_notes") {
@@ -4978,7 +4978,7 @@ export async function crmApiHandler(req, res) {
           }
         }
         if (t === "orders") {
-          const client = d.client_id ? db.prepare("SELECT name,address,opening_time,closing_time,invoice_delivery_method FROM clients WHERE id=?").get(Number(d.client_id)) : null;
+          const client = d.client_id ? db.prepare("SELECT name,address,city,opening_time,closing_time,invoice_delivery_method FROM clients WHERE id=?").get(Number(d.client_id)) : null;
           const shippingLocation = d.collection_point_id
             ? db.prepare("SELECT address,opening_time,closing_time FROM collection_points WHERE id=? AND (client_id=? OR client_id IS NULL)").get(Number(d.collection_point_id), Number(d.client_id || 0))
             : null;
@@ -4987,8 +4987,8 @@ export async function crmApiHandler(req, res) {
             Number(d.urgent || 0) === 1 ? "PEDIDO URGENTE · Revisar todas las líneas antes de preparar." : "",
             String(d.loading_notes || d.notes || "").trim(),
           ].filter(Boolean).join("\n") || "Preparación pendiente de revisión.";
-          const createdShipment = db.prepare("INSERT INTO shipments(code,order_id,client_id,client_name_snapshot,collection_point_id,status,preparation_date,urgent,expected_delivery_at,address,packages,incidents,notes,driver_notes,invoice_delivery_method,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(shipmentCode, Number(r.lastInsertRowid), d.client_id || null, client?.name || null, d.collection_point_id || null, "Preparando", d.preparation_date || null, Number(d.urgent || 0), d.shipping_date || d.delivery_date || null, shippingLocation?.address || d.address || client?.address || null, 1, "", loadingNotes, String(d.driver_notes || "").trim(), client?.invoice_delivery_method || "Pendiente de indicar", now, now);
-          db.prepare("UPDATE shipments SET delivery_window_start=?,delivery_window_end=? WHERE id=?").run(d.delivery_window_start || shippingLocation?.opening_time || client?.opening_time || null, d.delivery_window_end || shippingLocation?.closing_time || client?.closing_time || null, Number(createdShipment.lastInsertRowid));
+          const createdShipment = db.prepare("INSERT INTO shipments(code,order_id,client_id,client_name_snapshot,collection_point_id,status,preparation_date,urgent,expected_delivery_at,address,packages,incidents,notes,driver_notes,invoice_delivery_method,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(shipmentCode, Number(r.lastInsertRowid), d.client_id || null, client?.name || null, d.collection_point_id || null, "Preparando", d.preparation_date || null, Number(d.urgent || 0), d.delivery_date || d.shipping_date || null, shippingLocation?.address || d.address || client?.address || null, 1, "", loadingNotes, String(d.driver_notes || "").trim(), client?.invoice_delivery_method || "Pendiente de indicar", now, now);
+          db.prepare("UPDATE shipments SET delivery_window_start=?,delivery_window_end=?,delivery_city=?,expected_delivery_at=? WHERE id=?").run(d.delivery_window_start || shippingLocation?.opening_time || client?.opening_time || null, d.delivery_window_end || shippingLocation?.closing_time || client?.closing_time || null, shippingLocation?.city || d.delivery_city || client?.city || null, d.delivery_date || d.shipping_date || null, Number(createdShipment.lastInsertRowid));
           invalidateRelatedReadCaches("shipments");
         }
         if (t === "orders" && stockShortages.length) {
@@ -5387,7 +5387,7 @@ export async function crmApiHandler(req, res) {
           if (linkedShipment) {
             const currentOrder = db.prepare("SELECT client_id,collection_point_id,address,delivery_city,delivery_date,preparation_date,shipping_date,urgent FROM orders WHERE id=?").get(p[2]);
             const clientId = d.client_id ?? currentOrder?.client_id ?? null;
-            const collectionPointId = d.collection_point_id ?? currentOrder?.collection_point_id ?? null;
+            const collectionPointId = Object.prototype.hasOwnProperty.call(d, "collection_point_id") ? d.collection_point_id : currentOrder?.collection_point_id ?? null;
             const client = clientId
               ? db.prepare("SELECT address,city,opening_time,closing_time,invoice_delivery_method FROM clients WHERE id=?").get(clientId)
               : null;
@@ -5401,7 +5401,7 @@ export async function crmApiHandler(req, res) {
               collectionPointId,
               d.preparation_date ?? currentOrder?.preparation_date ?? null,
               Number(d.urgent ?? currentOrder?.urgent ?? 0),
-              d.shipping_date ?? currentOrder?.shipping_date ?? d.delivery_date ?? currentOrder?.delivery_date ?? null,
+              d.delivery_date ?? d.shipping_date ?? currentOrder?.delivery_date ?? currentOrder?.shipping_date ?? null,
               shipmentAddress,
               shipmentCity,
               orderDeliveryWindowStart ?? shippingLocation?.opening_time ?? client?.opening_time ?? linkedShipment.delivery_window_start ?? null,

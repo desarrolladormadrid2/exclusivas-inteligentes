@@ -5161,15 +5161,32 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     }
     if (active === "Pedidos" && field === "client_id") {
       const client = (lookups.clients || []).find((item: any) => Number(item.id) === Number(value));
+      const clientPoints = (lookups.collection_points || []).filter((item: any) => Number(item.client_id) === Number(value));
+      const primaryAddress = String(client?.address || "").trim();
+      const primaryCity = String(client?.city || "").trim();
+      const primaryPointExists = clientPoints.some((item: any) => String(item.address || "").trim().toLowerCase() === primaryAddress.toLowerCase() && String(item.city || "").trim().toLowerCase() === primaryCity.toLowerCase());
+      const usePrimaryAddress = Boolean(primaryAddress && !primaryPointExists);
       const defaultOrderDate = nextOrderWorkingDate(client?.weekly_closed_day);
       setForm((current: any) => ({
         ...current,
         client_id: value,
-        collection_point_id: "",
+        collection_point_id: usePrimaryAddress ? "__client_address__" : "",
+        address: usePrimaryAddress ? primaryAddress : "",
+        delivery_city: usePrimaryAddress ? primaryCity : "",
         ...(!editing ? { preparation_date: defaultOrderDate, shipping_date: defaultOrderDate, delivery_date: defaultOrderDate } : {}),
       }));
       setClientSearch(client ? `${client.name}${client.city ? ` · ${client.city}` : ""}` : "");
       setNewShippingLocationOpen(false);
+      return;
+    }
+    if (active === "Pedidos" && field === "collection_point_id") {
+      if (value === "__client_address__") {
+        const client = (lookups.clients || []).find((item: any) => Number(item.id) === Number(form.client_id));
+        setForm((current: any) => ({ ...current, collection_point_id: value, address: client?.address || "", delivery_city: client?.city || "" }));
+      } else {
+        const point = (lookups.collection_points || []).find((item: any) => Number(item.id) === Number(value));
+        setForm((current: any) => ({ ...current, collection_point_id: value, address: point?.address || "", delivery_city: point?.city || "" }));
+      }
       return;
     }
     if (active !== "Salidas") {
@@ -5306,7 +5323,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   }
   const selectedQuoteProduct = (lookups.products || []).find((item: any) => Number(item.id) === Number(quoteLineDraft.product_id));
   const quoteTotalUnits = quoteLineDraft.total_units;
-  const orderGeneralComplete = Boolean(String(form.code || "").trim() && form.client_id && form.collection_point_id);
+  const orderPrimaryAddressSelected = form.collection_point_id === "__client_address__";
+  const orderGeneralComplete = Boolean(String(form.code || "").trim() && form.client_id && form.collection_point_id && (!orderPrimaryAddressSelected || String(form.address || "").trim()));
   async function saveNewSupplier(event: any) {
     event.preventDefault();
     if (!String(newSupplier.name || "").trim()) return;
@@ -5342,7 +5360,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       setError("Este pedido ya ha sido enviado y no se puede editar.");
       return;
     }
-    if (isOrderForm && (!String(currentForm.code || "").trim() || !currentForm.client_id || !currentForm.collection_point_id)) {
+    const orderUsesPrimaryAddress = currentForm.collection_point_id === "__client_address__";
+    if (isOrderForm && (!String(currentForm.code || "").trim() || !currentForm.client_id || !currentForm.collection_point_id || (orderUsesPrimaryAddress && !String(currentForm.address || "").trim()))) {
       setError("Completa el código, el cliente y el lugar de envío antes de guardar el pedido.");
       return;
     }
@@ -5391,6 +5410,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       ...(c.api === "expenses" && !currentForm.code
         ? { code: "GAS-" + String(Date.now()).slice(-8) }
         : {}),
+      ...(c.api === "orders" && orderUsesPrimaryAddress ? { collection_point_id: null } : {}),
     };
     if (!editing && active === "Salidas" && currentForm.order_id) {
       const sourceLines = await fetch("/api/order_lines")
@@ -7496,7 +7516,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   };
   const renderFormField = (f: string, i: number) => (
     <label key={f}>
-      <span className={(active === "Pedidos" && ["client_id", "collection_point_id"].includes(f)) || (active === "Productos" && ["name", "sku", "description", "category", "unit", "created_at", "warehouse_id", "warehouse_location", "inventory_valuation_method", "cost_price", "last_direct_cost", "markup_percent", "unit_price", "accounting_product_group", "accounting_vat_group", "inventory_register_group", "product_tracking_code", "supplier_id"].includes(f)) ? "field-label-required" : undefined}>{active === "Pedidos" && f === "collection_point_id" ? "Lugar de envío" : active === "Productos" && f === "unit" ? "Unidad de medida base" : c.labels[i]}</span>
+      <span className={(active === "Pedidos" && ["client_id", "collection_point_id", "delivery_date"].includes(f)) || (active === "Productos" && ["name", "sku", "description", "category", "unit", "created_at", "warehouse_id", "warehouse_location", "inventory_valuation_method", "cost_price", "last_direct_cost", "markup_percent", "unit_price", "accounting_product_group", "accounting_vat_group", "inventory_register_group", "product_tracking_code", "supplier_id"].includes(f)) ? "field-label-required" : undefined}>{active === "Pedidos" && f === "collection_point_id" ? "Lugar de envío" : active === "Pedidos" && f === "delivery_date" ? "Fecha de reparto" : active === "Productos" && f === "unit" ? "Unidad de medida base" : c.labels[i]}</span>
       {active === "Pedidos" && f === "client_id" ? (
         <>
           <div className="smart-client-picker"><input aria-label="Cliente" autoComplete="off" placeholder={lookups.clients?.length ? "Buscar cliente por nombre, ciudad, teléfono o email…" : "Cargando clientes…"} value={clientSearch} onChange={(event) => { const value = event.target.value; setClientSearch(value); if (!value) handleFormChange("client_id", ""); }} />{lookups.clients?.length > 0 && <button type="button" className="smart-client-clear" onClick={() => { setClientSearch(""); handleFormChange("client_id", ""); }} aria-label="Limpiar cliente" title="Limpiar cliente">×</button>}{!form.client_id && clientSearch.trim().length > 0 && <div className="smart-client-suggestions">{(lookups.clients || []).filter((item: any) => `${item.name || ""} ${item.city || ""} ${item.phone || ""} ${item.email || ""}`.toLowerCase().includes(clientSearch.trim().toLowerCase())).slice(0, 8).map((item: any) => <button type="button" key={item.id} onClick={() => { setClientSearch(`${item.name}${item.city ? ` · ${item.city}` : ""}`); handleFormChange("client_id", String(item.id)); }}><b>{item.name}{item.city ? ` · ${item.city}` : ""}</b><small>{[item.phone, item.email].filter(Boolean).join(" · ") || "Sin datos de contacto"}</small></button>)}{!(lookups.clients || []).some((item: any) => `${item.name || ""} ${item.city || ""} ${item.phone || ""} ${item.email || ""}`.toLowerCase().includes(clientSearch.trim().toLowerCase())) && <span className="smart-client-no-results">No hay clientes que coincidan.</span>}</div>}</div>
@@ -7505,7 +7525,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         <>
           <select aria-label="Lugar de envío" required value={form[f] ?? ""} disabled={!form.client_id} onChange={(e) => { if (e.target.value === "__new__") setNewShippingLocationOpen(true); else handleFormChange(f, e.target.value); }}>
             <option value="">{form.client_id ? "Seleccionar ubicación del cliente…" : "Selecciona primero un cliente"}</option>
-            {(lookups.collection_points || []).filter((item: any) => Number(item.client_id) === Number(form.client_id)).map((item: any) => <option key={item.id} value={item.id}>{item.name}{item.address ? ` · ${item.address}` : ""}</option>)}
+            {(() => { const client = (lookups.clients || []).find((item: any) => Number(item.id) === Number(form.client_id)); const points = (lookups.collection_points || []).filter((item: any) => Number(item.client_id) === Number(form.client_id)); const primaryAddress = String(client?.address || "").trim(); const primaryCity = String(client?.city || "").trim(); const primaryPointExists = points.some((item: any) => String(item.address || "").trim().toLowerCase() === primaryAddress.toLowerCase() && String(item.city || "").trim().toLowerCase() === primaryCity.toLowerCase()); return <>{primaryAddress && !primaryPointExists && <option value="__client_address__">Dirección principal · {primaryAddress}{primaryCity ? ` · ${primaryCity}` : ""}</option>}{points.map((item: any) => <option key={item.id} value={item.id}>{item.name}{item.address ? ` · ${item.address}` : ""}{item.city ? ` · ${item.city}` : ""}</option>)}</>; })()}
             {form.client_id && <option value="__new__">＋ Crear nueva ubicación para este cliente</option>}
           </select>
           {newShippingLocationOpen && <div className="shipping-location-quick-form">
@@ -7634,7 +7654,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           required={active === "Productos"
             ? ["name", "sku", "category", "created_at", "warehouse_location", "cost_price", "last_direct_cost", "markup_percent", "unit_price"].includes(f)
             : c.api === "orders"
-            ? ["code", "client_id"].includes(f)
+            ? ["code", "client_id", "delivery_date"].includes(f)
             : active === "Notas"
             ? ["title", "content"].includes(f)
             : active === "Productos"
@@ -7906,6 +7926,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
               <summary><b>Datos generales del pedido</b><span><em className="order-created-date">Fecha del pedido: {formatSpanishDateValue(String(form.created_at || tabletTodayInput()).slice(0, 10), false)}</em> · {orderGeneralComplete ? <em className="accordion-complete" title="Campos obligatorios completos">✓ Completo</em> : <em className="accordion-pending">Pendiente de completar</em>} · Mostrar más/menos</span></summary>
               <div className="order-general-fields">
                 {c.fields.filter((f: string) => !["product_id", "quantity", "unit_price", "discount", "amount", "billing_status", "payment_status", "shipping_status", "prepared_by", "shipped_by", "delivered_by", "delivery_date", "notes", ...orderScheduleFields].includes(f)).map((f: string) => renderFormField(f, c.fields.indexOf(f)))}
+                {renderFormField("delivery_date", c.fields.indexOf("delivery_date"))}
               </div>
             </details>
             {editing && <section className="order-schedule-panel" aria-labelledby="order-schedule-title">
