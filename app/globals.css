@@ -3229,7 +3229,7 @@ footer span {
      duplicados de la barra superior solo roban ancho y terminan cortándose. */
   .header-quick-actions { display: flex; gap: 0; margin-left: 0; }
   .header-quick-actions > :not(.navbar-section-search) { display: none !important; }
-  .navbar-section-search { flex: 0 1 clamp(110px, 22vw, 170px); width: clamp(110px, 22vw, 170px); min-width: 110px; }
+  .navbar-section-search { flex: 1 1 auto; width: auto; min-width: 0; max-width: 220px; }
   .appbar-actions { justify-content: flex-end; overflow: visible; }
   /* El desplegable de usuario no puede quedar recortado por la cabecera en
      vertical: se posiciona respecto a la ventana y conserva el cierre de
