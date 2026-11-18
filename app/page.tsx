@@ -7079,7 +7079,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                   : [];
     const relationField = ["client_id", "product_id", "warehouse_id", "supplier_id", "primary_supplier_id", "collection_point_id", "order_id", "purchase_order_id", "purchase_invoice_id", "invoice_id", "shipment_id"].includes(field);
     if (relationField && value !== null && value !== undefined && value !== "") {
-      const historicalLabel = field === "client_id" ? row?.client_name_snapshot : field === "product_id" ? row?.product_name_snapshot : "";
+      const historicalLabel = field === "client_id" ? row?.client_name_snapshot : field === "product_id" ? (row?.product_name_snapshot || row?.product_name) : "";
       if (String(historicalLabel || "").trim()) return String(historicalLabel).trim();
     }
     if (lookupSource.length && relationField) {

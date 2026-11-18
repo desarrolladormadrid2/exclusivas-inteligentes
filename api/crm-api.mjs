@@ -4332,7 +4332,7 @@ export async function crmApiHandler(req, res) {
       if (t === "stock" && req.method === "GET") {
         const stock = db
           .prepare(
-            "SELECT p.id product_id,p.name product_name,COALESCE(p.sku,'') sku,COALESCE(p.unit,'unidad') unit,COALESCE(w.name,'Almacén general') warehouse_name,COALESCE(p.stock,0) stock,COALESCE(p.stock_reserved,0) stock_reserved,COALESCE(p.stock,0)-COALESCE(p.stock_reserved,0) available_stock,COALESCE(NULLIF(p.stock_min,0),p.min_stock,0) min_stock,CASE WHEN COALESCE(p.stock,0)-COALESCE(p.stock_reserved,0)<=0 THEN 'Sin stock' WHEN COALESCE(p.stock,0)-COALESCE(p.stock_reserved,0)<=COALESCE(NULLIF(p.stock_min,0),p.min_stock,0) THEN 'Crítico' ELSE 'Disponible' END stock_status FROM products p LEFT JOIN warehouses w ON w.id=1 WHERE CAST(COALESCE(p.deleted,0) AS INTEGER)=0 ORDER BY p.name",
+            "SELECT p.id product_id,p.name product_name,COALESCE(p.sku,'') sku,COALESCE(p.unit,'unidad') unit,COALESCE(w.name,'Almacén general') warehouse_name,COALESCE(p.stock,0) stock,COALESCE(p.stock_reserved,0) stock_reserved,COALESCE(p.stock,0)-COALESCE(p.stock_reserved,0) available_stock,COALESCE(NULLIF(p.stock_min,0),p.min_stock,0) min_stock,CASE WHEN COALESCE(p.stock,0)-COALESCE(p.stock_reserved,0)<=0 THEN 'Sin stock' WHEN COALESCE(p.stock,0)-COALESCE(p.stock_reserved,0)<=COALESCE(NULLIF(p.stock_min,0),p.min_stock,0) THEN 'Crítico' ELSE 'Disponible' END stock_status FROM products p LEFT JOIN warehouses w ON w.id=COALESCE(p.warehouse_id,1) WHERE CAST(COALESCE(p.deleted,0) AS INTEGER)=0 ORDER BY p.name",
           )
           .all();
         return send(res, 200, stock);
