@@ -8036,7 +8036,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       {!isLoadPreparation && <div className="manager-head">
         <div className="manager-section-title">
           <div className="columns-accordion header-columns-accordion">
-            <button type="button" className="columns-toggle columns-icon-toggle" aria-label="Configurar columnas visibles" title="Configurar columnas visibles" aria-expanded={columnsOpen} onClick={() => setColumnsOpen((value) => !value)}>▦</button>
+            <button type="button" className="columns-toggle columns-icon-toggle" aria-label="Configurar columnas visibles" title="Configurar columnas visibles" aria-expanded={columnsOpen} onClick={() => setColumnsOpen((value) => !value)}><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" /><path d="M9.15 4.5v15M14.85 4.5v15" /></svg></button>
             {columnsOpen && <div className="columns-options" role="group" aria-label={`Columnas visibles de ${c.title}`}>
               {(warehouseListFields[c.api] || c.fields).map((field: string) => <label key={field}><input type="checkbox" checked={visibleFields.includes(field)} onChange={() => toggleColumn(field)} />{compactFieldLabels[field] || c.labels[c.fields.indexOf(field)] || field}</label>)}
             </div>}
@@ -8558,7 +8558,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                     <th data-field={f} className={isDateField(f) ? "sortable-date-column" : undefined}>
                       <button type="button" className="table-sort-button" onClick={() => { setStockSort("none"); setDateSort(null); setTableSort((current) => current?.field === f ? { field: f, direction: current.direction === "asc" ? "desc" : "asc" } : { field: f, direction: "asc" }); }} aria-label={`Ordenar ${active === "Entradas" && f === "code" ? "Entrada" : active === "Entradas" && f === "purchase_order_code" ? "Pedido relacionado" : compactFieldLabels[f] || c.labels[c.fields.indexOf(f)] || f}`} title={f === "gtr_enabled" ? "Tratamiento de residuos" : "Ordenar columna"}>{active === "Entradas" && f === "code" ? "Entrada" : active === "Entradas" && f === "purchase_order_code" ? "Pedido relacionado" : f === "gtr_enabled" ? "GTR" : compactFieldLabels[f] || c.labels[c.fields.indexOf(f)] || f}<span aria-hidden="true">{tableSort?.field === f ? (tableSort.direction === "asc" ? " ↑" : " ↓") : " ↕"}</span></button>
                     </th>
-                    {active === "Stock" && fieldIndex === 0 && <th className="product-lots-column">LOTES</th>}
+                    {active === "Stock" && fieldIndex === 0 && <><th className="product-lots-column">LOTES</th><th className="stock-order-column">PEDIR</th></>}
                   </Fragment>
                 ))}
                 {active !== "Stock" && <th>ACCIONES</th>}
@@ -8619,9 +8619,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                                   ? "—"
                                   : formatTableValue(f, r[f], r)
                           )}
-                          {active === "Stock" && f === "product_id" && <button type="button" className="stock-row-order-button" onClick={(event) => { event.stopPropagation(); startPurchaseFromStock(r); }}>Pedir al proveedor</button>}
                         </td>
-                        {active === "Stock" && fieldIndex === 0 && renderProductLots(r)}
+                        {active === "Stock" && fieldIndex === 0 && <>{renderProductLots(r)}<td className="stock-order-column" data-label="Pedir"><button type="button" className="stock-row-order-button" onClick={(event) => { event.stopPropagation(); startPurchaseFromStock(r); }}>Pedir al proveedor</button></td></>}
                       </Fragment>
                     ))}
                     {active !== "Stock" && <td data-label="Acciones">
@@ -13061,19 +13060,54 @@ export function OcrIntelligent({ user = { username: "Usuario local" } }: { user?
   const [file, setFile] = useState<File | null>(null);
   const [data, setData] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<"new" | "history">("new");
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [message, setMessage] = useState("");
   const historyRequestRef = useRef(0);
-  const readHistory = async () => { const requestId = ++historyRequestRef.current; try { const response = await fetch(`/api/ocr_documents?refresh=${Date.now()}`, { cache: "no-store", headers: { "X-Audit-Query": "true", "X-Actor": user?.username || "Usuario local" } }); const body = await response.json(); if (requestId === historyRequestRef.current) setHistory(Array.isArray(body) ? body : []); } catch { if (requestId === historyRequestRef.current) setMessage("No se pudo cargar el historial."); } };
+  const readHistory = async () => { const requestId = ++historyRequestRef.current; setHistoryLoading(true); try { const response = await fetch(`/api/ocr_documents?refresh=${Date.now()}`, { cache: "no-store", headers: { "X-Audit-Query": "true", "X-Actor": user?.username || "Usuario local" } }); const body = await response.json(); if (!response.ok) throw new Error("No se pudo cargar el historial."); if (requestId === historyRequestRef.current) setHistory(Array.isArray(body) ? body : []); } catch { if (requestId === historyRequestRef.current) setMessage("No se pudo cargar el historial."); } finally { if (requestId === historyRequestRef.current) setHistoryLoading(false); } };
   useEffect(() => { void readHistory(); }, []);
   useEffect(() => { const handlePaste = (event: ClipboardEvent) => { const pasted = event.clipboardData?.files?.[0]; if (pasted) { event.preventDefault(); void selectFile(pasted); } }; window.addEventListener("paste", handlePaste); return () => window.removeEventListener("paste", handlePaste); }, []);
   function classify(name: string, text: string) { const value = `${name} ${text}`.toLowerCase(); if (/factura|invoice|iva|base imponible|total a pagar/.test(value)) return "Factura"; if (/presupuesto|cotizaci|proforma|oferta/.test(value)) return "Presupuesto"; return "Otro"; }
   function extractText(selected: File) { return new Promise<string>((resolve) => { if (!selected.type.startsWith("text/") && !/csv|xml|json/i.test(selected.type) && !/\.(txt|csv|xml|json)$/i.test(selected.name)) return resolve(""); const reader = new FileReader(); reader.onload = () => resolve(String(reader.result || "").slice(0, 50000)); reader.onerror = () => resolve(""); reader.readAsText(selected); }); }
   async function selectFile(selected?: File) { if (!selected) return; if (selected.size > 25 * 1024 * 1024) { setMessage("El archivo no puede superar 25 MB."); return; } setFile(selected); setLoading(true); setMessage(""); const text = await extractText(selected); const email = text.match(/[\w.-]+@[\w.-]+\.[a-z]{2,}/i)?.[0] || ""; const total = text.match(/(?:total|importe|precio)[^\d]{0,20}([\d.,]+\s*€?)/i)?.[1] || ""; setData({ document_type: classify(selected.name, text), email, total, extracted_text: text }); setLoading(false); }
   async function save() { if (!file || !data) return; setSaving(true); setMessage(""); try { const response = await fetch("/api/ocr_documents", { method: "POST", headers: { "Content-Type": "application/json", "X-Actor": user?.username || "Usuario local" }, body: JSON.stringify({ file_name: file.name, mime_type: file.type || "application/octet-stream", file_size: file.size, document_type: data.document_type, detected_email: data.email, detected_total: data.total, extracted_text: data.extracted_text, status: "Revisado", created_by: user?.username || "Usuario local" }) }); const body = await response.json(); if (!response.ok) throw new Error(body.error || "No se pudo guardar el documento."); setMessage("Documento guardado correctamente en el historial."); setFile(null); setData(null); await readHistory(); } catch (error: any) { setMessage(error.message || "No se pudo guardar el documento."); } finally { setSaving(false); } }
-  return <section className="ocr-page"><div className="ocr-page-head"><div><p className="eyebrow">AUTOMATIZACIÓN DOCUMENTAL</p><h2>OCR inteligente</h2><p className="muted">Sube un documento para identificarlo y preparar sus datos para el CRM.</p></div></div><div className="ocr-tabs"><b>Nuevo documento</b><span>Historial {history.length}</span></div><div className={`ocr-dropzone${dragging ? " is-dragging" : ""}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); void selectFile(event.dataTransfer.files?.[0]); }}><span className="ocr-upload-icon">↑</span><h3>Arrastra tu documento aquí</h3><p className="muted">o selecciona un archivo desde tu dispositivo</p><label className="button primary">Subir archivo<input type="file" hidden onChange={(event) => void selectFile(event.target.files?.[0])} /></label><small>PDF, imágenes, Word, Excel, XML, CSV y cualquier otro formato · Máx. 25 MB</small></div>{loading && <div className="ocr-feedback" role="status">Analizando documento…</div>}{data && !loading && <div className="ocr-review"><div className="panel-head"><div><h3>Datos extraídos</h3><p className="muted">Revisa la clasificación antes de guardar.</p></div><span className="scanner-state ready">{data.document_type}</span></div><div className="ocr-fields"><label>Tipo de documento<select value={data.document_type} onChange={(event) => setData({ ...data, document_type: event.target.value })}><option>Factura</option><option>Presupuesto</option><option>Otro</option></select></label><label>Correo detectado<input value={data.email} onChange={(event) => setData({ ...data, email: event.target.value })} placeholder="No detectado" /></label><label>Importe / total<input value={data.total} onChange={(event) => setData({ ...data, total: event.target.value })} placeholder="No detectado" /></label></div><div className="ocr-actions"><button className="button primary" disabled={saving} onClick={() => void save()}>{saving ? "Guardando…" : "Guardar en el historial"}</button><button className="button secondary" onClick={() => { setFile(null); setData(null); }}>Descartar</button></div></div>}{message && <p className="ocr-message" role="status">{message}</p>}<div className="ocr-history"><div className="panel-head"><div><h3>Historial de documentos</h3><p className="muted">Documentos guardados y clasificados.</p></div></div>{history.length ? history.map((item) => <div className="ocr-history-row" key={item.id}><span className="file-icon">▤</span><div><b>{item.file_name}</b><small>{item.created_at ? formatSpanishDateValue(item.created_at, true) : "—"} · {item.created_by || "Usuario local"}</small></div><span className="scanner-state ready">{item.document_type || "Otro"}</span></div>) : <p className="muted empty-row">Aún no hay documentos procesados.</p>}</div></section>;
+  return <section className="ocr-page">
+    <div className="ocr-page-head">
+      <div>
+        <h2>OCR inteligente</h2>
+        <p className="muted">Sube un documento para identificarlo y preparar sus datos para el CRM.</p>
+      </div>
+    </div>
+    <nav className="ocr-tabs" role="tablist" aria-label="Documentos OCR">
+      <button type="button" role="tab" id="ocr-new-tab" aria-selected={activeTab === "new"} aria-controls="ocr-new-panel" className={activeTab === "new" ? "is-active" : ""} onClick={() => setActiveTab("new")}>Nuevo documento</button>
+      <button type="button" role="tab" id="ocr-history-tab" aria-selected={activeTab === "history"} aria-controls="ocr-history-panel" className={activeTab === "history" ? "is-active" : ""} onClick={() => setActiveTab("history")}>Historial <span>{history.length}</span></button>
+    </nav>
+    {message && <p className="ocr-message" role="status">{message}</p>}
+    <section id="ocr-new-panel" role="tabpanel" aria-labelledby="ocr-new-tab" className="ocr-new-panel" hidden={activeTab !== "new"}>
+      <div className={`ocr-dropzone${dragging ? " is-dragging" : ""}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); void selectFile(event.dataTransfer.files?.[0]); }}>
+        <span className="ocr-upload-icon" aria-hidden="true">↑</span>
+        <div className="ocr-dropzone-copy"><h3>Arrastra un documento aquí</h3><p className="muted">o selecciónalo desde tu dispositivo</p><small>PDF, imágenes, Word, Excel, XML, CSV y otros formatos · Máx. 25 MB</small></div>
+        <label className="button primary">Subir archivo<input type="file" hidden onChange={(event) => void selectFile(event.target.files?.[0])} /></label>
+      </div>
+      {loading && <div className="ocr-feedback" role="status">Analizando documento…</div>}
+      {data && !loading && <div className="ocr-review">
+        <div className="panel-head"><div><h3>Datos extraídos</h3><p className="muted">Revisa la clasificación antes de guardar.</p></div><span className="scanner-state ready">{data.document_type}</span></div>
+        <div className="ocr-fields">
+          <label>Tipo de documento<select value={data.document_type} onChange={(event) => setData({ ...data, document_type: event.target.value })}><option>Factura</option><option>Presupuesto</option><option>Otro</option></select></label>
+          <label>Correo detectado<input value={data.email} onChange={(event) => setData({ ...data, email: event.target.value })} placeholder="No detectado" /></label>
+          <label>Importe / total<input value={data.total} onChange={(event) => setData({ ...data, total: event.target.value })} placeholder="No detectado" /></label>
+        </div>
+        <div className="ocr-actions"><button className="button primary" disabled={saving} onClick={() => void save()}>{saving ? "Guardando…" : "Guardar en el historial"}</button><button className="button secondary" onClick={() => { setFile(null); setData(null); }}>Descartar</button></div>
+      </div>}
+    </section>
+    <section id="ocr-history-panel" role="tabpanel" aria-labelledby="ocr-history-tab" className="ocr-history" hidden={activeTab !== "history"}>
+      <div className="panel-head"><div><h3>Historial de documentos</h3><p className="muted">Documentos guardados y clasificados.</p></div><small>{history.length} documentos</small></div>
+      {historyLoading ? <div className="data-loading" role="status"><span className="loading-spinner" aria-hidden="true" />Cargando historial…</div> : history.length ? <div className="ocr-history-table-wrap"><table className="ocr-history-table"><thead><tr><th>Documento</th><th>Tipo</th><th>Correo detectado</th><th>Importe</th><th>Fecha</th><th>Subido por</th></tr></thead><tbody>{history.map((item) => <tr key={item.id}><td data-label="Documento"><span className="ocr-history-file" title={item.file_name}>{item.file_name}</span><small className="muted">{Number(item.file_size) ? `${Math.max(1, Math.round(Number(item.file_size) / 1024))} KB` : "Tamaño no disponible"}</small></td><td data-label="Tipo"><span className="scanner-state ready">{item.document_type || "Otro"}</span></td><td data-label="Correo detectado">{item.detected_email || "—"}</td><td data-label="Importe">{item.detected_total || "—"}</td><td data-label="Fecha">{item.created_at ? formatSpanishDateValue(item.created_at, true) : "—"}</td><td data-label="Subido por">{item.created_by || "Usuario local"}</td></tr>)}</tbody></table></div> : <p className="empty-row">Aún no hay documentos procesados.</p>}
+    </section>
+  </section>;
 }
 
 function WarehouseIncidentManager({ user, refreshSignal = 0 }: { user: any; refreshSignal?: number }) {
