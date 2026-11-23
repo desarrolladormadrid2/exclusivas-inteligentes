@@ -37,6 +37,7 @@ export default function SupplierPurchasingManager({ user, onNavigate }: { user?:
   const [warehouses, setWarehouses] = useState<AnyRow[]>([]);
   const [products, setProducts] = useState<AnyRow[]>([]);
   const [purchaseSuggestions, setPurchaseSuggestions] = useState<AnyRow[]>([]);
+  const [recommendedSupplierSelection, setRecommendedSupplierSelection] = useState<Record<string, string>>({});
   const [orders, setOrders] = useState<AnyRow[]>([]);
   const [aliases, setAliases] = useState<AnyRow[]>([]);
   const [productSupplierLinks, setProductSupplierLinks] = useState<AnyRow[]>([]);
@@ -219,8 +220,12 @@ export default function SupplierPurchasingManager({ user, onNavigate }: { user?:
       const minimum = Number(product.min_stock ?? product.stock_min ?? 0);
       const suggestion = purchaseSuggestions.find((item) => Number(item.product_id) === Number(product.id));
       const comparisons = Array.isArray(suggestion?.comparisons) ? suggestion.comparisons : [];
-      const offer = comparisons.find((item: AnyRow) => Boolean(item.has_price)) || comparisons[0] || null;
-      return { product, available, minimum, suggested: Number(suggestion?.suggested_quantity || Math.max(1, minimum - available)), comparisons, offer };
+      const orderedOffers = [...comparisons].sort((a: AnyRow, b: AnyRow) => {
+        if (Boolean(a.has_price) !== Boolean(b.has_price)) return a.has_price ? -1 : 1;
+        return Number(a.real_cost || 0) - Number(b.real_cost || 0) || String(a.supplier_name || "").localeCompare(String(b.supplier_name || ""), "es");
+      });
+      const offer = orderedOffers[0] || null;
+      return { product, available, minimum, suggested: Number(suggestion?.suggested_quantity || Math.max(1, minimum - available)), comparisons: orderedOffers, offers: orderedOffers.slice(0, 3), offer };
     })
     .filter((item) => item.available < item.minimum)
     .sort((a, b) => a.available - b.available || String(a.product.name || "").localeCompare(String(b.product.name || ""), "es"));
@@ -720,6 +725,16 @@ export default function SupplierPurchasingManager({ user, onNavigate }: { user?:
         </>}
       </article>
     </div>}
-    {section === "recommended" && <section className="supplier-recommended-panel" aria-label="Compras recomendadas"><div className="supplier-recommended-head"><div><b>Productos que hay que pedir</b><small>Comprueba el proveedor y añade el producto a un borrador. Nada se envía hasta que lo revises y confirmes.</small></div><strong>{loading ? "—" : `${recommendedProducts.length} productos`}</strong></div>{loading ? <div className="data-loading" role="status">Calculando recomendaciones…</div> : recommendedProducts.length ? <div className="supplier-recommended-list">{recommendedProducts.map(({ product, available, minimum, suggested, comparisons, offer }) => <article className="supplier-recommended-row" key={product.id}><div className="supplier-recommended-product"><b>{product.name}</b><small>{product.sku || "Sin referencia"}</small></div><div className="supplier-recommended-stock"><span><b>{available}</b><small>disponibles</small></span><span><b>{minimum}</b><small>mínimo</small></span><span><b>{suggested}</b><small>a pedir</small></span></div><div className="supplier-recommended-choice">{offer ? <><span><small>Proveedor recomendado</small><b>{offer.supplier_name}</b><em>{offer.has_price ? "Precio registrado" : "Sin precio registrado"}</em></span><strong>{offer.has_price ? currency(offer.real_cost) : "Pedir precio"}</strong><button type="button" className="button primary" onClick={() => startRecommendedOrder(product, suggested, offer)}>Añadir a borrador</button></> : <p>Este producto aún no tiene un proveedor vinculado. Asígnalo en «Productos y proveedores» antes de crear la compra.</p>}</div>{comparisons.length > 1 && <details className="supplier-recommended-more"><summary>Ver otros proveedores</summary><div className="supplier-recommended-supplier-list">{comparisons.map((other: AnyRow) => <div className={other.has_price ? "has-price" : "no-price"} key={String(other.id)}><span><b>{other.supplier_name}</b><small>{other.has_price ? "Precio registrado" : "Sin precio registrado"}{other.lead_time_days ? ` · {other.lead_time_days} días` : ""}</small></span><strong>{other.has_price ? currency(other.real_cost) : "Sin precio registrado"}</strong><button type="button" className="row-action" onClick={() => startRecommendedOrder(product, suggested, other)}>Elegir proveedor</button></div>)}</div></details>}</article>)}</div> : <p className="empty-state">No hay productos por debajo del stock mínimo.</p>}</section>}
+    {section === "recommended" && <section className="supplier-recommended-panel" aria-label="Compras recomendadas"><div className="supplier-recommended-head"><div><b>Productos que hay que pedir</b><small>Compara proveedores y selecciona el precio que quieres llevar al borrador. El más barato queda marcado.</small></div><strong>{loading ? "—" : `${recommendedProducts.length} productos`}</strong></div>{loading ? <div className="data-loading" role="status">Calculando recomendaciones…</div> : recommendedProducts.length ? <div className="supplier-recommended-list">{recommendedProducts.map(({ product, available, minimum, suggested, offers, comparisons, offer }) => {
+      const key = String(product.id);
+      const selectedId = recommendedSupplierSelection[key] ?? String(offer?.supplier_id ?? "");
+      const selectedOffer = offers.find((item: AnyRow) => String(item.supplier_id) === selectedId) || null;
+      return <article className="supplier-recommended-row" key={product.id}>
+        <header className="supplier-recommended-product"><b>{product.name}</b><small>{product.sku || "Sin referencia"}</small></header>
+        <div className="supplier-recommended-stock"><span><b>{available}</b><small>disponibles</small></span><span><b>{minimum}</b><small>mínimo</small></span><span><b>{suggested}</b><small>a pedir</small></span></div>
+        {offers.length ? <div className="supplier-recommended-table-wrap"><table className="supplier-recommended-table"><thead><tr><th>Proveedor</th><th>Formato / plazo</th><th>Precio unitario</th><th>Elegir</th></tr></thead><tbody>{offers.map((item: AnyRow, index: number) => <tr key={`${product.id}-${item.supplier_id || item.id}`} className={String(item.supplier_id) === selectedId ? "is-selected" : ""}><td><b>{item.supplier_name || "Proveedor"}</b>{index === 0 && item.has_price && <small className="supplier-price-low">Más barato</small>}</td><td>{item.quantity_unit || item.order_unit || product.purchase_format || product.unit || "unidad"}{item.lead_time_days ? ` · ${item.lead_time_days} días` : ""}</td><td>{item.has_price ? currency(item.real_cost) : "Sin precio"}</td><td><label className="supplier-offer-checkbox"><input type="checkbox" aria-label={`Elegir ${item.supplier_name || "proveedor"} para ${product.name}`} checked={String(item.supplier_id) === selectedId} onChange={(event) => setRecommendedSupplierSelection((current) => ({ ...current, [key]: event.target.checked ? String(item.supplier_id) : "" }))} />{String(item.supplier_id) === selectedId ? "Seleccionado" : "Seleccionar"}</label></td></tr>)}</tbody></table>{comparisons.length < 3 && <small className="supplier-offer-count">Hay {comparisons.length} {comparisons.length === 1 ? "proveedor vinculado" : "proveedores vinculados"} con datos para este producto.</small>}</div> : <p className="supplier-recommended-no-offers">Este producto aún no tiene proveedores vinculados. Asígnalos en «Productos y proveedores» para comparar precios.</p>}
+        <footer className="supplier-recommended-footer"><span>Pedido sugerido: <b>{suggested} {product.purchase_format || product.unit || "unidad"}</b></span><button type="button" className="button primary" disabled={!selectedOffer} onClick={() => selectedOffer && startRecommendedOrder(product, suggested, selectedOffer)}>Añadir proveedor seleccionado al borrador</button></footer>
+      </article>;
+    })}</div> : <p className="empty-state">No hay productos por debajo del stock mínimo.</p>}</section>}
   </section>;
 }

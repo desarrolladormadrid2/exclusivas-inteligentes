@@ -1,5 +1,6 @@
 "use client";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 // @ts-ignore Librerías de generación local de códigos para etiquetas.
 import QRCode from "qrcode";
 // @ts-ignore Tipos incluidos por la librería.
@@ -4183,7 +4184,7 @@ function DriverRouteApp({ user }: { user: any }) {
   return <main className="driver-mobile-app"><header className="driver-mobile-header"><div className="driver-mobile-header-main">{selectedStop && <button type="button" className="driver-back-button" onClick={closeStop} aria-label="Volver a la lista de pedidos">←</button>}<span className="driver-brand-mark">E</span><div><b>Reparto</b><small>{actor}</small></div></div><div className="driver-mobile-header-actions"><span className="driver-today-label">Hoy</span><button type="button" className="driver-refresh" onClick={() => void load()} aria-label="Actualizar reparto">↻</button></div></header><section className="driver-mobile-toolbar"><label>Fecha<input aria-label="Fecha de reparto" type="date" value={routeDate} onChange={(event) => setRouteDate(event.target.value)} /></label><label>Camión<select aria-label="Camión o ruta" value={selectedRouteId} onChange={(event) => changeRoute(event.target.value)}><option value="">Selecciona una ruta</option>{routes.map((route) => <option value={route.id} key={route.id}>{route.vehicle || `Camión ${route.id}`} · {route.driver || "Sin conductor"}</option>)}</select></label></section>{loading ? <div className="driver-mobile-loading">Cargando la ruta…</div> : error ? <div className="driver-mobile-error" role="alert">{error}<button type="button" onClick={() => void load()}>Reintentar</button></div> : !activeRoute ? <div className="driver-mobile-empty"><b>No hay ruta asignada</b><span>Cuando administración guarde la carga del día aparecerá aquí.</span></div> : <><section className="driver-today-summary" aria-label="Resumen de entregas de hoy"><div><b>Entregas de hoy</b><span>{stops.length} paradas · {stops.filter((stop: any) => stop.status === "Entregado").length} entregadas · {stops.filter((stop: any) => !["Entregado", "Cancelada"].includes(String(stop.status || ""))).length} pendientes</span></div>{selectedStop && <button type="button" className="button secondary" onClick={closeStop}>← Lista de pedidos</button>}</section><section className="driver-route-summary"><div className="driver-route-summary-main"><div><b>{activeRoute.vehicle || "Camión"}</b><span>{stops.filter((stop: any) => stop.status === "Entregado").length}/{stops.length} entregas completadas · {Number(activeRoute.total_distance_km || 0).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km · {Math.floor(Number(activeRoute.estimated_minutes || 0) / 60)} h {Number(activeRoute.estimated_minutes || 0) % 60} min</span></div><strong className="driver-route-status">{activeRoute.status || "Planificada"}</strong></div><div className="driver-route-actions">{activeRoute.status !== "Completada" && <button type="button" className="button primary" onClick={gpsActive ? finishRoute : startGps}>{gpsActive ? "Finalizar ruta" : activeRoute.status === "En curso" ? "Reanudar GPS" : "Iniciar ruta y GPS"}</button>}{gpsActive && <span className="driver-gps-live">● GPS activo{location ? ` · ${Number(location.accuracy_m || 0).toFixed(0)} m` : ""}</span>}</div></section><nav className="driver-stop-list" aria-label="Pedidos de hoy">{stops.map((stop: any, index: number) => <button type="button" className={`driver-stop-card${Number(selectedStop?.id) === Number(stop.id) ? " is-selected" : ""}${stop.status === "Entregado" ? " is-complete" : ""}`} key={stop.id} aria-label={`Ver pedido de ${stop.client_name || "cliente"}`} onClick={() => openStop(Number(stop.id))}><span className="driver-stop-number">{stop.status === "Entregado" ? "✓" : index + 1}</span><span><b>{stop.client_name || "Cliente"}</b><small>{[stop.address, stop.city].filter(Boolean).join(" · ") || "Dirección pendiente"}</small><small>{stop.opening_time && stop.closing_time ? `Recepción ${String(stop.opening_time).slice(0, 5)}–${String(stop.closing_time).slice(0, 5)}` : "Horario pendiente"} · {stop.distance_km ? `${String(stop.distance_km).replace(".", ",")} km` : "Distancia pendiente"}</small></span><em>{stop.status || "Pendiente"}</em></button>)}</nav>{selectedStop && shipment && <section id="driver-stop-detail" className="driver-stop-detail"><div className="driver-detail-head"><div><p className="eyebrow">PEDIDO · PARADA {selectedStop.position || 1}</p><h2>{selectedStop.client_name}</h2><p>{[selectedStop.address, selectedStop.city].filter(Boolean).join(" · ") || "Dirección pendiente"}</p><small>{selectedStop.opening_time && selectedStop.closing_time ? `Recepción ${String(selectedStop.opening_time).slice(0, 5)}–${String(selectedStop.closing_time).slice(0, 5)}` : "Horario pendiente"}</small></div><button type="button" className="button secondary" onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent([selectedStop.address, selectedStop.city].filter(Boolean).join(", "))}`, "_blank")}>Navegar</button></div><div className="driver-detail-actions"><button type="button" className="button secondary" onClick={() => void updateStopStatus(selectedStop, "En entrega")} disabled={selectedStop.status === "Entregado"}>Estoy en el cliente</button><button type="button" className="button ghost" onClick={() => void updateStopStatus(selectedStop, "Incidencia")}>Incidencia</button></div><section className="driver-order-content"><div className="driver-section-title"><div><b>{shipment.code}</b><small>Contenido del pedido para mostrar al cliente</small></div><button type="button" className="button secondary" onClick={openInvoice}>Factura</button></div>{selectedLines.length ? selectedLines.map((line: any, index: number) => <div className="driver-order-line" key={`${line.id}-${index}`}><span>{line.quantity || line.quantity_requested || 0} {line.quantity_unit || "uds."}</span><b>{line.product_name || `Producto #${line.product_id}`}</b></div>) : <p className="driver-muted">No hay líneas detalladas disponibles.</p>}{(order?.driver_notes || shipment.driver_notes || selectedStop.driver_notes) && <div className="driver-notes"><b>Indicaciones</b><span>{order?.driver_notes || shipment.driver_notes || selectedStop.driver_notes}</span></div>}</section><DriverPaymentPanel shipment={shipment} invoice={invoice} actor={actor} onSaved={(updated) => setShipments((current) => current.map((row) => Number(row.id) === Number(updated.id) ? { ...row, ...updated } : row))} /><DeliverySignaturePanel shipment={shipment} actor={actor} client={{ name: selectedStop.client_name, address: selectedStop.address, city: selectedStop.city }} lines={selectedLines} onSaved={deliverySaved} /></section>}<DriverDailyClosingPanel route={activeRoute} stops={stops} shipments={shipments} actor={actor} /></>}{message && <p className="driver-mobile-message" role="status">{message}</p>}<footer className="driver-mobile-footer">{activeRoute ? `${activeRoute.code} · ${activeRoute.driver || actor}` : "Vista móvil de reparto"}</footer></main>;
 }
 
-function StockHistoricalDemand({ actor }: { actor: string }) {
+function StockHistoricalDemand({ actor, onOpen }: { actor: string; onOpen?: () => void }) {
   const today = tabletTodayInput();
   const monthStart = `${today.slice(0, 7)}-01`;
   const [from, setFrom] = useState(monthStart);
@@ -4192,6 +4193,10 @@ function StockHistoricalDemand({ actor }: { actor: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [loadedRange, setLoadedRange] = useState({ from: monthStart, to: today });
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [onlyReplenish, setOnlyReplenish] = useState(false);
+  const [sort, setSort] = useState("replenish");
   async function loadComparison(nextFrom = from, nextTo = to) {
     if (!nextFrom || !nextTo || nextFrom > nextTo) { setError("La fecha inicial debe ser anterior o igual a la fecha final."); return; }
     setLoading(true);
@@ -4210,8 +4215,12 @@ function StockHistoricalDemand({ actor }: { actor: string }) {
   useEffect(() => { void loadComparison(monthStart, today); }, []);
   const totalSold = rows.reduce((total, row) => total + Number(row.quantity_sold || 0), 0);
   const replenishmentCount = rows.filter((row) => Number(row.replenish_quantity || 0) > 0).length;
-  return <section className="stock-historical-demand" aria-label="Comparación de demanda histórica y stock actual">
-    <div className="stock-historical-head"><div><b>Demanda histórica y cobertura</b><small>Compara las unidades vendidas en el periodo con el stock disponible ahora. El objetivo equivale a repetir esa demanda.</small></div><span>{rows.length} productos</span></div>
+  const filteredRows = rows.filter((row) => (!onlyReplenish || Number(row.replenish_quantity || 0) > 0) && (!search || normalizeSearchText(`${row.product_name || ""} ${row.sku || ""}`).includes(normalizeSearchText(search)))).sort((a, b) => sort === "sales" ? Number(b.quantity_sold || 0) - Number(a.quantity_sold || 0) : sort === "name" ? String(a.product_name || "").localeCompare(String(b.product_name || ""), "es") : Number(b.replenish_quantity || 0) - Number(a.replenish_quantity || 0));
+  return <>
+    <button type="button" className="button secondary stock-comparator-trigger" aria-haspopup="dialog" onClick={() => { onOpen?.(); setOpen(true); }}>Comparador de demanda</button>
+    {typeof document !== "undefined" && open && createPortal(<div className="preview-overlay stock-comparator-overlay" role="dialog" aria-modal="true" aria-label="Comparador de demanda y stock" onClick={(event) => event.target === event.currentTarget && setOpen(false)}>
+    <section className="stock-comparator-modal">
+    <header><div><p className="eyebrow">STOCK · ANÁLISIS</p><h2>Comparador de demanda</h2><small>Compara ventas de un periodo con las existencias actuales y calcula cuánto reponer para cubrir una demanda equivalente.</small></div><button type="button" className="preview-close" aria-label="Cerrar comparador" onClick={() => setOpen(false)}>×</button></header>
     <form className="stock-historical-filters" onSubmit={(event) => { event.preventDefault(); void loadComparison(); }}>
       <label>Ventas desde<input type="date" value={from} max={to || undefined} onChange={(event) => setFrom(event.target.value)} /></label>
       <label>Ventas hasta<input type="date" value={to} min={from || undefined} onChange={(event) => setTo(event.target.value)} /></label>
@@ -4219,9 +4228,12 @@ function StockHistoricalDemand({ actor }: { actor: string }) {
       <small>Periodo actual: {formatSpanishDateValue(loadedRange.from, false)} – {formatSpanishDateValue(loadedRange.to, false)}</small>
     </form>
     <div className="stock-historical-summary"><span><b>{totalSold.toLocaleString("es-ES")}</b> unidades vendidas</span><span className={replenishmentCount ? "needs-replenishment" : "covered"}><b>{replenishmentCount}</b> productos por reponer</span></div>
+    <div className="stock-comparator-toolbar"><input type="search" aria-label="Buscar producto en el comparador" placeholder="Buscar producto o referencia…" value={search} onChange={(event) => setSearch(event.target.value)} /><label><input type="checkbox" checked={onlyReplenish} onChange={(event) => setOnlyReplenish(event.target.checked)} /> Solo productos por reponer</label><label>Ordenar<select value={sort} onChange={(event) => setSort(event.target.value)}><option value="replenish">Mayor reposición</option><option value="sales">Más vendidos</option><option value="name">Nombre</option></select></label><span>{filteredRows.length} de {rows.length} productos</span></div>
     {error && <p className="error-message" role="alert">{error}</p>}
-    {loading ? <p className="stock-historical-empty" role="status">Cargando ventas del periodo…</p> : rows.length ? <div className="stock-historical-table-wrap"><table className="stock-historical-table"><thead><tr><th>Producto</th><th>Vendidas en periodo</th><th>Stock físico</th><th>Reservado</th><th>Disponible</th><th>Objetivo para repetir demanda</th><th>Reponer</th></tr></thead><tbody>{rows.map((row) => <tr key={row.product_id}><td><b>{row.product_name}</b>{row.sku && <small>{row.sku}</small>}</td><td>{Number(row.quantity_sold).toLocaleString("es-ES")} {row.unit || "unidad"}</td><td>{Number(row.stock).toLocaleString("es-ES")}</td><td>{Number(row.stock_reserved).toLocaleString("es-ES")}</td><td>{Number(row.available_stock).toLocaleString("es-ES")}</td><td>{Number(row.target_stock).toLocaleString("es-ES")}</td><td className={Number(row.replenish_quantity) > 0 ? "replenishment-needed" : "replenishment-covered"}>{Number(row.replenish_quantity).toLocaleString("es-ES")}</td></tr>)}</tbody></table></div> : <p className="stock-historical-empty">No hay ventas registradas en ese periodo.</p>}
-  </section>;
+    {loading ? <p className="stock-historical-empty" role="status">Cargando ventas del periodo…</p> : filteredRows.length ? <div className="stock-historical-table-wrap"><table className="stock-historical-table"><thead><tr><th>Producto</th><th>Vendidas en periodo</th><th>Stock físico</th><th>Reservado</th><th>Disponible</th><th>Objetivo para repetir demanda</th><th>Reponer</th></tr></thead><tbody>{filteredRows.map((row) => <tr key={row.product_id}><td><b>{row.product_name}</b>{row.sku && <small>{row.sku}</small>}</td><td>{Number(row.quantity_sold).toLocaleString("es-ES")} {row.unit || "unidad"}</td><td>{Number(row.stock).toLocaleString("es-ES")}</td><td>{Number(row.stock_reserved).toLocaleString("es-ES")}</td><td>{Number(row.available_stock).toLocaleString("es-ES")}</td><td>{Number(row.target_stock).toLocaleString("es-ES")}</td><td className={Number(row.replenish_quantity) > 0 ? "replenishment-needed" : "replenishment-covered"}>{Number(row.replenish_quantity).toLocaleString("es-ES")}</td></tr>)}</tbody></table></div> : <p className="stock-historical-empty">{rows.length ? "No hay productos que coincidan con estos filtros." : "No hay ventas registradas en ese periodo."}</p>}
+    <footer><button type="button" className="button secondary" onClick={() => setOpen(false)}>Cerrar</button></footer>
+    </section></div>, document.body)}
+  </>;
 }
 
 function PendingSupplierReceipts({ refreshSignal, onReceive, onValidate }: { refreshSignal: number; onReceive: (purchaseOrderId: number) => void; onValidate: (receiptId: number, receiptCode: string) => void }) {
@@ -4733,6 +4745,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const stockListFields = ["product_id", "unit", "warehouse_name", "stock", "stock_reserved", "available_stock", "min_stock", "stock_status"];
   const warehouseListFields: Record<string, string[]> = {
     products: ["name", "sku", "barcode", "category", "format", "unit", "unit_price", "cost_price", "stock", "stock_reserved", "min_stock", "warehouse_location", "warehouse_id", "product_status"],
+    shipments: ["code", "order_id", "client_id", "carrier", "status", "collection_point_id", "origin_address", "address", "departure_at", "prepared_at", "shipped_at", "delivery_window_start", "delivery_window_end", "expected_delivery_at", "delivered_at", "tracking"],
     warehouses: ["code", "name", "address", "manager"],
     collection_points: ["code", "name", "address", "city", "opening_time", "closing_time", "geocoding_status"],
     goods_receipts: ["code", "counterparty_name", "purchase_order_code", "status"],
@@ -4861,7 +4874,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         return;
       }
       const compactFields = warehouseListFields[c.api];
-      const compactVersionKey = c.api === "goods_receipts" ? "excluvas.columns.compact-v4.goods_receipts" : `excluvas.columns.compact-v3.${c.api}`;
+      const compactVersionKey = c.api === "goods_receipts" ? "excluvas.columns.compact-v4.goods_receipts" : c.api === "shipments" ? "excluvas.columns.compact-v4.shipments" : `excluvas.columns.compact-v3.${c.api}`;
       const saved = localStorage.getItem(`excluvas.columns.${c.api}`);
       if (compactFields) {
         if (!saved || localStorage.getItem(compactVersionKey) !== "1") {
@@ -8021,8 +8034,13 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     <>
     <div className={`manager${isLoadPreparation ? " load-preparation-manager" : ""}${isCrmPreparation ? " crm-preparation-manager" : ""}${["Clientes", "Pedidos", "Presupuestos", "Albaranes", "Facturas", "Cobros"].includes(active) ? " sales-customers-block" : ""}${active === "Clientes" ? " sales-client-list" : active === "Pedidos" ? " sales-order-list" : active === "Presupuestos" ? " sales-quote-list" : active === "Albaranes" ? " sales-delivery-list" : active === "Facturas" ? " sales-invoice-list" : active === "Cobros" ? " sales-payment-list" : ""}${active === "Productos" ? " logistics-products-list" : active === "Stock" ? " logistics-stock-list" : active === "Envíos" ? " logistics-shipments-list" : active === "Almacenes" ? " logistics-warehouses-list" : active === "Lugares de recogida" ? " logistics-collection-list" : active === "Entradas" ? " logistics-receipts-list" : active === "Salidas" ? " logistics-stock-out-list" : active === "Devoluciones" ? " logistics-returns-list" : ""}`}>
       {!isLoadPreparation && <div className="manager-head">
-        <div>
-          <p className="eyebrow">GESTIÓN · {APP_ENVIRONMENT === "Producción" ? "DATOS OPERATIVOS" : "ENTORNO LOCAL"}</p>
+        <div className="manager-section-title">
+          <div className="columns-accordion header-columns-accordion">
+            <button type="button" className="columns-toggle columns-icon-toggle" aria-label="Configurar columnas visibles" title="Configurar columnas visibles" aria-expanded={columnsOpen} onClick={() => setColumnsOpen((value) => !value)}>▦</button>
+            {columnsOpen && <div className="columns-options" role="group" aria-label={`Columnas visibles de ${c.title}`}>
+              {(warehouseListFields[c.api] || c.fields).map((field: string) => <label key={field}><input type="checkbox" checked={visibleFields.includes(field)} onChange={() => toggleColumn(field)} />{compactFieldLabels[field] || c.labels[c.fields.indexOf(field)] || field}</label>)}
+            </div>}
+          </div>
           <h2>{c.title}</h2>
         </div>
         <div>
@@ -8428,6 +8446,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
               <option value="status_desc">Estado: stock saludable primero</option>
             </select>
           )}
+          {active === "Stock" && <StockHistoricalDemand actor={user?.username || "Usuario local"} onOpen={() => setColumnsOpen(false)} />}
           {active === "Albaranes" && <div className="delivery-note-bulk-toolbar"><label><input type="checkbox" aria-label="Seleccionar albaranes pendientes visibles" checked={filteredRows.filter((row: any) => !row.invoice_code).length > 0 && filteredRows.filter((row: any) => !row.invoice_code).every((row: any) => selectedDeliveryNoteIds.includes(Number(row.id)))} onChange={(event) => setSelectedDeliveryNoteIds(event.target.checked ? filteredRows.filter((row: any) => !row.invoice_code).map((row: any) => Number(row.id)) : [])} /> Seleccionar albaranes sin factura</label><span>{filteredRows.filter((row: any) => selectedDeliveryNoteIds.includes(Number(row.id)) && !row.invoice_code).length} seleccionados</span><button type="button" className="button primary" disabled={bulkDeliveryInvoiceSaving || !selectedDeliveryNoteIds.some((id) => filteredRows.some((row: any) => Number(row.id) === id && !row.invoice_code))} onClick={() => void invoiceSelectedDeliveryNotes()}>{bulkDeliveryInvoiceSaving ? "Creando facturas…" : "Facturar pedidos seleccionados"}</button></div>}
           {["Proveedores", "Clientes", "Productos"].includes(active) && (
             <button
@@ -8482,31 +8501,6 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           </>}
           </div>
         </div>
-        {active === "Stock" && <div className="stock-meaning" role="note"><b>Cómo leer la cobertura:</b><span>Stock físico = existencias actuales</span><span>Necesario = unidades requeridas por pedidos abiertos</span><span>Saldo = stock físico − necesario</span><span className="stock-meaning-alert">Saldo negativo = no se pueden cubrir todos los pedidos</span></div>}
-        {active === "Stock" && <StockHistoricalDemand actor={user?.username || "Usuario local"} />}
-        <div className="columns-accordion">
-          <button
-            type="button"
-            className="columns-toggle"
-            onClick={() => setColumnsOpen((v) => !v)}
-          >
-            ▦ Columnas visibles <span>{columnsOpen ? "−" : "+"}</span>
-          </button>
-          {columnsOpen && (
-            <div className="columns-options">
-              {(warehouseListFields[c.api] || c.fields).map((f: string, i: number) => (
-                <label key={f}>
-                  <input
-                    type="checkbox"
-                    checked={visibleFields.includes(f)}
-                    onChange={() => toggleColumn(f)}
-                  />{" "}
-                  {compactFieldLabels[f] || c.labels[c.fields.indexOf(f)] || f}
-                </label>
-              ))}
-            </div>
-          )}
-        </div>
         {isCrmPreparation ? (
           listIsReady ? (
           <>
@@ -8551,7 +8545,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             </div>
           )
         ) : <TopHorizontalScroll className="table-scroll">
-          <table className={active === "Entradas" ? "goods-receipts-table" : undefined}>
+          <table className={active === "Entradas" ? "goods-receipts-table" : active === "Envíos" ? "shipments-table" : active === "Stock" ? "stock-list-table" : undefined}>
             <thead>
             <tr>
                 {isProducts && <th className="product-check-column"><span className="sr-only">Seleccionar</span></th>}
@@ -8560,13 +8554,13 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                 {isProducts && <th className="product-lots-column">LOTES</th>}
                 {visibleFields.map((f: string, fieldIndex: number) => (
                   <Fragment key={f}>
-                    <th className={isDateField(f) ? "sortable-date-column" : undefined}>
+                    <th data-field={f} className={isDateField(f) ? "sortable-date-column" : undefined}>
                       <button type="button" className="table-sort-button" onClick={() => { setStockSort("none"); setDateSort(null); setTableSort((current) => current?.field === f ? { field: f, direction: current.direction === "asc" ? "desc" : "asc" } : { field: f, direction: "asc" }); }} aria-label={`Ordenar ${active === "Entradas" && f === "code" ? "Entrada" : active === "Entradas" && f === "purchase_order_code" ? "Pedido relacionado" : compactFieldLabels[f] || c.labels[c.fields.indexOf(f)] || f}`} title={f === "gtr_enabled" ? "Tratamiento de residuos" : "Ordenar columna"}>{active === "Entradas" && f === "code" ? "Entrada" : active === "Entradas" && f === "purchase_order_code" ? "Pedido relacionado" : f === "gtr_enabled" ? "GTR" : compactFieldLabels[f] || c.labels[c.fields.indexOf(f)] || f}<span aria-hidden="true">{tableSort?.field === f ? (tableSort.direction === "asc" ? " ↑" : " ↓") : " ↕"}</span></button>
                     </th>
                     {active === "Stock" && fieldIndex === 0 && <th className="product-lots-column">LOTES</th>}
                   </Fragment>
                 ))}
-                <th>ACCIONES</th>
+                {active !== "Stock" && <th>ACCIONES</th>}
               </tr>
             </thead>
             <tbody>
@@ -8578,7 +8572,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                     {isProducts && renderProductLots(r)}
                     {visibleFields.map((f: string, fieldIndex: number) => (
                       <Fragment key={f}>
-                        <td data-label={active === "Entradas" && f === "code" ? "Entrada" : active === "Entradas" && f === "purchase_order_code" ? "Pedido relacionado" : compactFieldLabels[f] || c.labels[c.fields.indexOf(f)] || f} title={active === "Entradas" && ["code", "purchase_order_code"].includes(f) && r[f] ? String(r[f]) : undefined} className={`${active === "Entradas" && ["code", "purchase_order_code"].includes(f) ? "goods-receipt-reference " : ""}${stockCellClass(r, f)}${active === "Stock" && ["stock", "stock_reserved", "available_stock", "min_stock"].includes(f) && Number(r[f]) < 0 ? " stock-negative" : ""}`}>
+                        <td data-field={f} data-label={active === "Entradas" && f === "code" ? "Entrada" : active === "Entradas" && f === "purchase_order_code" ? "Pedido relacionado" : compactFieldLabels[f] || c.labels[c.fields.indexOf(f)] || f} title={active === "Entradas" && ["code", "purchase_order_code"].includes(f) && r[f] ? String(r[f]) : undefined} className={`${active === "Entradas" && ["code", "purchase_order_code"].includes(f) ? "goods-receipt-reference " : ""}${stockCellClass(r, f)}${active === "Stock" && ["stock", "stock_reserved", "available_stock", "min_stock"].includes(f) && Number(r[f]) < 0 ? " stock-negative" : ""}`}>
                           {inlineEditing === (r.id ?? r.product_id) ? (
                             renderInlineEditor(f, r)
                           ) : (
@@ -8620,17 +8614,17 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                                 ? (typeof r[f] === "object"
                                   ? String(r[f].address || r[f].name || r[f].label || "—")
                                   : String(getClient(r.client_id)?.address || "—"))
-                              : formatTableValue(f, r[f], r) === "[object Object]"
+                                  : formatTableValue(f, r[f], r) === "[object Object]"
                                   ? "—"
                                   : formatTableValue(f, r[f], r)
                           )}
+                          {active === "Stock" && f === "product_id" && <button type="button" className="stock-row-order-button" onClick={(event) => { event.stopPropagation(); startPurchaseFromStock(r); }}>Pedir al proveedor</button>}
                         </td>
                         {active === "Stock" && fieldIndex === 0 && renderProductLots(r)}
                       </Fragment>
                     ))}
-                    <td data-label="Acciones">
+                    {active !== "Stock" && <td data-label="Acciones">
                       <div className="row-actions">
-                        {active === "Stock" && <button type="button" className="row-action primary" onClick={() => startPurchaseFromStock(r)}>Pedir al proveedor</button>}
                         <details className="row-actions-disclosure"><summary>Acciones</summary><div className="row-actions-disclosure-content">
                         {isLoadPreparation && (
                           <b className="prep-status-badge">{r.status || "Preparando"}</b>
@@ -8756,7 +8750,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                         ))}
                         </div></details>
                       </div>
-                    </td>
+                    </td>}
                   </tr>
                 ))}
             </tbody>
