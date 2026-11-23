@@ -6229,10 +6229,26 @@ body:has(.warehouse-tablet-app) .settings-panel {
 }
 @media (max-width: 850px) {
   .collective-load-simple-head { display: none; }
+}
+@media (min-width: 601px) and (max-width: 850px) {
   .collective-load-simple-row {
     display: grid;
-    grid-template-columns: minmax(70px, .55fr) minmax(0, 1.45fr) minmax(0, 1.4fr);
+    grid-template-columns: minmax(70px, .55fr) minmax(0, 1.1fr) minmax(150px, 1.2fr) minmax(100px, .65fr);
     gap: 6px 9px;
+    min-height: 0;
+    padding: 9px;
+  }
+  .collective-load-simple-main > .collective-load-simple-location { grid-column: 1; }
+  .collective-load-simple-main > .collective-load-simple-product { grid-column: 2 / 5; }
+  .collective-load-simple-barcode { grid-column: 1 / 3; }
+  .collective-load-simple-quantity { grid-column: 3; }
+  .collective-load-simple-action { grid-column: 4; }
+}
+@media (max-width: 600px) {
+  .collective-load-simple-row {
+    display: grid;
+    grid-template-columns: minmax(64px, .55fr) minmax(0, 1.45fr) minmax(100px, .9fr);
+    gap: 6px 8px;
     min-height: 0;
     padding: 9px;
   }
