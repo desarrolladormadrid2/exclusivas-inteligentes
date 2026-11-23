@@ -4564,6 +4564,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const [preparationOrderEditSaving, setPreparationOrderEditSaving] = useState(false);
   const [preparationOrderEditError, setPreparationOrderEditError] = useState("");
   const [preparationOrderEditMessage, setPreparationOrderEditMessage] = useState("");
+  const [preparationStatusSavingId, setPreparationStatusSavingId] = useState<number | null>(null);
+  const [preparationStatusFeedback, setPreparationStatusFeedback] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [documentCreationNotice, setDocumentCreationNotice] = useState<any>(null);
   const [entryDetail, setEntryDetail] = useState<any>(null);
   const [entryEdit, setEntryEdit] = useState<any>(null);
@@ -7460,6 +7462,28 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     if (["Preparando", "En preparación"].includes(status)) return "preparing";
     return "pending";
   };
+  async function changePreparationStatus(row: any, status: string) {
+    const shipmentId = Number(row?.id);
+    if (!shipmentId || preparationStatusSavingId !== null || status === String(row.status || "Pendiente")) return;
+    setPreparationStatusSavingId(shipmentId);
+    setPreparationStatusFeedback(null);
+    try {
+      const response = await fetch(`/api/shipments/${shipmentId}/preparation-status`, {
+        method: "POST",
+        headers: actorHeaders,
+        body: JSON.stringify({ status }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "No se pudo cambiar el estado de preparación.");
+      setRows((current) => current.map((item) => Number(item.id) === shipmentId ? { ...item, ...result } : item));
+      setLookups((current: any) => ({ ...current, shipments: (current.shipments || []).map((item: any) => Number(item.id) === shipmentId ? { ...item, ...result } : item) }));
+      setPreparationStatusFeedback({ kind: "success", text: `${row.code || "Pedido"}: estado cambiado a ${status === "Pendiente" ? "Pendiente de preparar" : status}.` });
+    } catch (caught: any) {
+      setPreparationStatusFeedback({ kind: "error", text: caught?.message || "No se pudo cambiar el estado de preparación." });
+    } finally {
+      setPreparationStatusSavingId(null);
+    }
+  }
   const crmPreparationColumns = [
     { key: "pending", title: "Pendientes de preparar", hint: "Aún no empezados" },
     { key: "preparing", title: "Preparando", hint: "En curso" },
@@ -8240,6 +8264,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         </div>
         {isCrmPreparation ? (
           listIsReady ? (
+          <>
+          {preparationStatusFeedback && <p className={`crm-preparation-status-feedback is-${preparationStatusFeedback.kind}`} role={preparationStatusFeedback.kind === "error" ? "alert" : "status"}>{preparationStatusFeedback.text}</p>}
           <section className="crm-preparation-board" aria-label="Preparación de pedidos por estado">
             {crmPreparationColumns.map((column) => (
               <section className={`crm-preparation-column crm-preparation-column-${column.key}`} key={column.key}>
@@ -8256,19 +8282,23 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                     const closed = clientClosedOnDate(clientRecord, receptionDate);
                     const deliveryWindow = formatReceptionWindow(row.delivery_window_start || clientRecord?.opening_time, row.delivery_window_end || clientRecord?.closing_time);
                     return (
-                      <button type="button" className="crm-preparation-card" key={row.id} onClick={() => void openPreview(row)}>
+                      <article className="crm-preparation-card-wrap" key={row.id}>
+                      <button type="button" className="crm-preparation-card" onClick={() => void openPreview(row)}>
                         <span className="crm-preparation-card-top"><b>{row.code || `Envío #${row.id}`}</b><em>{row.status || "Pendiente"}</em></span>
                         <strong>{client}</strong>
                         <span>{preparationAddress(row)}</span>
                         <small>{date ? `Preparación ${String(date).slice(0, 10)}` : "Fecha pendiente"} · Envío {row.shipping_date ? String(row.shipping_date).slice(0, 10) : "pendiente"}</small>
                         <small className={closed ? "crm-preparation-closed" : "crm-preparation-reception"}>{closed ? `Cerrado el ${weekdayLabelForDate(receptionDate)}` : `Recepción ${deliveryWindow}`}{Number(row.urgent) === 1 ? " · URGENTE" : ""}</small>
                       </button>
+                      <label className="crm-preparation-status-control">Estado<select aria-label={`Cambiar estado de preparación ${row.code || row.id}`} value={preparationStatusGroup(row) === "pending" ? "Pendiente" : preparationStatusGroup(row) === "preparing" ? "Preparando" : "Preparado"} disabled={preparationStatusSavingId === Number(row.id)} onChange={(event) => void changePreparationStatus(row, event.target.value)}><option value="Pendiente">Pendiente de preparar</option><option value="Preparando">Preparando</option><option value="Preparado">Preparado</option></select>{preparationStatusSavingId === Number(row.id) && <small role="status">Guardando…</small>}</label>
+                      </article>
                     );
                   }) : <p className="crm-preparation-empty">No hay pedidos en este estado.</p>}
                 </div>
               </section>
             ))}
           </section>
+          </>
           ) : (
             <div className="data-loading" role="status" aria-live="polite">
               <span className="loading-spinner" aria-hidden="true" />

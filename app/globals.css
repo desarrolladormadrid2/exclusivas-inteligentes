@@ -6353,6 +6353,16 @@ body:has(.warehouse-tablet-app) .settings-panel {
 .crm-preparation-card>strong{overflow:hidden;color:#26343d;font-size:12px;text-overflow:ellipsis;white-space:nowrap}
 .crm-preparation-card>span:not(.crm-preparation-card-top){overflow:hidden;font-size:10px;text-overflow:ellipsis;white-space:nowrap}
 .crm-preparation-card>small{overflow:hidden;color:#71818a;font-size:9px;text-overflow:ellipsis;white-space:nowrap}
+.crm-preparation-card-wrap{display:grid;gap:6px;padding:7px;border:1px solid #d3dde1;background:#fff}
+.crm-preparation-card-wrap:nth-child(even){background:#f0f2f3}
+.crm-preparation-card-wrap .crm-preparation-card{padding:2px;border:0;border-left:0;background:transparent}
+.crm-preparation-card-wrap .crm-preparation-card:hover,.crm-preparation-card-wrap .crm-preparation-card:focus-visible{border:0;box-shadow:none;outline:2px solid #bd2027;outline-offset:2px}
+.crm-preparation-status-control{display:flex;align-items:center;gap:7px;color:#536873;font-size:10px;font-weight:700}
+.crm-preparation-status-control select{box-sizing:border-box;min-width:0;max-width:100%;height:30px;padding:3px 7px;border:1px solid #cbd7dc;background:#fff;color:#26343d;font:inherit;font-size:11px}
+.crm-preparation-status-control select:disabled{opacity:.65;cursor:wait}
+.crm-preparation-status-control>small{color:#536873;font-size:10px;font-weight:400}
+.crm-preparation-status-feedback{margin:8px 10px 0;padding:7px 10px;border-left:3px solid #198754;background:#edf7f1;color:#176b43;font-size:12px}
+.crm-preparation-status-feedback.is-error{border-left-color:#bd2027;background:#fff3f3;color:#a71d24}
 .crm-preparation-empty{margin:0;padding:18px 8px;color:#8a989e;font-size:11px;text-align:center}
 @media(max-width:950px){.crm-preparation-board{grid-template-columns:1fr}.crm-preparation-column-list{min-height:0}}
 

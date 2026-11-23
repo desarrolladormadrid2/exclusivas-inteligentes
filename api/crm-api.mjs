@@ -3419,6 +3419,27 @@ export async function crmApiHandler(req, res) {
         invalidateRelatedReadCaches("shipments");
         return send(res, 200, { ok: true, closed_count: updatedShipments.length, shipments: updatedShipments });
       }
+      if (t === "shipments" && p[2] && p[3] === "preparation-status" && req.method === "POST") {
+        const shipmentId = Number(p[2]);
+        const body = await read(req);
+        const status = String(body.status || "").trim();
+        if (!["Pendiente", "Preparando", "Preparado"].includes(status)) {
+          return send(res, 400, { error: "Elige Pendiente de preparar, Preparando o Preparado." });
+        }
+        const shipment = db.prepare(`SELECT s.*,o.status order_status FROM shipments s LEFT JOIN orders o ON o.id=s.order_id WHERE s.id=? AND CAST(COALESCE(s.deleted,0) AS INTEGER)=0`).get(shipmentId);
+        if (!shipment) return send(res, 404, { error: "No se encontró el pedido de preparación." });
+        if (["Enviado", "En reparto", "Entregado", "Cancelado"].includes(String(shipment.status || "")) || ["Enviado", "En reparto", "Entregado", "Cancelado"].includes(String(shipment.order_status || ""))) {
+          return send(res, 409, { error: "Este pedido ya salió de preparación y no se puede cambiar desde este tablero." });
+        }
+        const now = new Date().toISOString();
+        const prepared = status === "Preparado";
+        db.prepare("UPDATE shipments SET status=?,prepared_at=?,prepared_by=?,preparation_closed_at=?,preparation_closed_by=?,updated_at=? WHERE id=?")
+          .run(status, prepared ? (shipment.prepared_at || now) : null, status === "Pendiente" ? null : actor, prepared ? now : null, prepared ? actor : null, now, shipmentId);
+        const updated = db.prepare("SELECT * FROM shipments WHERE id=?").get(shipmentId);
+        recordAudit(actor, "POST", `shipments/${shipmentId}/preparation-status`, "Cambiar estado de preparación", JSON.stringify({ from: shipment.status || "Pendiente", to: status, order_id: shipment.order_id || null }));
+        invalidateRelatedReadCaches("shipments");
+        return send(res, 200, updated);
+      }
       if (t === "public_promotions" && req.method === "GET") {
         const now = new Date().toISOString();
         const promotions = db.prepare("SELECT * FROM web_promotions WHERE status='Publicada' AND CAST(COALESCE(deleted,0) AS INTEGER)=0 AND start_at<=? AND end_at>=? ORDER BY CASE promotion_type WHEN 'flash' THEN 1 WHEN 'week' THEN 2 WHEN 'month' THEN 3 ELSE 4 END,id DESC").all(now, now);
