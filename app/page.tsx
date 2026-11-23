@@ -6,6 +6,7 @@ import QRCode from "qrcode";
 // @ts-ignore Tipos incluidos por la librería.
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
+import { ListFilterHeader, ListTableShell } from "./components/ListPrimitives";
 import SupplierPurchasingManager from "./SupplierPurchasingManager";
 import { APP_VERSION } from "./version";
 
@@ -2366,7 +2367,7 @@ function Contacts({ onNavigate }: { onNavigate: (section: string) => void }) {
             {loading ? "Cargando contactos…" : `${rows.length} contactos de clientes y proveedores.`}
           </p>
         </div>
-        <div>
+        <ListFilterHeader className="contacts-filter-header" ariaLabel="Filtros de contactos">
           <label className="contacts-date-filter">
             Desde
             <input
@@ -2400,7 +2401,7 @@ function Contacts({ onNavigate }: { onNavigate: (section: string) => void }) {
           >
             ＋ Crear contacto
           </button>
-        </div>
+        </ListFilterHeader>
       </div>
       <div className="contacts-layout">
         <div className="contacts-table-wrap contacts-table-wide">
@@ -4269,11 +4270,11 @@ function PendingSupplierReceipts({ refreshSignal, onReceive, onValidate }: { ref
   const formatDate = (value: any) => value ? formatSpanishDateValue(value, false) : "Sin fecha prevista";
   return <section className="pending-supplier-receipts" aria-labelledby="pending-supplier-receipts-title">
     <header className="pending-supplier-receipts-head"><div><h2 id="pending-supplier-receipts-title">Mercancía pendiente de recibir</h2><p>Revisa lo recibido y registra la entrada para actualizar el stock.</p></div><div><b>{loading ? "Cargando…" : `${visibleOrders.length} ${visibleOrders.length === 1 ? "pedido" : "pedidos"}`}</b><button type="button" className="button secondary" disabled={refreshing || loading} onClick={() => { setRefreshing(true); setReloadKey((value) => value + 1); }}>{refreshing ? "Actualizando…" : "Actualizar"}</button></div></header>
-    <div className="pending-supplier-receipts-tools"><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar pedido, proveedor o producto…" aria-label="Buscar mercancía pendiente" /><span>{pendingSummary ? `${pendingSummary} por recibir` : "Sin unidades pendientes"}</span></div>
+    <ListFilterHeader className="pending-supplier-receipts-tools" ariaLabel="Filtros de entradas pendientes"><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar pedido, proveedor o producto…" aria-label="Buscar mercancía pendiente" /><span>{pendingSummary ? `${pendingSummary} por recibir` : "Sin unidades pendientes"}</span></ListFilterHeader>
     {error && <p className="error-message" role="alert">{error} <button type="button" className="link-button" onClick={() => { setRefreshing(true); setReloadKey((value) => value + 1); }}>Reintentar</button></p>}
     {loading ? <div className="data-loading" role="status">Cargando pedidos pendientes de recibir…</div> : visibleOrders.length ? <div className="pending-supplier-order-list">{visibleOrders.map((order) => <article className="pending-supplier-order" key={order.id}>
       <header className="pending-supplier-order-head"><div className="pending-supplier-order-identity"><div className="pending-supplier-order-title"><b>{order.code}</b><strong>{order.supplier_name || order.title || "Proveedor sin nombre"}</strong></div><div className="pending-supplier-order-meta"><span><small>Pedido:</small><b>{formatDate(order.order_date)}</b></span><span><small>Entrega prevista:</small><b>{formatDate(order.expected_date)}</b></span><span><small>Productos:</small><b>{order.lines.length}</b></span></div>{order.notes && <p className="pending-supplier-order-notes" title={order.notes}><b>Nota:</b> {order.notes}</p>}</div><div className="pending-supplier-order-actions">{order.pending_receipt_id ? <><span className="supplier-order-status status-pendiente">Entrada pendiente de validar · {order.pending_receipt_code}</span><button type="button" className="button primary" onClick={() => onValidate(Number(order.pending_receipt_id), String(order.pending_receipt_code || ""))}>Validar entrada</button></> : <><span className={`supplier-order-status status-${String(order.status || "").toLowerCase().replaceAll(" ", "-")}`}>{order.status}</span><button type="button" className="button primary" onClick={() => onReceive(Number(order.id))}>Registrar entrada</button></>}</div></header>
-      <div className="pending-supplier-order-lines-wrap"><table className="pending-supplier-order-lines"><thead><tr><th>Producto</th><th>Pedido</th><th>Recibido correcto</th><th>Por recibir</th></tr></thead><tbody>{order.lines.map((line: any) => { const unit = line.quantity_unit || "unidad"; return <tr key={`${line.product_id}-${unit}`}><td data-label="Producto"><b>{line.product_name}</b><small>{line.sku || "Sin referencia"} · {unit}</small></td><td data-label="Pedido">{Number(line.ordered_quantity || 0).toLocaleString("es-ES")} {unit}</td><td data-label="Recibido correcto">{Number(line.received_good_quantity || 0).toLocaleString("es-ES")} {unit}</td><td data-label="Por recibir"><strong>{Number(line.remaining_quantity || 0).toLocaleString("es-ES")} {unit}</strong></td></tr>; })}</tbody></table></div>
+      <ListTableShell className="pending-supplier-order-lines-wrap" ariaLabel="Productos del pedido pendiente de recibir"><table className="pending-supplier-order-lines"><thead><tr><th>Producto</th><th>Pedido</th><th>Recibido correcto</th><th>Por recibir</th></tr></thead><tbody>{order.lines.map((line: any) => { const unit = line.quantity_unit || "unidad"; return <tr key={`${line.product_id}-${unit}`}><td data-label="Producto"><b>{line.product_name}</b><small>{line.sku || "Sin referencia"} · {unit}</small></td><td data-label="Pedido">{Number(line.ordered_quantity || 0).toLocaleString("es-ES")} {unit}</td><td data-label="Recibido correcto">{Number(line.received_good_quantity || 0).toLocaleString("es-ES")} {unit}</td><td data-label="Por recibir"><strong>{Number(line.remaining_quantity || 0).toLocaleString("es-ES")} {unit}</strong></td></tr>; })}</tbody></table></ListTableShell>
     </article>)}</div> : <p className="pending-supplier-receipts-empty">{normalizedSearch ? "No hay pedidos pendientes que coincidan con la búsqueda." : "No hay mercancía pendiente. Los pedidos aparecerán aquí cuando se envíen al proveedor."}</p>}
   </section>;
 }
@@ -8396,7 +8397,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         <button type="button" role="tab" aria-selected={entryListView === "received"} className={entryListView === "received" ? "is-active" : ""} onClick={() => setEntryListView("received")}>Entradas registradas</button>
       </div>}
         {active === "Entradas" && entryListView === "pending" ? <PendingSupplierReceipts refreshSignal={pendingReceiptRefresh} onReceive={beginSupplierReceipt} onValidate={reviewSupplierReceipt} /> : <div className={`panel table-panel${listIsReady ? "" : " is-loading"}`}>
-        <div className={`table-tools${active === "Proveedores" ? " supplier-table-tools" : ""}`}>
+        <ListFilterHeader className={`table-tools${active === "Proveedores" ? " supplier-table-tools" : ""}`} ariaLabel={`Búsqueda y filtros de ${active}`}>
           <div className="table-tools-primary">
           <input
             placeholder={isProducts ? "Buscar por nombre, SKU, referencia o código..." : "Buscar en columnas principales..."}
@@ -8501,7 +8502,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             </div>
           </>}
           </div>
-        </div>
+        </ListFilterHeader>
         {isCrmPreparation ? (
           listIsReady ? (
           <>
@@ -8545,7 +8546,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
               <LoadingIndicator label="Cargando preparación de pedidos…" />
             </div>
           )
-        ) : <TopHorizontalScroll className="table-scroll">
+        ) : <ListTableShell className="crm-list-table-shell" ariaLabel={`Tabla de ${active}`}><TopHorizontalScroll className="table-scroll">
           <table className={active === "Entradas" ? "goods-receipts-table" : active === "Envíos" ? "shipments-table" : active === "Stock" ? "stock-list-table" : undefined}>
             <thead>
             <tr>
@@ -8755,7 +8756,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                 ))}
             </tbody>
           </table>
-        </TopHorizontalScroll>}
+        </TopHorizontalScroll></ListTableShell>}
       {!isCrmPreparation && listIsReady && sortedRows.length > 0 && <div className="table-pagination" aria-label="Paginación del listado">
         <span>Mostrando {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, sortedRows.length)} de {sortedRows.length}</span>
         <label>Filas<select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }} aria-label="Filas por página"><option value="50">50</option><option value="100">100</option><option value="200">200</option></select></label>
@@ -12754,7 +12755,7 @@ function TrashManager({ user }: { user: any }) {
   }
   return <div className="trash-manager">
     <div className="manager-head trash-manager-head"><div><b>Papelera</b><p>Registros eliminados de forma segura. Puedes recuperarlos cuando quieras.</p></div><span className="trash-count">{rows.length} eliminados</span></div>
-    <div className="trash-toolbar"><input placeholder="Buscar registro, sección o usuario…" value={query} onChange={(event) => setQuery(event.target.value)} /><select value={table} onChange={(event) => setTable(event.target.value)}><option value="">Todas las secciones</option>{tableOptions.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select><input placeholder="Filtrar por usuario…" value={actor} onChange={(event) => setActor(event.target.value)} /><button type="button" className="button secondary" onClick={() => void load()}>{loading ? "Actualizando…" : "Actualizar"}</button></div>
+    <ListFilterHeader className="trash-toolbar" ariaLabel="Filtros de papelera"><input placeholder="Buscar registro, sección o usuario…" value={query} onChange={(event) => setQuery(event.target.value)} /><select value={table} onChange={(event) => setTable(event.target.value)}><option value="">Todas las secciones</option>{tableOptions.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select><input placeholder="Filtrar por usuario…" value={actor} onChange={(event) => setActor(event.target.value)} /><button type="button" className="button secondary" onClick={() => void load()}>{loading ? "Actualizando…" : "Actualizar"}</button></ListFilterHeader>
     {error && <p className="users-manager-error">{error}</p>}
     <div className="trash-table-wrap"><table className="trash-table"><thead><tr><th>Registro</th><th>Sección</th><th>Eliminado por</th><th>Fecha de eliminación</th><th>Acciones</th></tr></thead><tbody>{rows.map((row) => <tr key={`${row.table}-${row.id}`}><td><b>{row.record_label}</b><small>ID {row.id}</small></td><td>{row.table_label}</td><td>{row.deleted_by || "Usuario local"}</td><td>{row.deleted_at ? new Date(row.deleted_at).toLocaleString("es-ES") : "—"}</td><td><button className="table-action" onClick={() => void restore(row)}>Recuperar</button><button className="table-action danger" onClick={() => void permanentlyDelete(row)}>Eliminar definitivamente</button></td></tr>)}{!rows.length && <tr><td colSpan={5}>{loading ? "Cargando papelera…" : "La papelera está vacía."}</td></tr>}</tbody></table></div>
   </div>;
@@ -13105,7 +13106,7 @@ export function OcrIntelligent({ user = { username: "Usuario local" } }: { user?
     </section>
     <section id="ocr-history-panel" role="tabpanel" aria-labelledby="ocr-history-tab" className="ocr-history" hidden={activeTab !== "history"}>
       <div className="panel-head"><div><h3>Historial de documentos</h3><p className="muted">Documentos guardados y clasificados.</p></div><small>{history.length} documentos</small></div>
-      {historyLoading ? <div className="data-loading" role="status"><span className="loading-spinner" aria-hidden="true" />Cargando historial…</div> : history.length ? <div className="ocr-history-table-wrap"><table className="ocr-history-table"><thead><tr><th>Documento</th><th>Tipo</th><th>Correo detectado</th><th>Importe</th><th>Fecha</th><th>Subido por</th></tr></thead><tbody>{history.map((item) => <tr key={item.id}><td data-label="Documento"><span className="ocr-history-file" title={item.file_name}>{item.file_name}</span><small className="muted">{Number(item.file_size) ? `${Math.max(1, Math.round(Number(item.file_size) / 1024))} KB` : "Tamaño no disponible"}</small></td><td data-label="Tipo"><span className="scanner-state ready">{item.document_type || "Otro"}</span></td><td data-label="Correo detectado">{item.detected_email || "—"}</td><td data-label="Importe">{item.detected_total || "—"}</td><td data-label="Fecha">{item.created_at ? formatSpanishDateValue(item.created_at, true) : "—"}</td><td data-label="Subido por">{item.created_by || "Usuario local"}</td></tr>)}</tbody></table></div> : <p className="empty-row">Aún no hay documentos procesados.</p>}
+      {historyLoading ? <div className="data-loading" role="status"><span className="loading-spinner" aria-hidden="true" />Cargando historial…</div> : history.length ? <ListTableShell className="ocr-history-table-wrap" ariaLabel="Historial de documentos OCR"><table className="ocr-history-table"><thead><tr><th>Documento</th><th>Tipo</th><th>Correo detectado</th><th>Importe</th><th>Fecha</th><th>Subido por</th></tr></thead><tbody>{history.map((item) => <tr key={item.id}><td data-label="Documento"><span className="ocr-history-file" title={item.file_name}>{item.file_name}</span><small className="muted">{Number(item.file_size) ? `${Math.max(1, Math.round(Number(item.file_size) / 1024))} KB` : "Tamaño no disponible"}</small></td><td data-label="Tipo"><span className="scanner-state ready">{item.document_type || "Otro"}</span></td><td data-label="Correo detectado">{item.detected_email || "—"}</td><td data-label="Importe">{item.detected_total || "—"}</td><td data-label="Fecha">{item.created_at ? formatSpanishDateValue(item.created_at, true) : "—"}</td><td data-label="Subido por">{item.created_by || "Usuario local"}</td></tr>)}</tbody></table></ListTableShell> : <p className="empty-row">Aún no hay documentos procesados.</p>}
     </section>
   </section>;
 }
