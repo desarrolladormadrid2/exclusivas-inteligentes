@@ -3483,7 +3483,7 @@ function CollectiveLoadModal({ rows, lookups, dateFilter, actor, onClose, onDate
       {loading ? <div className="collective-load-empty"><span className="loading-spinner" /><p>Cargando artículos de los pedidos…</p></div> : !groups.length ? <div className="collective-load-empty"><b>No hay artículos para esta fecha</b><span>Prueba otra fecha o vuelve a “Todos”.</span></div> : (
         <>
           <div className="collective-load-list collective-load-simple-list">
-            <div className="collective-load-simple-head"><b>Ubicación</b><b>Artículo</b><b>Código</b><b>Uds.</b></div>
+            <div className="collective-load-simple-head"><b>Ubicación</b><b>Artículo</b><b>Código escaneado</b><b>Unidades</b><b>Acción</b></div>
             {displayLines.map((line: any) => {
               const product = getProduct(line);
               const validated = lineIsValidated(line);
