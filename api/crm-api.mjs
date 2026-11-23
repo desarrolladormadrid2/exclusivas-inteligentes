@@ -83,6 +83,19 @@ function synchronizeProductPricing(input, previous = null, isCreate = false) {
   input.margin_percent = Number(margin.toFixed(2));
   input.real_cost = Number((cost + number(input.freight_cost ?? previous?.freight_cost) + number(input.handling_cost ?? previous?.handling_cost)).toFixed(2));
 }
+function minimumSalePrice(product) {
+  const minimumMargin = Math.max(0, Math.min(99.99, Number(product?.min_margin_percent || 0)));
+  const realCost = Number(product?.real_cost || product?.cost_price || 0);
+  return minimumMargin > 0 && realCost > 0 ? realCost / (1 - minimumMargin / 100) : 0;
+}
+function validateOrderLineMargin(line, product) {
+  const floor = minimumSalePrice(product);
+  const netUnitPrice = Number(line.unit_price || 0) * (1 - Number(line.discount || 0) / 100);
+  if (floor > 0 && netUnitPrice + 0.000001 < floor) {
+    return `${product.name}: el precio neto mínimo es ${floor.toFixed(2)} € por unidad para respetar el margen mínimo del ${Number(product.min_margin_percent).toLocaleString("es-ES")}%`;
+  }
+  return "";
+}
 function parseImageDataUrl(value) {
   const match = String(value || "").match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=]+)$/i);
   if (!match) return null;
@@ -1762,7 +1775,7 @@ const lookupProfiles = {
 };
 function listSelectFor(resource) {
   if (resource === "delivery_notes") {
-    return `delivery_notes.*,(SELECT id FROM shipments WHERE shipments.order_id=delivery_notes.order_id AND CAST(COALESCE(shipments.deleted,0) AS INTEGER)=0 ORDER BY shipments.id DESC LIMIT 1) AS shipment_id`;
+    return `delivery_notes.*,(SELECT id FROM shipments WHERE shipments.order_id=delivery_notes.order_id AND CAST(COALESCE(shipments.deleted,0) AS INTEGER)=0 ORDER BY shipments.id DESC LIMIT 1) AS shipment_id,(SELECT code FROM invoices WHERE CAST(COALESCE(invoices.deleted,0) AS INTEGER)=0 AND COALESCE(invoices.status,'')<>'Anulada' AND (invoices.delivery_note_id=delivery_notes.id OR invoices.order_id=delivery_notes.order_id OR EXISTS(SELECT 1 FROM invoice_orders WHERE invoice_orders.invoice_id=invoices.id AND invoice_orders.order_id=delivery_notes.order_id)) ORDER BY invoices.id DESC LIMIT 1) AS invoice_code`;
   }
   if (resource === "quotes") {
     return `quotes.*,(SELECT TRIM(COALESCE(clients.name,'') || CASE WHEN TRIM(COALESCE(clients.city,''))<>'' THEN ' · ' || TRIM(clients.city) ELSE '' END) FROM clients WHERE clients.id=quotes.client_id) AS client_name_snapshot`;
@@ -4195,6 +4208,54 @@ export async function crmApiHandler(req, res) {
         }
       }
       if (t === "stock" && req.method === "GET") {
+        if (p[2] === "sales-comparison") {
+          const url = new URL(req.url, "http://local");
+          const from = String(url.searchParams.get("from") || "").slice(0, 10);
+          const to = String(url.searchParams.get("to") || "").slice(0, 10);
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+            return send(res, 400, { error: "Selecciona un rango de fechas válido." });
+          }
+          const rows = db.prepare(`
+            WITH historical_sales AS (
+              SELECT ol.product_id, SUM(COALESCE(ol.quantity,0)) quantity_sold
+              FROM order_lines ol
+              JOIN orders o ON o.id=ol.order_id
+              WHERE CAST(COALESCE(o.deleted,0) AS INTEGER)=0
+                AND date(COALESCE(
+                  (SELECT MAX(substr(s.delivered_at,1,10)) FROM shipments s WHERE s.order_id=o.id AND lower(trim(COALESCE(s.status,'')))='entregado' AND COALESCE(s.delivered_at,'')<>''),
+                  NULLIF(substr(o.delivery_date,1,10),''), NULLIF(substr(o.shipping_date,1,10),''), substr(o.created_at,1,10)
+                )) BETWEEN date(?) AND date(?)
+                AND (lower(trim(COALESCE(o.status,''))) IN ('enviado','en reparto','entregado','facturado','cobrada','completado')
+                  OR EXISTS (SELECT 1 FROM shipments s WHERE s.order_id=o.id AND lower(trim(COALESCE(s.status,'')))='entregado'))
+              GROUP BY ol.product_id
+              UNION ALL
+              SELECT o.product_id, SUM(COALESCE(o.quantity,0)) quantity_sold
+              FROM orders o
+              WHERE o.product_id IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM order_lines ol WHERE ol.order_id=o.id)
+                AND CAST(COALESCE(o.deleted,0) AS INTEGER)=0
+                AND date(COALESCE(
+                  (SELECT MAX(substr(s.delivered_at,1,10)) FROM shipments s WHERE s.order_id=o.id AND lower(trim(COALESCE(s.status,'')))='entregado' AND COALESCE(s.delivered_at,'')<>''),
+                  NULLIF(substr(o.delivery_date,1,10),''), NULLIF(substr(o.shipping_date,1,10),''), substr(o.created_at,1,10)
+                )) BETWEEN date(?) AND date(?)
+                AND (lower(trim(COALESCE(o.status,''))) IN ('enviado','en reparto','entregado','facturado','cobrada','completado')
+                  OR EXISTS (SELECT 1 FROM shipments s WHERE s.order_id=o.id AND lower(trim(COALESCE(s.status,'')))='entregado'))
+              GROUP BY o.product_id
+            ), sales_by_product AS (
+              SELECT product_id, SUM(quantity_sold) quantity_sold FROM historical_sales GROUP BY product_id
+            )
+            SELECT p.id product_id, p.name product_name, COALESCE(p.sku,'') sku,
+              COALESCE(p.unit,'unidad') unit, COALESCE(p.stock,0) stock,
+              COALESCE(p.stock_reserved,0) stock_reserved,
+              COALESCE(p.stock,0)-COALESCE(p.stock_reserved,0) available_stock,
+              s.quantity_sold, s.quantity_sold target_stock,
+              MAX(0,s.quantity_sold-(COALESCE(p.stock,0)-COALESCE(p.stock_reserved,0))) replenish_quantity
+            FROM sales_by_product s JOIN products p ON p.id=s.product_id
+            WHERE CAST(COALESCE(p.deleted,0) AS INTEGER)=0 AND s.quantity_sold>0
+            ORDER BY replenish_quantity DESC, p.name
+          `).all(from, to, from, to);
+          return send(res, 200, { from, to, rows });
+        }
         const stock = db
           .prepare(
             "SELECT p.id product_id,p.name product_name,COALESCE(p.sku,'') sku,COALESCE(p.unit,'unidad') unit,COALESCE(w.name,'Almacén general') warehouse_name,COALESCE(p.stock,0) stock,COALESCE(p.stock_reserved,0) stock_reserved,COALESCE(p.stock,0)-COALESCE(p.stock_reserved,0) available_stock,COALESCE(NULLIF(p.stock_min,0),p.min_stock,0) min_stock,CASE WHEN COALESCE(p.stock,0)-COALESCE(p.stock_reserved,0)<=0 THEN 'Sin stock' WHEN COALESCE(p.stock,0)-COALESCE(p.stock_reserved,0)<=COALESCE(NULLIF(p.stock_min,0),p.min_stock,0) THEN 'Crítico' ELSE 'Disponible' END stock_status FROM products p LEFT JOIN warehouses w ON w.id=COALESCE(p.warehouse_id,1) WHERE CAST(COALESCE(p.deleted,0) AS INTEGER)=0 ORDER BY p.name",
@@ -4425,6 +4486,7 @@ export async function crmApiHandler(req, res) {
         if (delivery.order_id) db.prepare("INSERT INTO invoice_orders(invoice_id,order_id) VALUES(?,?)").run(invoiceId, delivery.order_id);
         if (delivery.order_id) db.prepare("UPDATE orders SET status='Facturado',updated_at=? WHERE id=?").run(new Date().toISOString(), delivery.order_id);
         invalidateReadCache("invoice_lines");
+        invalidateReadCache("delivery_notes");
         invalidateReadCache("orders");
         let pdf = null;
         try { pdf = await ensureInvoicePdf(invoiceId, actor); } catch (error) { pdf = { pdf_status: "Pendiente · PDF no generado", pdf_error: error?.message || "No se pudo generar el PDF" }; }
@@ -4679,6 +4741,10 @@ export async function crmApiHandler(req, res) {
           const parentOrder = db.prepare("SELECT status FROM orders WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(d.order_id));
           if (!parentOrder) return send(res, 404, { error: "Pedido no encontrado" });
           if (["Enviado", "En reparto", "Entregado", "Cancelado"].includes(String(parentOrder.status || ""))) return send(res, 409, { error: "No se pueden añadir líneas a un pedido enviado o cerrado" });
+          const product = db.prepare("SELECT * FROM products WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(d.product_id));
+          if (!product) return send(res, 400, { error: "Producto no encontrado" });
+          const marginError = validateOrderLineMargin(d, product);
+          if (marginError) return send(res, 422, { error: marginError, minimum_sale_price: minimumSalePrice(product), min_margin_percent: Number(product.min_margin_percent || 0) });
         }
         if (["products", "clients", "suppliers", "warehouses"].includes(t) && !String(d.name || "").trim()) {
           return send(res, 400, { error: "El nombre es obligatorio" });
@@ -4762,8 +4828,10 @@ export async function crmApiHandler(req, res) {
             amount: Number(line.amount || (Number(line.quantity || 0) * Number(line.unit_price || 0))),
           })).filter((line) => line.product_id && line.quantity > 0);
           for (const line of orderLines) {
-            const product = db.prepare("SELECT name,stock,COALESCE(stock_reserved,0) stock_reserved FROM products WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(line.product_id);
+            const product = db.prepare("SELECT *,COALESCE(stock_reserved,0) stock_reserved FROM products WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(line.product_id);
             if (!product) return send(res, 400, { error: "Producto no encontrado" });
+            const marginError = validateOrderLineMargin(line, product);
+            if (marginError) return send(res, 422, { error: marginError, product_id: line.product_id, minimum_sale_price: minimumSalePrice(product), min_margin_percent: Number(product.min_margin_percent || 0) });
             line.product_name_snapshot = product.name;
             const available = Number(product.stock) - Number(product.stock_reserved);
             const minimum = Number(product.stock_min ?? product.min_stock ?? 0);
@@ -5355,9 +5423,22 @@ export async function crmApiHandler(req, res) {
         }
         if (t === "order_lines" && d.quantity !== undefined) {
           const oldLine = db.prepare("SELECT ol.*,o.status order_status FROM order_lines ol LEFT JOIN orders o ON o.id=ol.order_id WHERE ol.id=?").get(Number(p[2]));
+          if (oldLine && (d.unit_price !== undefined || d.discount !== undefined)) {
+            const product = db.prepare("SELECT * FROM products WHERE id=?").get(Number(oldLine.product_id));
+            const marginError = validateOrderLineMargin({ ...oldLine, ...d }, product);
+            if (marginError) return send(res, 422, { error: marginError, minimum_sale_price: minimumSalePrice(product), min_margin_percent: Number(product?.min_margin_percent || 0) });
+          }
           if (oldLine && !["Enviado", "En reparto", "Entregado", "Cancelado"].includes(String(oldLine.order_status || ""))) {
             const delta = Number(d.quantity || 0) - Number(oldLine.quantity || 0);
             if (delta) db.prepare("UPDATE products SET stock_reserved=MAX(0,COALESCE(stock_reserved,0)+?) WHERE id=?").run(delta, Number(oldLine.product_id));
+          }
+        }
+        if (t === "order_lines" && (d.unit_price !== undefined || d.discount !== undefined) && d.quantity === undefined) {
+          const oldLine = db.prepare("SELECT ol.*,o.status order_status FROM order_lines ol LEFT JOIN orders o ON o.id=ol.order_id WHERE ol.id=?").get(Number(p[2]));
+          if (oldLine) {
+            const product = db.prepare("SELECT * FROM products WHERE id=?").get(Number(oldLine.product_id));
+            const marginError = validateOrderLineMargin({ ...oldLine, ...d }, product);
+            if (marginError) return send(res, 422, { error: marginError, minimum_sale_price: minimumSalePrice(product), min_margin_percent: Number(product?.min_margin_percent || 0) });
           }
         }
         if (t === "shipments" && d.status) {

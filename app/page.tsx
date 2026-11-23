@@ -901,6 +901,7 @@ const cfg: any = {
       "order_id",
       "client_id",
       "delivery_date",
+      "invoice_code",
       "carrier",
       "status",
       "notes",
@@ -910,6 +911,7 @@ const cfg: any = {
       "Pedido",
       "Cliente",
       "Fecha entrega",
+      "Factura asociada",
       "Transportista",
       "Estado",
       "Notas",
@@ -3709,10 +3711,10 @@ function SupplierPayablesPanel({ rows, suppliers, actor, onReload, onOpen }: { r
 function OrderWorkflowPanel({ order, shipment, billingStatus, paymentStatus, invoice, onOpenPayment, onNavigate }: { order: any; shipment: any; billingStatus: string; paymentStatus: string; invoice: any; onOpenPayment: () => void; onNavigate?: (module: string) => void }) {
   const shippingStatus = String(shipment?.status || order?.status || "Pendiente");
   const deliverySignatureStatus = String(shipment?.delivery_signature_status || "Pendiente");
-  const phase = shippingStatus === "Entregado" ? 5 : shippingStatus === "En reparto" ? 4 : shippingStatus === "Enviado" ? 3 : ["Preparado", "Preparado con incidencia"].includes(shippingStatus) ? 2 : ["Preparando", "Pendiente", "Nuevo"].includes(shippingStatus) ? 1 : 0;
+  const phase = shippingStatus === "Entregado" ? 5 : shippingStatus === "En reparto" ? 4 : shippingStatus === "Enviado" ? 3 : ["Preparado", "Preparado con incidencia"].includes(shippingStatus) ? 2 : shippingStatus === "Preparando" ? 1 : 0;
   const steps = [
     { label: "Pedido", done: true, value: order?.created_at, person: order?.created_by },
-    { label: "Confirmado", done: phase >= 1 && !["Nuevo", "Borrador"].includes(String(order?.status || "")), value: order?.confirmed_at, person: order?.confirmed_by },
+    { label: "En preparación", done: ["Preparando", "Preparado", "Preparado con incidencia", "Enviado", "En reparto", "Entregado"].includes(shippingStatus), value: order?.preparation_started_at || order?.confirmed_at, person: order?.preparation_started_by || order?.confirmed_by || order?.prepared_by },
     { label: "Preparado", done: phase >= 2, value: shipment?.prepared_at || order?.preparation_date, person: shipment?.prepared_by || order?.prepared_by },
     { label: "Enviado", done: phase >= 3, value: shipment?.shipped_at || order?.shipping_date, person: shipment?.shipped_by || order?.shipped_by },
     { label: "En reparto", done: phase >= 4, value: shipment?.departure_at, person: shipment?.carrier },
@@ -4181,6 +4183,47 @@ function DriverRouteApp({ user }: { user: any }) {
   return <main className="driver-mobile-app"><header className="driver-mobile-header"><div className="driver-mobile-header-main">{selectedStop && <button type="button" className="driver-back-button" onClick={closeStop} aria-label="Volver a la lista de pedidos">←</button>}<span className="driver-brand-mark">E</span><div><b>Reparto</b><small>{actor}</small></div></div><div className="driver-mobile-header-actions"><span className="driver-today-label">Hoy</span><button type="button" className="driver-refresh" onClick={() => void load()} aria-label="Actualizar reparto">↻</button></div></header><section className="driver-mobile-toolbar"><label>Fecha<input aria-label="Fecha de reparto" type="date" value={routeDate} onChange={(event) => setRouteDate(event.target.value)} /></label><label>Camión<select aria-label="Camión o ruta" value={selectedRouteId} onChange={(event) => changeRoute(event.target.value)}><option value="">Selecciona una ruta</option>{routes.map((route) => <option value={route.id} key={route.id}>{route.vehicle || `Camión ${route.id}`} · {route.driver || "Sin conductor"}</option>)}</select></label></section>{loading ? <div className="driver-mobile-loading">Cargando la ruta…</div> : error ? <div className="driver-mobile-error" role="alert">{error}<button type="button" onClick={() => void load()}>Reintentar</button></div> : !activeRoute ? <div className="driver-mobile-empty"><b>No hay ruta asignada</b><span>Cuando administración guarde la carga del día aparecerá aquí.</span></div> : <><section className="driver-today-summary" aria-label="Resumen de entregas de hoy"><div><b>Entregas de hoy</b><span>{stops.length} paradas · {stops.filter((stop: any) => stop.status === "Entregado").length} entregadas · {stops.filter((stop: any) => !["Entregado", "Cancelada"].includes(String(stop.status || ""))).length} pendientes</span></div>{selectedStop && <button type="button" className="button secondary" onClick={closeStop}>← Lista de pedidos</button>}</section><section className="driver-route-summary"><div className="driver-route-summary-main"><div><b>{activeRoute.vehicle || "Camión"}</b><span>{stops.filter((stop: any) => stop.status === "Entregado").length}/{stops.length} entregas completadas · {Number(activeRoute.total_distance_km || 0).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km · {Math.floor(Number(activeRoute.estimated_minutes || 0) / 60)} h {Number(activeRoute.estimated_minutes || 0) % 60} min</span></div><strong className="driver-route-status">{activeRoute.status || "Planificada"}</strong></div><div className="driver-route-actions">{activeRoute.status !== "Completada" && <button type="button" className="button primary" onClick={gpsActive ? finishRoute : startGps}>{gpsActive ? "Finalizar ruta" : activeRoute.status === "En curso" ? "Reanudar GPS" : "Iniciar ruta y GPS"}</button>}{gpsActive && <span className="driver-gps-live">● GPS activo{location ? ` · ${Number(location.accuracy_m || 0).toFixed(0)} m` : ""}</span>}</div></section><nav className="driver-stop-list" aria-label="Pedidos de hoy">{stops.map((stop: any, index: number) => <button type="button" className={`driver-stop-card${Number(selectedStop?.id) === Number(stop.id) ? " is-selected" : ""}${stop.status === "Entregado" ? " is-complete" : ""}`} key={stop.id} aria-label={`Ver pedido de ${stop.client_name || "cliente"}`} onClick={() => openStop(Number(stop.id))}><span className="driver-stop-number">{stop.status === "Entregado" ? "✓" : index + 1}</span><span><b>{stop.client_name || "Cliente"}</b><small>{[stop.address, stop.city].filter(Boolean).join(" · ") || "Dirección pendiente"}</small><small>{stop.opening_time && stop.closing_time ? `Recepción ${String(stop.opening_time).slice(0, 5)}–${String(stop.closing_time).slice(0, 5)}` : "Horario pendiente"} · {stop.distance_km ? `${String(stop.distance_km).replace(".", ",")} km` : "Distancia pendiente"}</small></span><em>{stop.status || "Pendiente"}</em></button>)}</nav>{selectedStop && shipment && <section id="driver-stop-detail" className="driver-stop-detail"><div className="driver-detail-head"><div><p className="eyebrow">PEDIDO · PARADA {selectedStop.position || 1}</p><h2>{selectedStop.client_name}</h2><p>{[selectedStop.address, selectedStop.city].filter(Boolean).join(" · ") || "Dirección pendiente"}</p><small>{selectedStop.opening_time && selectedStop.closing_time ? `Recepción ${String(selectedStop.opening_time).slice(0, 5)}–${String(selectedStop.closing_time).slice(0, 5)}` : "Horario pendiente"}</small></div><button type="button" className="button secondary" onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent([selectedStop.address, selectedStop.city].filter(Boolean).join(", "))}`, "_blank")}>Navegar</button></div><div className="driver-detail-actions"><button type="button" className="button secondary" onClick={() => void updateStopStatus(selectedStop, "En entrega")} disabled={selectedStop.status === "Entregado"}>Estoy en el cliente</button><button type="button" className="button ghost" onClick={() => void updateStopStatus(selectedStop, "Incidencia")}>Incidencia</button></div><section className="driver-order-content"><div className="driver-section-title"><div><b>{shipment.code}</b><small>Contenido del pedido para mostrar al cliente</small></div><button type="button" className="button secondary" onClick={openInvoice}>Factura</button></div>{selectedLines.length ? selectedLines.map((line: any, index: number) => <div className="driver-order-line" key={`${line.id}-${index}`}><span>{line.quantity || line.quantity_requested || 0} {line.quantity_unit || "uds."}</span><b>{line.product_name || `Producto #${line.product_id}`}</b></div>) : <p className="driver-muted">No hay líneas detalladas disponibles.</p>}{(order?.driver_notes || shipment.driver_notes || selectedStop.driver_notes) && <div className="driver-notes"><b>Indicaciones</b><span>{order?.driver_notes || shipment.driver_notes || selectedStop.driver_notes}</span></div>}</section><DriverPaymentPanel shipment={shipment} invoice={invoice} actor={actor} onSaved={(updated) => setShipments((current) => current.map((row) => Number(row.id) === Number(updated.id) ? { ...row, ...updated } : row))} /><DeliverySignaturePanel shipment={shipment} actor={actor} client={{ name: selectedStop.client_name, address: selectedStop.address, city: selectedStop.city }} lines={selectedLines} onSaved={deliverySaved} /></section>}<DriverDailyClosingPanel route={activeRoute} stops={stops} shipments={shipments} actor={actor} /></>}{message && <p className="driver-mobile-message" role="status">{message}</p>}<footer className="driver-mobile-footer">{activeRoute ? `${activeRoute.code} · ${activeRoute.driver || actor}` : "Vista móvil de reparto"}</footer></main>;
 }
 
+function StockHistoricalDemand({ actor }: { actor: string }) {
+  const today = tabletTodayInput();
+  const monthStart = `${today.slice(0, 7)}-01`;
+  const [from, setFrom] = useState(monthStart);
+  const [to, setTo] = useState(today);
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [loadedRange, setLoadedRange] = useState({ from: monthStart, to: today });
+  async function loadComparison(nextFrom = from, nextTo = to) {
+    if (!nextFrom || !nextTo || nextFrom > nextTo) { setError("La fecha inicial debe ser anterior o igual a la fecha final."); return; }
+    setLoading(true);
+    setError("");
+    try {
+      const query = new URLSearchParams({ from: nextFrom, to: nextTo });
+      const response = await fetch(`/api/stock/sales-comparison?${query.toString()}`, { headers: { "X-Actor": actor }, cache: "no-store" });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "No se pudo cargar la comparación de ventas y stock.");
+      setRows(Array.isArray(body.rows) ? body.rows : []);
+      setLoadedRange({ from: nextFrom, to: nextTo });
+    } catch (loadError: any) {
+      setError(loadError?.message || "No se pudo cargar la comparación de ventas y stock.");
+    } finally { setLoading(false); }
+  }
+  useEffect(() => { void loadComparison(monthStart, today); }, []);
+  const totalSold = rows.reduce((total, row) => total + Number(row.quantity_sold || 0), 0);
+  const replenishmentCount = rows.filter((row) => Number(row.replenish_quantity || 0) > 0).length;
+  return <section className="stock-historical-demand" aria-label="Comparación de demanda histórica y stock actual">
+    <div className="stock-historical-head"><div><b>Demanda histórica y cobertura</b><small>Compara las unidades vendidas en el periodo con el stock disponible ahora. El objetivo equivale a repetir esa demanda.</small></div><span>{rows.length} productos</span></div>
+    <form className="stock-historical-filters" onSubmit={(event) => { event.preventDefault(); void loadComparison(); }}>
+      <label>Ventas desde<input type="date" value={from} max={to || undefined} onChange={(event) => setFrom(event.target.value)} /></label>
+      <label>Ventas hasta<input type="date" value={to} min={from || undefined} onChange={(event) => setTo(event.target.value)} /></label>
+      <button type="submit" className="button primary" disabled={loading}>{loading ? "Actualizando…" : "Comparar"}</button>
+      <small>Periodo actual: {formatSpanishDateValue(loadedRange.from, false)} – {formatSpanishDateValue(loadedRange.to, false)}</small>
+    </form>
+    <div className="stock-historical-summary"><span><b>{totalSold.toLocaleString("es-ES")}</b> unidades vendidas</span><span className={replenishmentCount ? "needs-replenishment" : "covered"}><b>{replenishmentCount}</b> productos por reponer</span></div>
+    {error && <p className="error-message" role="alert">{error}</p>}
+    {loading ? <p className="stock-historical-empty" role="status">Cargando ventas del periodo…</p> : rows.length ? <div className="stock-historical-table-wrap"><table className="stock-historical-table"><thead><tr><th>Producto</th><th>Vendidas en periodo</th><th>Stock físico</th><th>Reservado</th><th>Disponible</th><th>Objetivo para repetir demanda</th><th>Reponer</th></tr></thead><tbody>{rows.map((row) => <tr key={row.product_id}><td><b>{row.product_name}</b>{row.sku && <small>{row.sku}</small>}</td><td>{Number(row.quantity_sold).toLocaleString("es-ES")} {row.unit || "unidad"}</td><td>{Number(row.stock).toLocaleString("es-ES")}</td><td>{Number(row.stock_reserved).toLocaleString("es-ES")}</td><td>{Number(row.available_stock).toLocaleString("es-ES")}</td><td>{Number(row.target_stock).toLocaleString("es-ES")}</td><td className={Number(row.replenish_quantity) > 0 ? "replenishment-needed" : "replenishment-covered"}>{Number(row.replenish_quantity).toLocaleString("es-ES")}</td></tr>)}</tbody></table></div> : <p className="stock-historical-empty">No hay ventas registradas en ese periodo.</p>}
+  </section>;
+}
+
 function PendingSupplierReceipts({ refreshSignal, onReceive, onValidate }: { refreshSignal: number; onReceive: (purchaseOrderId: number) => void; onValidate: (receiptId: number, receiptCode: string) => void }) {
   const [orders, setOrders] = useState<any[]>([]);
   const [search, setSearch] = useState("");
@@ -4584,6 +4627,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const [batchLabelProducts, setBatchLabelProducts] = useState<any[]>([]);
   const [documentPreview, setDocumentPreview] = useState<any>(null);
   const [selectedProductIds, setSelectedProductIds] = useState<number[]>([]);
+  const [selectedDeliveryNoteIds, setSelectedDeliveryNoteIds] = useState<number[]>([]);
+  const [bulkDeliveryInvoiceSaving, setBulkDeliveryInvoiceSaving] = useState(false);
   const [productFilters, setProductFilters] = useState({ category: "", brand: "", stock: "todos", codes: "todos" });
   const [stockSort, setStockSort] = useState("status_asc");
   const [dateSort, setDateSort] = useState<{ field: string; direction: "asc" | "desc" } | null>(null);
@@ -4656,6 +4701,11 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   });
   const [quoteLines, setQuoteLines] = useState<any[]>([]);
   const [quoteLineDraft, setQuoteLineDraft] = useState({ product_id: "", quantity: "1", quantity_unit: "unidad", total_units: "", unit_price: "0", discount: "0", vat: "21" });
+  const [purchaseCreationMode, setPurchaseCreationMode] = useState<"supplier" | "product">("supplier");
+  const [purchaseSupplierOffers, setPurchaseSupplierOffers] = useState<any[]>([]);
+  const [purchaseSupplierOffersLoading, setPurchaseSupplierOffersLoading] = useState(false);
+  const [purchaseSupplierOffersError, setPurchaseSupplierOffersError] = useState("");
+  const [purchaseSelectedSupplierOffer, setPurchaseSelectedSupplierOffer] = useState("");
   const [quoteLineEditingIndex, setQuoteLineEditingIndex] = useState<number | null>(null);
   const [quoteProductSearch, setQuoteProductSearch] = useState("");
   const [customerRecurrentItems, setCustomerRecurrentItems] = useState<any[]>([]);
@@ -4675,7 +4725,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const undoTimerRef = useRef<number | null>(null);
   const [quickView, setQuickView] = useState("all");
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const [pageSize, setPageSize] = useState(50);
   const [listSupplier, setListSupplier] = useState("");
   const [entryCounterpartyType, setEntryCounterpartyType] = useState("Todos");
   const [visibleFields, setVisibleFields] = useState<string[]>(c.fields);
@@ -4754,6 +4804,22 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     setForm(value);
     setEditing(record);
   }
+  function startPurchaseFromStock(row: any) {
+    const product = (lookups.products || []).find((item: any) => Number(item.id) === Number(row.product_id ?? row.id)) || row;
+    const available = Number(row.available_stock ?? (Number(row.stock || 0) - Number(row.stock_reserved || 0)));
+    const target = Number(product.stock_target || product.stock_min || row.min_stock || 0);
+    const quantity = Math.max(1, target - available);
+    const unitCost = Number(product.last_direct_cost || product.real_cost || product.cost_price || 0);
+    const today = tabletTodayInput();
+    const detail = {
+      supplier_id: product.primary_supplier_id || product.supplier_id || "",
+      order_date: today, invoice_date: today, expected_date: nextCalendarDate(today),
+      status: "Borrador", payment_status: "Pendiente", title: `Reposición de ${product.name || "producto"}`,
+      lines: [{ product_id: Number(product.id || row.product_id), product_name: product.name || row.name, quantity, quantity_requested: quantity, quantity_unit: "unidad", units_factor: 1, unit_price: unitCost, amount: quantity * unitCost, format_price: unitCost, discount: 0, vat: Number(product.vat ?? 21) }],
+    };
+    onNavigate?.("Compras");
+    window.setTimeout(() => window.dispatchEvent(new CustomEvent("crm:compra-desde-stock", { detail })), 150);
+  }
   function beginSupplierReceipt(purchaseOrderId: number) {
     setEntryListView("received");
     setPendingReceiptOrderId(String(purchaseOrderId));
@@ -4771,6 +4837,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     setEditing(null);
     setForm({});
     setQuoteLines([]);
+    setPurchaseCreationMode("supplier");
+    setPurchaseSelectedSupplierOffer("");
     setQuoteLineEditingIndex(null);
     quoteLinesInitialSnapshot.current = "[]";
     setFormDirty(false);
@@ -5289,16 +5357,32 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     const product = (lookups.products || []).find((item: any) => Number(item.id) === Number(quoteLineDraft.product_id));
     const requestedQuantity = Number(quoteLineDraft.quantity || 0);
     if (!product || requestedQuantity <= 0) return;
+    const selectedSupplierOffer = purchaseSupplierOffers.find((offer: any) => String(offer.id) === String(purchaseSelectedSupplierOffer) && Number(offer.product_id) === Number(product.id));
+    if (isPurchaseForm && purchaseCreationMode === "product" && !selectedSupplierOffer) {
+      setError("Elige un proveedor y un precio para este producto antes de añadirlo.");
+      return;
+    }
     const unitsFactor = quoteUnitsFactor(product, quoteLineDraft.quantity_unit);
     const totalUnits = Number(quoteLineDraft.total_units || 0);
     if (isOrderForm && totalUnits <= 0) {
       setError("Indica las unidades totales de la línea antes de añadirla.");
       return;
     }
-    const quantity = isOrderForm ? totalUnits : requestedQuantity * unitsFactor;
-    const formatPrice = Number(quoteLineDraft.unit_price || product.unit_price || 0);
+    const quantity = isOrderForm ? totalUnits : isPurchaseForm && purchaseCreationMode === "product" ? requestedQuantity : requestedQuantity * unitsFactor;
+    const formatPrice = isPurchaseForm && purchaseCreationMode === "product"
+      ? Number(selectedSupplierOffer?.unit_cost || 0)
+      : Number(quoteLineDraft.unit_price || product.unit_price || 0);
     const unitPrice = unitsFactor > 0 ? formatPrice / unitsFactor : formatPrice;
     const discount = Number(quoteLineDraft.discount || 0);
+    if (isOrderForm && Number(product.min_margin_percent || 0) > 0) {
+      const cost = Number(product.real_cost || product.cost_price || 0);
+      const minimumUnitPrice = cost > 0 ? cost / (1 - Number(product.min_margin_percent) / 100) : 0;
+      const netUnitPrice = unitPrice * (1 - discount / 100);
+      if (minimumUnitPrice > 0 && netUnitPrice + 0.000001 < minimumUnitPrice) {
+        setError(`${product.name}: el precio neto mínimo es ${minimumUnitPrice.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € por unidad para respetar el margen mínimo del ${Number(product.min_margin_percent).toLocaleString("es-ES") }%.`);
+        return;
+      }
+    }
     const base = requestedQuantity * formatPrice * (1 - discount / 100);
     const nextLine = {
       product_id: Number(product.id),
@@ -5312,6 +5396,15 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       discount,
       vat: Number(quoteLineDraft.vat || 21),
       amount: base,
+      ...(isPurchaseForm && purchaseCreationMode === "product" ? {
+        supplier_id: Number(selectedSupplierOffer.supplier_id),
+        supplier_name: (lookups.suppliers || []).find((supplier: any) => Number(supplier.id) === Number(selectedSupplierOffer.supplier_id))?.name || "Proveedor",
+        supplier_ref: selectedSupplierOffer.supplier_ref || "",
+        quantity_unit: selectedSupplierOffer.order_unit || product.purchase_format || product.unit || "unidad",
+        units_factor: 1,
+        quantity: requestedQuantity,
+        quantity_requested: requestedQuantity,
+      } : {}),
     };
     setQuoteLines((current) => quoteLineEditingIndex === null
       ? [...current, nextLine]
@@ -5319,6 +5412,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     setQuoteLineEditingIndex(null);
     setQuoteLineDraft({ product_id: "", quantity: "1", quantity_unit: "unidad", total_units: "", unit_price: "0", discount: "0", vat: "21" });
     setQuoteProductSearch("");
+    setPurchaseSelectedSupplierOffer("");
+    setError("");
   }
   function quoteUnitsFactor(product: any, unit: string) {
     return unit === "caja" ? Number(product?.units_per_case || 1) : unit === "pack_4" ? 4 : unit === "pack_6" ? 6 : unit === "palet" ? Number(product?.units_per_pallet || 0) : 1;
@@ -5351,6 +5446,9 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     setError("");
   }
   const selectedQuoteProduct = (lookups.products || []).find((item: any) => Number(item.id) === Number(quoteLineDraft.product_id));
+  const comparablePurchaseOffers = active === "Compras" && purchaseCreationMode === "product" && selectedQuoteProduct
+    ? purchaseSupplierOffers.filter((offer: any) => Number(offer.product_id) === Number(selectedQuoteProduct.id)).sort((a: any, b: any) => Number(a.unit_cost || 0) - Number(b.unit_cost || 0))
+    : [];
   const quoteTotalUnits = quoteLineDraft.total_units;
   const orderPrimaryAddressSelected = form.collection_point_id === "__client_address__";
   const orderGeneralComplete = Boolean(String(form.code || "").trim() && form.client_id && form.collection_point_id && String(form.preparation_date || "").trim() && String(form.delivery_date || "").trim() && (!orderPrimaryAddressSelected || String(form.address || "").trim()));
@@ -5379,6 +5477,63 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       await saveRecordUnsafe(e, formOverride);
     } finally {
       recordSaveLock.current = false;
+      setRecordSaving(false);
+    }
+  }
+  async function saveProductBasedPurchases(status: "Borrador" | "Enviado") {
+    if (!quoteLines.length) { setError("Añade al menos un producto con proveedor antes de guardar la compra."); return; }
+    if (!String(formRef.current?.order_date || "").trim()) { setError("Indica la fecha del pedido antes de guardar."); return; }
+    const groups = new Map<number, any[]>();
+    for (const line of quoteLines) {
+      const supplierId = Number(line.supplier_id || 0);
+      if (!supplierId || !Number(line.product_id) || Number(line.quantity || 0) <= 0) {
+        setError(`Revisa «${line.product_name || "producto"}»: falta proveedor, producto o cantidad válida.`);
+        return;
+      }
+      groups.set(supplierId, [...(groups.get(supplierId) || []), line]);
+    }
+    const suppliers = [...groups.entries()];
+    if (status === "Enviado" && !window.confirm(`Se crearán ${suppliers.length} pedido${suppliers.length === 1 ? "" : "s"} de compra, uno por proveedor, y quedarán enviados. ¿Continuar?`)) return;
+    setRecordSaving(true);
+    setError("");
+    const created: any[] = [];
+    const failedSupplierIds: number[] = [];
+    try {
+      for (let index = 0; index < suppliers.length; index++) {
+        const [supplierId, lines] = suppliers[index];
+        const supplierName = (lookups.suppliers || []).find((item: any) => Number(item.id) === supplierId)?.name || `Proveedor #${supplierId}`;
+        const amount = lines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+        const suffix = suppliers.length > 1 ? `-${String(index + 1).padStart(2, "0")}` : "";
+        const payload = {
+          ...formRef.current,
+          code: `${String(formRef.current?.code || `COM-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`).slice(0, 36)}${suffix}`,
+          title: `${formRef.current?.title || "Pedido de compra"} · ${supplierName}`,
+          supplier_id: supplierId,
+          status,
+          amount,
+          lines: lines.map((line) => ({ product_id: Number(line.product_id), quantity: Number(line.quantity), unit_cost: Number(line.unit_price ?? line.unit_cost ?? 0), amount: Number(line.amount || 0), quantity_unit: line.quantity_unit || "unidad", supplier_ref: line.supplier_ref || "" })),
+        };
+        const response = await fetch("/api/purchase_orders", { method: "POST", headers: actorHeaders, body: JSON.stringify(payload) });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          failedSupplierIds.push(...suppliers.slice(index).map(([pendingSupplierId]) => pendingSupplierId));
+          setError(`Se guardaron ${created.length} de ${suppliers.length} pedidos. Falló ${supplierName}: ${body.error || "error al guardar"}. Los productos pendientes siguen en el formulario.`);
+          break;
+        }
+        created.push(body);
+      }
+      if (created.length) {
+        setRows((current) => [...created, ...current]);
+        if (failedSupplierIds.length) {
+          const failedSet = new Set(failedSupplierIds);
+          setQuoteLines((current) => current.filter((line) => failedSet.has(Number(line.supplier_id))));
+        } else {
+          closeForm(true);
+        }
+      }
+    } catch (saveError: any) {
+      setError(saveError?.message || "No se pudieron guardar todos los pedidos de compra.");
+    } finally {
       setRecordSaving(false);
     }
   }
@@ -5519,11 +5674,13 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       return;
     }
     if (isPurchaseForm && e?.nativeEvent?.submitter?.dataset?.purchaseAction === "confirm") {
+      if (!editing && purchaseCreationMode === "product") { await saveProductBasedPurchases("Enviado"); return; }
       const nextForm = { ...formRef.current, status: "Enviado" };
       if (!window.confirm("El pedido quedará marcado como enviado al proveedor. ¿Continuar?")) return;
       await saveRecord(e, nextForm);
       return;
     }
+    if (isPurchaseForm && !editing && purchaseCreationMode === "product") { await saveProductBasedPurchases("Borrador"); return; }
     await saveRecord(e);
   }
   async function remove(id: number) {
@@ -6153,6 +6310,43 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     return () => window.removeEventListener("crm:nuevo-cliente", newClientRequested);
   }, [active]);
   useEffect(() => {
+    if (active !== "Compras") return;
+    function createStockPurchase(event: Event) {
+      const detail = (event as CustomEvent).detail || {};
+      setPurchaseCreationMode("supplier");
+      setPurchaseSelectedSupplierOffer("");
+      setQuoteLines(Array.isArray(detail.lines) ? detail.lines : []);
+      setQuoteProductSearch("");
+      setQuoteLineEditingIndex(null);
+      const { lines, ...header } = detail;
+      beginForm({ code: `COM-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`, ...header });
+      setFormOpen(true);
+    }
+    window.addEventListener("crm:compra-desde-stock", createStockPurchase);
+    return () => window.removeEventListener("crm:compra-desde-stock", createStockPurchase);
+  }, [active]);
+  useEffect(() => {
+    if (active !== "Compras" || !formOpen || editing) return;
+    const controller = new AbortController();
+    setPurchaseSupplierOffersLoading(true);
+    setPurchaseSupplierOffersError("");
+    fetch("/api/product_suppliers", { headers: actorHeaders, signal: controller.signal, cache: "no-store" })
+      .then(async (response) => {
+        const body = await response.json().catch(() => []);
+        if (!response.ok) throw new Error(body?.error || "No se pudieron cargar los proveedores y sus precios.");
+        return Array.isArray(body) ? body : [];
+      })
+      .then((offers) => setPurchaseSupplierOffers(offers.filter((offer: any) => Number(offer.active ?? 1) !== 0)))
+      .catch((loadError: any) => {
+        if (loadError?.name !== "AbortError") {
+          setPurchaseSupplierOffers([]);
+          setPurchaseSupplierOffersError(loadError?.message || "No se pudieron cargar los proveedores y sus precios.");
+        }
+      })
+      .finally(() => { if (!controller.signal.aborted) setPurchaseSupplierOffersLoading(false); });
+    return () => controller.abort();
+  }, [active, formOpen, editing]);
+  useEffect(() => {
     if (active !== "Pedidos") return;
     function newOrderRequested() {
       setQuoteLines([]);
@@ -6285,6 +6479,34 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     const d = await r.json();
     if (!r.ok) return alert(d.error || "No se pudo generar la factura");
     setDocumentCreationNotice({ documentType: "Factura", code: d.code, id: d.id, module: "Facturas", shareUrl: d.share_url || "" });
+  }
+  async function invoiceSelectedDeliveryNotes() {
+    const selected = filteredRows.filter((row: any) => selectedDeliveryNoteIds.includes(Number(row.id)) && !row.invoice_code);
+    if (!listClient) return alert("Filtra primero por un cliente para evitar mezclar facturas.");
+    if (!selected.length) return alert("Selecciona albaranes pendientes de facturar.");
+    const clientIds = new Set(selected.map((row: any) => Number(row.client_id)));
+    const days = new Set(selected.map((row: any) => String(row.delivery_date || row.created_at || "").slice(0, 10)));
+    if (clientIds.size !== 1 || !clientIds.has(Number(listClient))) return alert("Los albaranes seleccionados deben pertenecer al cliente filtrado.");
+    if (days.size !== 1 || days.has("")) return alert("Selecciona albaranes de un solo día. Usa el filtro de fecha para elegir la jornada.");
+    const byOrder = new Map<number, any>();
+    for (const row of selected) if (Number(row.order_id) > 0 && !byOrder.has(Number(row.order_id))) byOrder.set(Number(row.order_id), row);
+    const candidates = [...byOrder.values()];
+    if (!candidates.length) return alert("Los albaranes seleccionados no están vinculados a pedidos facturables.");
+    if (!window.confirm(`Se crearán ${candidates.length} facturas, una por pedido, para el cliente y el día seleccionados. ¿Continuar?`)) return;
+    setBulkDeliveryInvoiceSaving(true);
+    const created: string[] = [];
+    const failures: string[] = [];
+    try {
+      for (const row of candidates) {
+        const response = await fetch(`/api/delivery_notes/convert-invoice/${row.id}`, { method: "POST", headers: actorHeaders });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) failures.push(`${row.code}: ${body.error || "No se pudo generar"}`);
+        else created.push(body.code || row.code);
+      }
+      setSelectedDeliveryNoteIds([]);
+      setListRefreshKey((value) => value + 1);
+      alert(`${created.length} factura(s) creada(s)${failures.length ? `; ${failures.length} no creadas: ${failures.join(" · ")}` : "."}`);
+    } finally { setBulkDeliveryInvoiceSaving(false); }
   }
   async function convertProformaToInvoice(row: any) {
     const code = String(row.code || "").replace(/^PRO-/, "FAC-") || `FAC-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
@@ -7633,7 +7855,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       ) : f === "client_id" || f === "product_id" || f === "warehouse_id" || f === "supplier_id" || f === "primary_supplier_id" || f === "collection_point_id" || f === "order_id" || f === "shipment_id" ? (
         <select
           aria-label={c.labels[i]}
-          required={active === "Productos" ? false : c.api === "orders" ? f === "client_id" : !['warehouse_id', 'order_id', 'shipment_id', 'supplier_id', 'primary_supplier_id'].includes(f)}
+          required={active === "Clientes" ? false : active === "Productos" ? false : c.api === "orders" ? f === "client_id" : !['warehouse_id', 'order_id', 'shipment_id', 'supplier_id', 'primary_supplier_id'].includes(f)}
           value={form[f] ?? ""}
           onChange={(e) => handleFormChange(f, e.target.value)}
         >
@@ -7694,7 +7916,9 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         <textarea aria-label={c.labels[i]} required={active === "Productos" ? false : !["description", "notes", "loading_notes", "driver_notes"].includes(f)} value={form[f] ?? ""} onChange={(e) => handleFormChange(f, e.target.value)} />
       ) : (
         <input
-          required={active === "Productos"
+          required={active === "Clientes"
+            ? f === "name"
+            : active === "Productos"
             ? f === "name"
             : c.api === "orders"
             ? ["code", "client_id", "preparation_date", "delivery_date"].includes(f)
@@ -7807,6 +8031,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             className="button primary"
             onClick={() => {
               setQuoteLines([]);
+              if (isPurchaseForm) { setPurchaseCreationMode("supplier"); setPurchaseSelectedSupplierOffer(""); }
+              if (isPurchaseForm) setQuoteProductSearch("");
               if (active === "Pedidos") setClientSearch("");
               const nextForm = (
                   (c.movementFilter && active !== "Entradas")
@@ -7991,7 +8217,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
               </div>
             </section>}
             </>
-          ) : c.fields.filter((f: string) => !(active === "Clientes" && clientComputedFields.has(f))).map((f: string) => renderFormField(f, c.fields.indexOf(f)))}
+          ) : c.fields.filter((f: string) => !(active === "Clientes" && clientComputedFields.has(f)) && !(isPurchaseForm && !editing && purchaseCreationMode === "product" && f === "supplier_id")).map((f: string) => renderFormField(f, c.fields.indexOf(f)))}
           {(active === "Facturas" || active === "Albaranes") && (
             <section className="gtr-inclusion-panel" aria-label="Concepto de tratamiento de residuos">
               <label>
@@ -8011,6 +8237,12 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           {(active === "Presupuestos" || isOrderForm || isPurchaseForm) && (
             <section className="quote-lines-editor">
               <div className="quote-lines-head"><div><b>{isOrderForm ? "Líneas del pedido" : isPurchaseForm ? "Líneas de la compra" : "Líneas del presupuesto"}</b><small>{isPurchaseForm ? "Añade, revisa o elimina los productos y las unidades compradas." : "Busca y añade varios productos como en un carrito."}</small>{isPurchaseForm && editing && !purchaseLinesCanEdit && <em className="quote-lines-readonly">Las líneas solo se pueden cambiar mientras la compra está en borrador.</em>}</div></div>
+              {isPurchaseForm && !editing && <div className="purchase-creation-mode" role="group" aria-label="Modo de creación de compra">
+                <span>Crear compra</span>
+                <button type="button" className={purchaseCreationMode === "supplier" ? "is-active" : ""} aria-pressed={purchaseCreationMode === "supplier"} onClick={() => { setPurchaseCreationMode("supplier"); setPurchaseSelectedSupplierOffer(""); setError(""); }}>Por proveedor</button>
+                <button type="button" className={purchaseCreationMode === "product" ? "is-active" : ""} aria-pressed={purchaseCreationMode === "product"} onClick={() => { setPurchaseCreationMode("product"); setPurchaseSelectedSupplierOffer(""); setForm((current: any) => ({ ...current, supplier_id: "" })); setError(""); }}>Por producto</button>
+                <small>{purchaseCreationMode === "supplier" ? "Añade varios productos para un proveedor." : "Compara el coste por proveedor; al guardar se crea un pedido por cada proveedor elegido."}</small>
+              </div>}
               {isOrderForm && !editing && <section className="customer-recurrent-panel" aria-label="Productos pedidos anteriormente por el cliente">
                 <div className="customer-recurrent-head"><div><b>Pedidos recurrentes del cliente</b><small>Productos de pedidos anteriores, con foto y unidades habituales. Ajusta la cantidad y añádelos al pedido.</small></div>{form.client_id && !customerRecurrentLoading && !customerRecurrentError && <span>{customerRecurrentItems.length} productos</span>}</div>
                 {!form.client_id && <p className="customer-recurrent-message">Selecciona un cliente para consultar sus productos habituales.</p>}
@@ -8034,16 +8266,27 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                 </div>}
                 {customerRecurrentError && customerRecurrentItems.length > 0 && <p className="customer-recurrent-message is-error" role="alert">{customerRecurrentError}</p>}
               </section>}
+              {isPurchaseForm && !editing && purchaseCreationMode === "product" && <section className="purchase-supplier-comparison" aria-label="Comparativa de proveedores para el producto seleccionado">
+                <div><b>Proveedores y precios</b><small>{selectedQuoteProduct ? `Ofertas registradas para ${selectedQuoteProduct.name}.` : "Elige un producto para comparar sus proveedores y precios."}</small></div>
+                {purchaseSupplierOffersLoading && <p role="status">Cargando precios registrados…</p>}
+                {!purchaseSupplierOffersLoading && purchaseSupplierOffersError && <p className="error-message" role="alert">{purchaseSupplierOffersError}</p>}
+                {!purchaseSupplierOffersLoading && !purchaseSupplierOffersError && selectedQuoteProduct && comparablePurchaseOffers.length === 0 && <p>No hay precios de proveedor guardados para este producto. Añade ofertas desde «Productos y proveedores».</p>}
+                {!purchaseSupplierOffersLoading && comparablePurchaseOffers.length > 0 && <div className="purchase-supplier-offer-list">{comparablePurchaseOffers.map((offer: any) => {
+                  const supplier = (lookups.suppliers || []).find((item: any) => Number(item.id) === Number(offer.supplier_id));
+                  return <button type="button" key={offer.id} className={String(offer.id) === purchaseSelectedSupplierOffer ? "is-selected" : ""} onClick={() => { setPurchaseSelectedSupplierOffer(String(offer.id)); setQuoteLineDraft((current) => ({ ...current, unit_price: String(Number(offer.unit_cost || 0)), quantity_unit: String(offer.order_unit || selectedQuoteProduct?.purchase_format || selectedQuoteProduct?.unit || "unidad") })); setError(""); }}><b>{supplier?.name || `Proveedor #${offer.supplier_id}`}</b><strong>{Number(offer.unit_cost || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</strong><small>{offer.order_unit || selectedQuoteProduct?.purchase_format || selectedQuoteProduct?.unit || "unidad"}{offer.lead_time_days ? ` · ${offer.lead_time_days} días` : ""}{offer.supplier_ref ? ` · Ref. ${offer.supplier_ref}` : ""}{Number(offer.is_primary || 0) ? " · Preferente" : ""}</small></button>;
+                })}</div>}
+              </section>}
               <div className="quote-line-add">
                 <label className="quote-line-field quote-line-product"><span>Producto</span><div className="quote-product-picker"><input aria-label="Buscar producto" autoComplete="off" placeholder="Buscar por nombre o SKU…" value={quoteProductSearch} onChange={(event) => { const value = event.target.value; const product = (lookups.products || []).find((item: any) => String(item.name).toLowerCase() === value.trim().toLowerCase() || String(item.sku || "").toLowerCase() === value.trim().toLowerCase()); const factor = quoteUnitsFactor(product, quoteLineDraft.quantity_unit); setQuoteProductSearch(value); setQuoteLineDraft({ ...quoteLineDraft, product_id: product ? String(product.id) : "", total_units: product && factor > 0 ? String(Number(quoteLineDraft.quantity || 1) * factor) : "", unit_price: product ? String(Number(product.unit_price || 0) * factor) : quoteLineDraft.unit_price }); }} />{quoteProductSearch && <button type="button" className="quote-product-clear" aria-label="Limpiar producto" onClick={() => { setQuoteProductSearch(""); setQuoteLineDraft({ ...quoteLineDraft, product_id: "", total_units: "", unit_price: "0" }); }}>×</button>}{quoteProductSearch.trim() && !quoteLineDraft.product_id && <div className="quote-product-suggestions">{(lookups.products || []).filter((item: any) => `${item.name || ""} ${item.sku || ""} ${item.brand || ""}`.toLowerCase().includes(quoteProductSearch.trim().toLowerCase())).slice(0, 8).map((item: any) => <button type="button" key={item.id} onClick={() => { const factor = quoteUnitsFactor(item, quoteLineDraft.quantity_unit); setQuoteProductSearch(`${item.name}${item.sku ? ` · ${item.sku}` : ""}`); setQuoteLineDraft({ ...quoteLineDraft, product_id: String(item.id), total_units: factor > 0 ? String(Number(quoteLineDraft.quantity || 1) * factor) : "", unit_price: String(Number(item.unit_price || 0) * factor) }); }}><b>{item.name}</b><small>{[item.sku, item.brand, item.category].filter(Boolean).join(" · ") || "Sin referencia"}</small></button>)}{!(lookups.products || []).some((item: any) => `${item.name || ""} ${item.sku || ""} ${item.brand || ""}`.toLowerCase().includes(quoteProductSearch.trim().toLowerCase())) && <span className="quote-product-no-results">No hay productos que coincidan.</span>}</div>}</div></label>
-                <label className="quote-line-field"><span>Tipo de cantidad</span><select aria-label="Tipo de cantidad" value={quoteLineDraft.quantity_unit} onChange={(event) => { const value = event.target.value; const product = (lookups.products || []).find((item: any) => Number(item.id) === Number(quoteLineDraft.product_id)); const factor = quoteUnitsFactor(product, value); setQuoteLineDraft({ ...quoteLineDraft, quantity_unit: value, total_units: product && factor > 0 ? String(Number(quoteLineDraft.quantity || 1) * factor) : "", unit_price: product ? String(Number(product.unit_price || 0) * factor) : quoteLineDraft.unit_price }); }}><option value="unidad">Unidad</option><option value="caja">Caja</option><option value="pack_4">Pack de 4</option><option value="pack_6">Pack de 6</option><option value="palet">Palé</option></select></label>
+                {isPurchaseForm && purchaseCreationMode === "product" ? <label className="quote-line-field"><span>Formato proveedor</span><input aria-label="Formato proveedor" readOnly value={comparablePurchaseOffers.find((offer: any) => String(offer.id) === purchaseSelectedSupplierOffer)?.order_unit || selectedQuoteProduct?.purchase_format || selectedQuoteProduct?.unit || "Elige una oferta"} /></label> : <label className="quote-line-field"><span>Tipo de cantidad</span><select aria-label="Tipo de cantidad" value={quoteLineDraft.quantity_unit} onChange={(event) => { const value = event.target.value; const product = (lookups.products || []).find((item: any) => Number(item.id) === Number(quoteLineDraft.product_id)); const factor = quoteUnitsFactor(product, value); setQuoteLineDraft({ ...quoteLineDraft, quantity_unit: value, total_units: product && factor > 0 ? String(Number(quoteLineDraft.quantity || 1) * factor) : "", unit_price: product ? String(Number(product.unit_price || 0) * factor) : quoteLineDraft.unit_price }); }}><option value="unidad">Unidad</option><option value="caja">Caja</option><option value="pack_4">Pack de 4</option><option value="pack_6">Pack de 6</option><option value="palet">Palé</option></select></label>}
                 <label className="quote-line-field"><span>Cantidad</span><input aria-label="Cantidad" type="number" min="1" step="any" value={quoteLineDraft.quantity} onChange={(event) => { const value = event.target.value; const factor = quoteUnitsFactor(selectedQuoteProduct, quoteLineDraft.quantity_unit); setQuoteLineDraft({ ...quoteLineDraft, quantity: value, total_units: selectedQuoteProduct && factor > 0 ? String(Number(value || 0) * factor) : "" }); }} /></label>
-                <label className="quote-line-field"><span>{isPurchaseForm ? "Coste del formato (€)" : "Precio del formato (€)"}</span><input aria-label={isPurchaseForm ? "Coste del formato" : "Precio del formato"} type="number" min="0" step="any" value={quoteLineDraft.unit_price} onChange={(event) => setQuoteLineDraft({ ...quoteLineDraft, unit_price: event.target.value })} /></label>
+                <label className="quote-line-field"><span>{isPurchaseForm ? purchaseCreationMode === "product" ? "Coste elegido (€)" : "Coste del formato (€)" : "Precio del formato (€)"}</span><input aria-label={isPurchaseForm ? "Coste del formato" : "Precio del formato"} type="number" min="0" step="any" readOnly={isPurchaseForm && purchaseCreationMode === "product"} value={isPurchaseForm && purchaseCreationMode === "product" ? comparablePurchaseOffers.find((offer: any) => String(offer.id) === purchaseSelectedSupplierOffer)?.unit_cost ?? "" : quoteLineDraft.unit_price} onChange={(event) => setQuoteLineDraft({ ...quoteLineDraft, unit_price: event.target.value })} placeholder={isPurchaseForm && purchaseCreationMode === "product" ? "Selecciona proveedor" : undefined} /></label>
                 {isOrderForm ? <label className="quote-line-field"><span>Unidades totales{quoteLineDraft.product_id ? " *" : ""}</span><input aria-label="Unidades totales" type="number" min="1" step="any" required={Boolean(quoteLineDraft.product_id)} value={quoteTotalUnits} onChange={(event) => setQuoteLineDraft({ ...quoteLineDraft, total_units: event.target.value })} placeholder="Indica las unidades" /></label> : !isPurchaseForm && <label className="quote-line-field"><span>Descuento %</span><input aria-label="Descuento %" type="number" min="0" max="100" step="any" value={quoteLineDraft.discount} onChange={(event) => setQuoteLineDraft({ ...quoteLineDraft, discount: event.target.value })} /></label>}
                 <button type="button" className="button secondary" onClick={addQuoteLine} disabled={!purchaseLinesCanEdit}>＋ {quoteLineEditingIndex === null ? "Añadir línea" : "Actualizar línea"}</button>
               </div>
-              {quoteLines.length ? <div className="quote-lines-list">{quoteLines.map((line, index) => <div className="quote-line-row" key={`${line.product_id}-${index}`}><span><b>{line.product_name}</b></span><span className="quote-line-detail"><b>{line.quantity_requested || line.quantity} {quantityUnitLabel(line.quantity_unit)}</b><small>{Number(line.quantity)} unidades totales · {Number(line.format_price ?? line.unit_price).toLocaleString("es-ES", { style: "currency", currency: "EUR" })} por formato</small></span><strong>{Number(line.amount).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</strong><div className="quote-line-actions"><button type="button" className="row-action workflow" disabled={!purchaseLinesCanEdit} onClick={() => { const product = (lookups.products || []).find((item: any) => Number(item.id) === Number(line.product_id)); setQuoteLineEditingIndex(index); setQuoteProductSearch(`${line.product_name || product?.name || ""}${product?.sku ? ` · ${product.sku}` : ""}`); setQuoteLineDraft({ product_id: String(line.product_id), quantity: String(line.quantity_requested || line.quantity || 1), quantity_unit: line.quantity_unit || "unidad", total_units: String(line.quantity || 1), unit_price: String(line.format_price ?? line.unit_price ?? line.unit_cost ?? 0), discount: String(line.discount || 0), vat: String(line.vat || 21) }); }}>Editar</button><button type="button" className="row-action danger" disabled={!purchaseLinesCanEdit} aria-label={`Quitar ${line.product_name}`} onClick={() => { setQuoteLineEditingIndex(null); setQuoteLines((current) => current.filter((_, lineIndex) => lineIndex !== index)); }}>Quitar</button></div></div>)}</div> : <p className="quote-lines-empty">Todavía no has añadido productos.</p>}
+              {quoteLines.length ? <div className="quote-lines-list">{quoteLines.map((line, index) => <div className="quote-line-row" key={`${line.product_id}-${index}`}><span><b>{line.product_name}</b>{isPurchaseForm && purchaseCreationMode === "product" && <small className="purchase-line-supplier">{line.supplier_name || "Proveedor"}{line.supplier_ref ? ` · Ref. ${line.supplier_ref}` : ""}</small>}</span><span className="quote-line-detail"><b>{line.quantity_requested || line.quantity} {quantityUnitLabel(line.quantity_unit)}</b><small>{Number(line.quantity)} unidades totales · {Number(line.format_price ?? line.unit_price).toLocaleString("es-ES", { style: "currency", currency: "EUR" })} por formato</small></span><strong>{Number(line.amount).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</strong><div className="quote-line-actions"><button type="button" className="row-action workflow" disabled={!purchaseLinesCanEdit} onClick={() => { const product = (lookups.products || []).find((item: any) => Number(item.id) === Number(line.product_id)); setQuoteLineEditingIndex(index); setQuoteProductSearch(`${line.product_name || product?.name || ""}${product?.sku ? ` · ${product.sku}` : ""}`); setPurchaseSelectedSupplierOffer(String(purchaseSupplierOffers.find((offer: any) => Number(offer.product_id) === Number(line.product_id) && Number(offer.supplier_id) === Number(line.supplier_id))?.id || "")); setQuoteLineDraft({ product_id: String(line.product_id), quantity: String(line.quantity_requested || line.quantity || 1), quantity_unit: line.quantity_unit || "unidad", total_units: String(line.quantity || 1), unit_price: String(line.format_price ?? line.unit_price ?? line.unit_cost ?? 0), discount: String(line.discount || 0), vat: String(line.vat || 21) }); }}>Editar</button><button type="button" className="row-action danger" disabled={!purchaseLinesCanEdit} aria-label={`Quitar ${line.product_name}`} onClick={() => { setQuoteLineEditingIndex(null); setQuoteLines((current) => current.filter((_, lineIndex) => lineIndex !== index)); }}>Quitar</button></div></div>)}</div> : <p className="quote-lines-empty">Todavía no has añadido productos.</p>}
               <div className="quote-lines-total"><span>Total de {isOrderForm ? "pedido" : isPurchaseForm ? "compra" : "presupuesto"}</span><strong>{quoteLines.reduce((sum, line) => sum + Number(line.amount || 0), 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</strong></div>
+              {isOrderForm && error && <p className="error-message" role="alert">{error}</p>}
             </section>
           )}
           {active === "Productos" && <>
@@ -8185,6 +8428,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
               <option value="status_desc">Estado: stock saludable primero</option>
             </select>
           )}
+          {active === "Albaranes" && <div className="delivery-note-bulk-toolbar"><label><input type="checkbox" aria-label="Seleccionar albaranes pendientes visibles" checked={filteredRows.filter((row: any) => !row.invoice_code).length > 0 && filteredRows.filter((row: any) => !row.invoice_code).every((row: any) => selectedDeliveryNoteIds.includes(Number(row.id)))} onChange={(event) => setSelectedDeliveryNoteIds(event.target.checked ? filteredRows.filter((row: any) => !row.invoice_code).map((row: any) => Number(row.id)) : [])} /> Seleccionar albaranes sin factura</label><span>{filteredRows.filter((row: any) => selectedDeliveryNoteIds.includes(Number(row.id)) && !row.invoice_code).length} seleccionados</span><button type="button" className="button primary" disabled={bulkDeliveryInvoiceSaving || !selectedDeliveryNoteIds.some((id) => filteredRows.some((row: any) => Number(row.id) === id && !row.invoice_code))} onClick={() => void invoiceSelectedDeliveryNotes()}>{bulkDeliveryInvoiceSaving ? "Creando facturas…" : "Facturar pedidos seleccionados"}</button></div>}
           {["Proveedores", "Clientes", "Productos"].includes(active) && (
             <button
               type="button"
@@ -8239,6 +8483,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           </div>
         </div>
         {active === "Stock" && <div className="stock-meaning" role="note"><b>Cómo leer la cobertura:</b><span>Stock físico = existencias actuales</span><span>Necesario = unidades requeridas por pedidos abiertos</span><span>Saldo = stock físico − necesario</span><span className="stock-meaning-alert">Saldo negativo = no se pueden cubrir todos los pedidos</span></div>}
+        {active === "Stock" && <StockHistoricalDemand actor={user?.username || "Usuario local"} />}
         <div className="columns-accordion">
           <button
             type="button"
@@ -8310,6 +8555,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             <thead>
             <tr>
                 {isProducts && <th className="product-check-column"><span className="sr-only">Seleccionar</span></th>}
+                {active === "Albaranes" && <th className="delivery-note-select-column"><span className="sr-only">Seleccionar</span></th>}
                 {isProducts && <th className="product-image-column">Imagen</th>}
                 {isProducts && <th className="product-lots-column">LOTES</th>}
                 {visibleFields.map((f: string, fieldIndex: number) => (
@@ -8327,6 +8573,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
               {pagedRows.map((r) => (
                   <tr key={r.id ?? r.product_id} data-inline-row={r.id ?? r.product_id} data-row-modal={active === "Presupuestos" || active === "Pedidos" || active === "Envíos" || active === "Facturas" || active === "Albaranes" || active === "Preparación de pedidos" || active === "Compras" || usesRecordModal || active === "Entradas" ? "true" : undefined} className={`${isProducts && Number(r.stock || 0) - Number(r.stock_reserved || 0) <= Number(r.min_stock || 0) ? "product-row-critical" : ""}${isLoadPreparation && Number(r.urgent) === 1 ? " prep-row-urgent" : ""}${isLoadPreparation && r.status === "Preparado con incidencia" ? " prep-row-incident" : ""}${Number(r.deleted) === 1 ? " deleted-row" : ""}${active === "Pedidos" ? " order-list-row" : ""}`} onClick={(event) => { if (inlineEditing === (r.id ?? r.product_id) || (event.target as HTMLElement).closest("button, input, select, textarea, a, details, summary")) return; if (active === "Entradas") { void openEntryDetail(r); return; } if (active === "Envíos" || active === "Facturas" || active === "Albaranes" || active === "Compras") { void openPreview(r); return; } if (active === "Presupuestos" || active === "Pedidos") { if (active === "Pedidos" && isOrderSent(r)) void openPreview(r); else void openRecordModal(r); return; } if (isLoadPreparation) { void openPreparationRow(r); return; } if (isCrmPreparation) { void openPreview(r); return; } if (usesRecordModal) { void openRecordModal(r); return; } beginInline(r); }}>
                     {isProducts && <td className="product-check-column" data-label="Seleccionar"><input type="checkbox" checked={selectedProductIds.includes(Number(r.id))} onChange={() => toggleProductSelection(Number(r.id))} aria-label={`Seleccionar ${r.name}`} /></td>}
+                    {active === "Albaranes" && <td className="delivery-note-select-column" data-label="Seleccionar"><input type="checkbox" checked={selectedDeliveryNoteIds.includes(Number(r.id))} disabled={Boolean(r.invoice_code)} title={r.invoice_code ? `Ya facturado en ${r.invoice_code}` : "Seleccionar albarán"} onChange={(event) => setSelectedDeliveryNoteIds((current) => event.target.checked ? [...current, Number(r.id)] : current.filter((id) => id !== Number(r.id)))} aria-label={`Seleccionar albarán ${r.code}${r.invoice_code ? " ya facturado" : ""}`} /></td>}
                     {isProducts && <td className="product-image-column" data-label="Imagen"><button type="button" className={`product-thumbnail-button${productImageSource(r) ? "" : " product-reference-thumbnail"}`} onClick={() => setProductDetail(r)} aria-label={`Abrir imagen de ${r.name}`}>{<img src={productDisplayImageSource(r)} alt={productImageSource(r) ? "" : `Imagen de referencia para ${r.name}`} loading="lazy" />}</button></td>}
                     {isProducts && renderProductLots(r)}
                     {visibleFields.map((f: string, fieldIndex: number) => (
@@ -8335,7 +8582,9 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                           {inlineEditing === (r.id ?? r.product_id) ? (
                             renderInlineEditor(f, r)
                           ) : (
-                              f === "pending_invoice_count"
+                              f === "invoice_code"
+                              ? r.invoice_code ? <span className="delivery-note-invoice-status">{r.invoice_code}</span> : <span className="delivery-note-unbilled-status">Sin factura</span>
+                              : f === "pending_invoice_count"
                               ? `${Number(r.pending_invoice_count || 0).toLocaleString("es-ES")} ${Number(r.pending_invoice_count || 0) === 1 ? "factura" : "facturas"}`
                               : f === "pending_invoice_total"
                               ? Number(r.pending_invoice_total || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" })
@@ -8381,6 +8630,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                     ))}
                     <td data-label="Acciones">
                       <div className="row-actions">
+                        {active === "Stock" && <button type="button" className="row-action primary" onClick={() => startPurchaseFromStock(r)}>Pedir al proveedor</button>}
+                        <details className="row-actions-disclosure"><summary>Acciones</summary><div className="row-actions-disclosure-content">
                         {isLoadPreparation && (
                           <b className="prep-status-badge">{r.status || "Preparando"}</b>
                         )}
@@ -8503,6 +8754,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                         ) : (
                           <button className="row-action danger" onClick={() => remove(r.id)}>Eliminar</button>
                         ))}
+                        </div></details>
                       </div>
                     </td>
                   </tr>
@@ -8512,7 +8764,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
         </TopHorizontalScroll>}
       {!isCrmPreparation && listIsReady && sortedRows.length > 0 && <div className="table-pagination" aria-label="Paginación del listado">
         <span>Mostrando {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, sortedRows.length)} de {sortedRows.length}</span>
-        <label>Filas<select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }} aria-label="Filas por página"><option value="15">15</option><option value="25">25</option><option value="50">50</option><option value="100">100</option></select></label>
+        <label>Filas<select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }} aria-label="Filas por página"><option value="50">50</option><option value="100">100</option><option value="200">200</option></select></label>
         <button type="button" className="button secondary" disabled={currentPage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Anterior</button>
         <b>Página {currentPage} de {totalPages}</b>
         <button type="button" className="button secondary" disabled={currentPage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>Siguiente</button>
@@ -11154,6 +11406,11 @@ export function ClientOrderPortal({
     if (unit === "palet") return Math.max(1, Number(product?.units_per_pallet || Number(product?.units_per_case || 1) * 10));
     return 1;
   }
+  function minimumOrderUnitPrice(product: any) {
+    const cost = Number(product?.real_cost || product?.cost_price || 0);
+    const margin = Number(product?.min_margin_percent || 0);
+    return cost > 0 && margin > 0 && margin < 100 ? cost / (1 - margin / 100) : 0;
+  }
   function chooseClient(client: any) {
     setClientId(String(client.id));
     setClientSearch(client.name || "");
@@ -11591,6 +11848,17 @@ function TabletOrderDemo({
   async function createOrder() {
     if (!clientId || !pointId || !cart.length || !deliveryDate || !preparationDate || !shippingDate) {
       setError("Completa cliente, lugar de envío, fechas y añade al menos un producto.");
+      return;
+    }
+    const marginViolations = cart.flatMap((line) => {
+      const product = products.find((item) => Number(item.id) === Number(line.product_id));
+      const minimum = minimumOrderUnitPrice(product);
+      return minimum > 0 && Number(line.unit_price || 0) + 0.000001 < minimum
+        ? [`${line.name}: mínimo ${minimum.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €/ud. (margen mínimo ${Number(product.min_margin_percent).toLocaleString("es-ES")}%).`]
+        : [];
+    });
+    if (marginViolations.length) {
+      setError(`No se puede crear el pedido por debajo del margen mínimo. ${marginViolations.join(" ")}`);
       return;
     }
     setSaving(true);
@@ -12361,15 +12629,7 @@ function TabletOrderDemo({
                               showTabletPrices ? "" : "tablet-price-hidden"
                             }
                           >
-                            {showTabletPrices
-                              ? (
-                                  Number(line.quantity) *
-                                  Number(line.unit_price)
-                                ).toLocaleString("es-ES", {
-                                  style: "currency",
-                                  currency: "EUR",
-                                })
-                              : "•••"}
+                            {showTabletPrices ? <><label className="tablet-cart-price"><small>Precio/ud.</small><input type="number" min="0" step="0.01" aria-label={`Precio por unidad de ${line.name}`} value={line.unit_price} onChange={(event) => setCart((current) => current.map((item) => item.product_id === line.product_id && item.quantity_unit === line.quantity_unit ? { ...item, unit_price: Number(event.target.value) } : item))} /></label><strong>{(Number(line.quantity) * Number(line.unit_price)).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</strong>{(() => { const product = products.find((item) => Number(item.id) === Number(line.product_id)); const minimum = minimumOrderUnitPrice(product); return minimum > 0 && Number(line.unit_price) + 0.000001 < minimum ? <small className="tablet-margin-warning" role="alert">Por debajo del margen. Mínimo {minimum.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €/ud.</small> : null; })()}</> : "•••"}
                           </span>
                           <button
                             onClick={() =>
