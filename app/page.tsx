@@ -4624,6 +4624,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
   const [inlineDraft, setInlineDraft] = useState<any>({});
   const [search, setSearch] = useState("");
   const [preview, setPreview] = useState<any>(null);
+  const [invoiceVoidSavingId, setInvoiceVoidSavingId] = useState<number | null>(null);
+  const [invoiceVoidFeedback, setInvoiceVoidFeedback] = useState<{ id: number; kind: "success" | "error"; text: string } | null>(null);
   const [previewSourceOrder, setPreviewSourceOrder] = useState<any>(null);
   const [preparationOrderEdit, setPreparationOrderEdit] = useState<any>(null);
   const [preparationOrderEditLines, setPreparationOrderEditLines] = useState<any[]>([]);
@@ -6157,6 +6159,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
           ? ["Activa", "Borrador", "Archivada"]
         : ["Pendiente", "Activo", "Borrador", "Confirmado", "Cobrada", "Anulada", "Recibida", "Cancelada"];
     if (field === "status") {
+      if (active === "Facturas" && String(row.status || "") === "Anulada") return <span className="billing-status billing-status-anulada">Anulada</span>;
       return <select {...common}>{statusOptions.map((option) => <option key={option}>{option}</option>)}</select>;
     }
     if (field === "movement_type") {
@@ -6564,6 +6567,30 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     let prepared = updated;
     try { prepared = await prepareInvoicePdf(updated) || updated; } catch { /* El documento se puede abrir desde el listado aunque el PDF falle. */ }
     setDocumentCreationNotice({ documentType: "Factura", code: prepared.code, id: prepared.id, module: "Facturas", shareUrl: prepared.share_url || "" });
+  }
+  async function annulInvoiceAndReleaseDeliveryNotes(row: any) {
+    const invoiceId = Number(row?.id || 0);
+    if (!invoiceId || invoiceVoidSavingId) return;
+    if (!window.confirm(`Se conservará ${row.code || "la factura"} como anulada y sus albaranes quedarán disponibles para facturarlos de nuevo. La factura anulada no se podrá reactivar. Si ya fue emitida, confirma que corresponde anularla y no emitir una factura rectificativa. ¿Continuar?`)) return;
+    setInvoiceVoidSavingId(invoiceId);
+    setInvoiceVoidFeedback(null);
+    try {
+      const response = await fetch(`/api/invoices/${invoiceId}/annul-release-delivery-notes`, { method: "POST", headers: actorHeaders, body: JSON.stringify({}) });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setInvoiceVoidFeedback({ id: invoiceId, kind: "error", text: result.error || "No se pudo anular la factura y liberar sus albaranes." });
+        return;
+      }
+      const updated = { ...row, status: "Anulada", released_delivery_notes: result.released_delivery_notes || [] };
+      setRows((current) => current.map((item) => Number(item.id) === invoiceId ? { ...item, ...updated } : item));
+      setPreview((current: any) => current && Number(current.id) === invoiceId ? { ...current, ...updated } : current);
+      setListRefreshKey((current) => current + 1);
+      setInvoiceVoidFeedback({ id: invoiceId, kind: "success", text: `${result.released_delivery_notes?.length || 0} albarán(es) liberado(s). Ya puedes facturarlos de nuevo desde Albaranes.` });
+    } catch (error: any) {
+      setInvoiceVoidFeedback({ id: invoiceId, kind: "error", text: error?.message || "No se pudo completar la anulación. Conservamos abierta esta factura." });
+    } finally {
+      setInvoiceVoidSavingId(null);
+    }
   }
   async function prepareInvoicePdf(row: any, force = false) {
     const response = await fetch(`/api/invoices/${row.id}/pdf`, { method: "POST", headers: actorHeaders, body: JSON.stringify({ force }) });
@@ -7948,7 +7975,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       ) : f === "status" && active === "Albaranes" ? (
         <><input aria-label={c.labels[i]} value={form[f] ?? "Pendiente"} readOnly /><small>El estado se actualiza al confirmar o reabrir la entrega desde este listado o desde Reparto.</small></>
       ) : f === "status" && active === "Facturas" ? (
-        <><select aria-label={c.labels[i]} value={form[f] ?? "Pendiente"} onChange={(e) => handleFormChange(f, e.target.value)}>{Array.from(new Set([String(form[f] || "Pendiente"), "Pendiente", "Proforma", "Anulada"])).map((status) => <option key={status}>{status}</option>)}</select><small>Parcial, cobrada y vencida se calculan desde los cobros activos y la fecha de vencimiento. Usa «Registrar cobro» para actualizar el estado real.</small></>
+        <><select aria-label={c.labels[i]} value={form[f] ?? "Pendiente"} disabled={String(form[f] || "") === "Anulada"} onChange={(e) => handleFormChange(f, e.target.value)}>{Array.from(new Set([String(form[f] || "Pendiente"), "Pendiente", "Proforma", "Anulada"])).map((status) => <option key={status}>{status}</option>)}</select><small>{String(form[f] || "") === "Anulada" ? "Factura anulada: se conserva el historial y no se puede reactivar. Emite una nueva desde los albaranes liberados." : "Parcial, cobrada y vencida se calculan desde los cobros activos y la fecha de vencimiento. Usa «Registrar cobro» para actualizar el estado real."}</small></>
       ) : f === "status" && active === "Pedidos" ? (
         <><select aria-label={c.labels[i]} value={form[f] ?? "Nuevo"} onChange={(e) => handleFormChange(f, e.target.value)}>{Array.from(new Set([String(form[f] || "Nuevo"), "Nuevo", "Pendiente", "Confirmado"])).map((status) => <option key={status}>{status}</option>)}</select><small>Preparado, enviado y entregado se actualizan desde Almacén y Reparto para conservar stock y seguimiento.</small></>
       ) : f === "status" ? (
@@ -9077,7 +9104,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
               </section>
             )}
             {isLoadPreparation && preparationValidationMessage && <p className="preparation-validation-success" role="status">{preparationValidationMessage} Los cambios quedan guardados en la nota de carga.</p>}
-            {active !== "Cobros" && active !== "Compras" && !(active === "Pedidos" && isOrderSent(preview)) && <div className="add-line">
+            {active !== "Cobros" && active !== "Compras" && !(active === "Pedidos" && isOrderSent(preview)) && !(active === "Facturas" && preview.status === "Anulada") && <div className="add-line">
               <select
                 value={newLine.product_id}
                 onChange={(e) => {
@@ -9171,7 +9198,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
               })()}
             </div>}
             <div className="preview-document-actions">
-              {(active === "Facturas" || active === "Albaranes" || active === "Compras") && <button className="button workflow" type="button" onClick={() => { const row = preview; setPreview(null); void openRecordModal(row); }}>{active === "Compras" ? "Editar compra" : "Editar documento"}</button>}
+              {(active === "Facturas" && preview.status !== "Anulada" || active === "Albaranes" || active === "Compras") && <button className="button workflow" type="button" onClick={() => { const row = preview; setPreview(null); void openRecordModal(row); }}>{active === "Compras" ? "Editar compra" : "Editar documento"}</button>}
               {isCrmPreparation && <button className="button primary" type="button" onClick={() => void openPreparationOrderEditor(preview)}>Editar pedido y datos de reparto</button>}
               <button className="button secondary" disabled={previewLoading} onClick={() => window.print()}>
                 Imprimir / guardar PDF
@@ -9180,7 +9207,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                 Etiqueta de envío · QR y barras
               </button>}
             </div>
-            {active === "Facturas" && <div className="invoice-document-actions"><button type="button" className="button workflow" onClick={() => void openInvoicePdf(preview)}>Ver PDF generado</button><button type="button" className="button secondary" onClick={() => void copyInvoiceLink(preview)}>Copiar enlace seguro</button><button type="button" className="button workflow" onClick={() => void sendInvoiceEmail(preview)}>Enviar por email</button><button type="button" className="button secondary" onClick={() => void prepareInvoicePdf(preview, true)}>Regenerar PDF</button>{getInvoiceOutstanding(preview) > 0.009 && <button type="button" className="button primary" onClick={() => openPaymentForInvoice(preview)}>Registrar cobro · {getInvoiceOutstanding(preview).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</button>}</div>}
+            {active === "Facturas" && <div className="invoice-document-actions">{preview.delivery_note_id && preview.status !== "Anulada" && <button type="button" className="button danger" disabled={invoiceVoidSavingId === Number(preview.id)} onClick={() => void annulInvoiceAndReleaseDeliveryNotes(preview)}>{invoiceVoidSavingId === Number(preview.id) ? "Anulando…" : "Anular y liberar albaranes"}</button>}{preview.delivery_note_id && preview.status === "Anulada" && <span className="invoice-void-release-status">Factura anulada · albaranes disponibles para facturar</span>}<button type="button" className="button workflow" onClick={() => void openInvoicePdf(preview)}>Ver PDF generado</button>{preview.status !== "Anulada" && <><button type="button" className="button secondary" onClick={() => void copyInvoiceLink(preview)}>Copiar enlace seguro</button><button type="button" className="button workflow" onClick={() => void sendInvoiceEmail(preview)}>Enviar por email</button><button type="button" className="button secondary" onClick={() => void prepareInvoicePdf(preview, true)}>Regenerar PDF</button>{getInvoiceOutstanding(preview) > 0.009 && <button type="button" className="button primary" onClick={() => openPaymentForInvoice(preview)}>Registrar cobro · {getInvoiceOutstanding(preview).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</button>}</>}{invoiceVoidFeedback?.id === Number(preview.id) && <p className={`invoice-void-feedback ${invoiceVoidFeedback.kind}`} role={invoiceVoidFeedback.kind === "error" ? "alert" : "status"}>{invoiceVoidFeedback.text}</p>}</div>}
             {active === "Albaranes" && <div className="invoice-document-actions"><button type="button" className="button primary" disabled={Boolean(preview.invoice_code)} onClick={() => void convertDeliveryToInvoice(preview)}>{preview.invoice_code ? `Facturado · ${preview.invoice_code}` : "Crear factura desde este albarán"}</button><button type="button" className="button workflow" onClick={() => void openCommercialDocumentPdf(preview, "delivery")}>Ver PDF generado</button><button type="button" className="button secondary" onClick={() => void copyCommercialDocumentLink(preview, "delivery")}>Copiar enlace seguro</button><button type="button" className="button secondary" onClick={() => void prepareCommercialDocumentPdf(preview, "delivery", true)}>Regenerar PDF</button></div>}
             {active === "Pedidos" && <><div className="document-pdf-actions"><button type="button" className="button workflow" onClick={() => void openCommercialDocumentPdf(preview, "order")}>Ver PDF generado</button><button type="button" className="button secondary" onClick={() => void copyCommercialDocumentLink(preview, "order")}>Copiar enlace seguro</button><button type="button" className="button secondary" onClick={() => void prepareCommercialDocumentPdf(preview, "order", true)}>Regenerar PDF</button></div><div className="order-preview-actions"><button type="button" className="button workflow" onClick={() => void (getOrderShipment(preview) ? openOrderLoadNote(preview) : createOrderLoadNote(preview))}>{getOrderShipment(preview) ? "Abrir nota de carga" : "Crear nota de carga"}</button>{!isOrderSent(preview) && <button type="button" className="button secondary" onClick={() => { setPreview(null); beginInline(preview); }}>Editar pedido</button>}<button type="button" className="button secondary" onClick={() => void openOrderDeliveryNote(preview)}>{preview.delivery_note_id ? `Abrir albarán · ${preview.delivery_note_code || ""}` : "Crear albarán"}</button></div></>}
             {active === "Presupuestos" && <><div className="document-pdf-actions"><button type="button" className="button workflow" onClick={() => void openCommercialDocumentPdf(preview, "quote")}>Ver PDF generado</button><button type="button" className="button secondary" onClick={() => void copyCommercialDocumentLink(preview, "quote")}>Copiar enlace seguro</button><button type="button" className="button secondary" onClick={() => void prepareCommercialDocumentPdf(preview, "quote", true)}>Regenerar PDF</button></div><div className="quote-preview-actions"><button type="button" className="button secondary" onClick={() => void sendQuoteToClient(preview)}>Enviar al cliente</button><button type="button" className="button primary" disabled={preview.status === "Convertido"} onClick={() => void convertQuoteToOrder(preview)}>{preview.status === "Convertido" ? "Convertido a pedido" : "Convertir a pedido"}</button></div></>}

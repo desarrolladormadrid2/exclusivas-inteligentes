@@ -1427,6 +1427,9 @@ table:not(.preview-lines) tbody > tr:nth-child(even),
 .quote-record-toolbar > div:last-child, .quote-preview-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .quote-preview-actions { margin-top: 14px; }
  .invoice-document-actions, .document-pdf-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #d5dfe3; }
+.invoice-void-release-status { align-self: center; color: #16734a; font-size: 12px; font-weight: 700; }
+.invoice-void-feedback { flex: 1 1 100%; margin: 0; padding: 8px 10px; border-left: 3px solid #16734a; background: #f0faf4; color: #145c3b; font-size: 12px; }
+.invoice-void-feedback.error { border-left-color: #b91c1c; background: #fff5f5; color: #991b1b; }
  @media (max-width: 620px) { .invoice-document-actions, .document-pdf-actions { align-items: stretch; } .invoice-document-actions .button, .document-pdf-actions .button { flex: 1 1 100%; } }
 @media (max-width: 760px) {
   .quote-record-toolbar { align-items: stretch; flex-direction: column; }

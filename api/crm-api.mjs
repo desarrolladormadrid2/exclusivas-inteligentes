@@ -975,8 +975,27 @@ try { db.exec(`
      SET product_name_snapshot=COALESCE(NULLIF(TRIM(product_name_snapshot),''),(SELECT name FROM products WHERE products.id=order_lines.product_id))
    WHERE product_name_snapshot IS NULL OR TRIM(product_name_snapshot)='';
 `); } catch {}
-db.exec(`CREATE TABLE IF NOT EXISTS invoice_orders(id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_id INTEGER NOT NULL,order_id INTEGER NOT NULL,UNIQUE(invoice_id,order_id),UNIQUE(order_id));`);
-db.exec(`CREATE TABLE IF NOT EXISTS invoice_delivery_notes(id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_id INTEGER NOT NULL,delivery_note_id INTEGER NOT NULL,UNIQUE(invoice_id,delivery_note_id),UNIQUE(delivery_note_id));`);
+db.exec(`CREATE TABLE IF NOT EXISTS invoice_orders(id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_id INTEGER NOT NULL,order_id INTEGER NOT NULL,UNIQUE(invoice_id,order_id));`);
+db.exec(`CREATE TABLE IF NOT EXISTS invoice_delivery_notes(id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_id INTEGER NOT NULL,delivery_note_id INTEGER NOT NULL,UNIQUE(invoice_id,delivery_note_id));`);
+// Keep document relations as history: after an invoice is annulled, the same
+// order or delivery note can be invoiced again without erasing the old link.
+function removeUniqueDocumentRelation(table, relationColumn) {
+  try {
+    const uniqueIndexes = db.prepare(`PRAGMA index_list('${table}')`).all().filter((index) => Number(index.unique) === 1);
+    const hasSingleColumnUnique = uniqueIndexes.some((index) => {
+      const columns = db.prepare(`PRAGMA index_info('${String(index.name).replaceAll("'", "''")}')`).all().map((column) => String(column.name || ""));
+      return columns.length === 1 && columns[0] === relationColumn;
+    });
+    if (!hasSingleColumnUnique) return;
+    const temporary = `${table}_billing_history_migration`;
+    db.exec(`DROP TABLE IF EXISTS ${temporary}; CREATE TABLE ${temporary}(id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_id INTEGER NOT NULL,${relationColumn} INTEGER NOT NULL,UNIQUE(invoice_id,${relationColumn})); INSERT OR IGNORE INTO ${temporary}(id,invoice_id,${relationColumn}) SELECT id,invoice_id,${relationColumn} FROM ${table}; DROP TABLE ${table}; ALTER TABLE ${temporary} RENAME TO ${table};`);
+  } catch (error) {
+    console.error(`No se pudo actualizar la relación histórica ${table}:`, error?.message || error);
+    throw error;
+  }
+}
+removeUniqueDocumentRelation("invoice_orders", "order_id");
+removeUniqueDocumentRelation("invoice_delivery_notes", "delivery_note_id");
 // Estas cachés se inicializan antes de la reconciliación de arranque porque
 // el recálculo de facturas puede invalidarlas durante esa primera pasada.
 const readCache = new Map();
@@ -4518,6 +4537,42 @@ export async function crmApiHandler(req, res) {
           pdf_error: pdf?.pdf_error || null,
         });
       }
+      if (t === "invoices" && req.method === "POST" && p[2] && p[3] === "annul-release-delivery-notes") {
+        const invoiceId = Number(p[2]);
+        const invoice = db.prepare("SELECT * FROM invoices WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(invoiceId);
+        if (!invoice) return send(res, 404, { error: "Factura no encontrada" });
+        const linkedOrders = [...new Set([
+          Number(invoice.order_id || 0),
+          ...db.prepare("SELECT order_id FROM invoice_orders WHERE invoice_id=?").all(invoiceId).map((row) => Number(row.order_id || 0)),
+        ].filter((id) => id > 0))];
+        const linkedNotes = db.prepare(`SELECT DISTINCT dn.id,dn.code FROM delivery_notes dn
+          LEFT JOIN invoice_delivery_notes idn ON idn.delivery_note_id=dn.id
+          WHERE CAST(COALESCE(dn.deleted,0) AS INTEGER)=0
+            AND (idn.invoice_id=? OR dn.id=?${linkedOrders.length ? ` OR dn.order_id IN (${linkedOrders.map(() => "?").join(",")})` : ""})
+          ORDER BY dn.id`).all(invoiceId, Number(invoice.delivery_note_id || 0), ...linkedOrders);
+        if (!linkedNotes.length) return send(res, 409, { error: "Esta factura no tiene albaranes asociados que se puedan liberar." });
+        if (String(invoice.status || "") !== "Anulada") {
+          const activePayment = db.prepare("SELECT id FROM payments WHERE invoice_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 AND COALESCE(status,'Aplicado')<>'Anulado' AND voided_at IS NULL LIMIT 1").get(invoiceId);
+          if (activePayment) return send(res, 409, { error: "Anula primero los cobros activos desde Cobros. Así se conserva el historial y el estado de la factura." });
+          const now = new Date().toISOString();
+          if (!remoteMode) db.exec("BEGIN");
+          try {
+            db.prepare("UPDATE invoices SET status='Anulada',updated_at=? WHERE id=?").run(now, invoiceId);
+            syncOrderStatusFromInvoice(invoiceId);
+            recordAudit(actor, "POST", `invoices/${invoiceId}/annul-release-delivery-notes`, "Anular factura y liberar albaranes", JSON.stringify({ invoice_id: invoiceId, invoice_code: invoice.code, delivery_notes: linkedNotes.map((note) => ({ id: Number(note.id), code: note.code })), order_ids: linkedOrders }));
+            if (!remoteMode) db.exec("COMMIT");
+          } catch (error) {
+            if (!remoteMode) { try { db.exec("ROLLBACK"); } catch {} }
+            throw error;
+          }
+        }
+        invalidateRelatedReadCaches("invoices");
+        invalidateReadCache("invoice_delivery_notes");
+        invalidateReadCache("invoice_orders");
+        invalidateReadCache("delivery_notes");
+        invalidateReadCache("orders");
+        return send(res, 200, { ok: true, id: invoiceId, code: invoice.code, status: "Anulada", released_delivery_notes: linkedNotes.map((note) => ({ id: Number(note.id), code: note.code })), already_annulled: String(invoice.status || "") === "Anulada" });
+      }
       if (t === "delivery_notes" && req.method === "POST" && p[2] === "bulk-invoice") {
         const d = await read(req);
         const ids = [...new Set((Array.isArray(d.delivery_note_ids) ? d.delivery_note_ids : []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
@@ -4844,6 +4899,10 @@ export async function crmApiHandler(req, res) {
       delete d.reopen_preparation;
       delete d.update_client_address;
       if (req.method === "POST") {
+        if (t === "invoice_lines" && d.invoice_id) {
+          const invoice = db.prepare("SELECT status FROM invoices WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(d.invoice_id));
+          if (String(invoice?.status || "") === "Anulada") return send(res, 409, { error: "No se pueden modificar líneas de una factura anulada. Crea una factura nueva desde los albaranes liberados." });
+        }
         if (t === "order_lines" && d.order_id) {
           const parentOrder = db.prepare("SELECT status FROM orders WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(Number(d.order_id));
           if (!parentOrder) return send(res, 404, { error: "Pedido no encontrado" });
@@ -5277,6 +5336,11 @@ export async function crmApiHandler(req, res) {
         return send(res, 201, createdRecord);
       }
       if (req.method === "DELETE") {
+        if (t === "invoice_lines") {
+          const line = db.prepare("SELECT invoice_id FROM invoice_lines WHERE id=?").get(Number(p[2]));
+          const invoice = line?.invoice_id ? db.prepare("SELECT status FROM invoices WHERE id=?").get(Number(line.invoice_id)) : null;
+          if (String(invoice?.status || "") === "Anulada") return send(res, 409, { error: "No se pueden modificar líneas de una factura anulada. Se conserva como historial." });
+        }
         invalidateRelatedReadCaches(t);
         const now = new Date().toISOString();
         if (t === "payments") {
@@ -5333,6 +5397,11 @@ export async function crmApiHandler(req, res) {
         invalidateRelatedReadCaches(t);
         const currentRecord = db.prepare(`SELECT * FROM ${t} WHERE id=?`).get(Number(p[2]));
         if (!currentRecord) return send(res, 404, { error: "Registro no encontrado" });
+        if (t === "invoice_lines") {
+          const invoice = db.prepare("SELECT status FROM invoices WHERE id=?").get(Number(currentRecord.invoice_id));
+          if (String(invoice?.status || "") === "Anulada") return send(res, 409, { error: "No se pueden modificar líneas de una factura anulada. Se conserva como historial." });
+        }
+        if (t === "invoices" && String(currentRecord.status || "") === "Anulada") return send(res, 409, { error: "Una factura anulada es de solo lectura y no se puede reactivar ni modificar. Crea una factura nueva desde los albaranes liberados." });
         if (t === "invoices" && String(d.status || "") === "Anulada" && String(currentRecord.status || "") !== "Anulada") {
           const activePayment = db.prepare("SELECT id FROM payments WHERE invoice_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 AND COALESCE(status,'Aplicado')<>'Anulado' AND voided_at IS NULL LIMIT 1").get(Number(p[2]));
           if (activePayment) return send(res, 409, { error: "Anula primero los cobros activos desde Cobros. Así se conserva el historial y el estado de la factura." });
@@ -5724,6 +5793,13 @@ export async function crmApiHandler(req, res) {
           recordAudit(actor, "PUT", `purchase_orders/${Number(p[2])}`, "Editar líneas de pedido a proveedor", JSON.stringify({ lines: purchaseOrderLinesToReplace.length, amount: d.amount }));
         }
         if (t === "payments" && currentRecord.invoice_id) recalculateInvoicePaymentStatus(currentRecord.invoice_id, actor);
+        if (t === "invoices" && String(d.status ?? currentRecord.status ?? "") === "Anulada") {
+          syncOrderStatusFromInvoice(Number(p[2]));
+          if (String(currentRecord.status || "") !== "Anulada") recordAudit(actor, "PUT", `invoices/${Number(p[2])}`, "Anular factura y liberar albaranes", JSON.stringify({ invoice_id: Number(p[2]), invoice_code: currentRecord.code }));
+          invalidateReadCache("delivery_notes");
+          invalidateReadCache("invoice_delivery_notes");
+          invalidateReadCache("orders");
+        }
         if (t === "invoices" && String(d.status ?? currentRecord.status ?? "Pendiente") !== "Anulada") {
           const totals = recalculateInvoiceTax(Number(p[2]), actor);
           if (totals) Object.assign(d, { amount: totals.amount, base_amount: totals.base_amount, vat_amount: totals.vat_amount, equivalence_surcharge_amount: totals.equivalence_surcharge_amount, equivalence_surcharge_breakdown: JSON.stringify(totals.equivalence_surcharge_breakdown || []) });

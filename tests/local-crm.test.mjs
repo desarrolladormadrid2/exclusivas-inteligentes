@@ -153,6 +153,55 @@ test("un pedido conserva sus líneas al convertirlo en albarán y factura", asyn
   await call(`/clients/${client.id}`, { method: "DELETE" });
 });
 
+test("anular una factura agrupada libera sus albaranes sin borrar el vínculo histórico y permite facturarlos otra vez", async () => {
+  const stamp = Date.now();
+  const client = (await call("/clients", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: `__TEST_LIBERAR_CLIENTE_${stamp}__` }) })).data;
+  const product = (await call("/products", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: `__TEST_LIBERAR_PRODUCTO_${stamp}__`, unit_price: 5, stock: 20 }) })).data;
+  const notes = [];
+  for (let index = 1; index <= 2; index++) {
+    const order = (await call("/orders", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: `__TEST_LIBERAR_${stamp}_${index}`, client_id: client.id, product_id: product.id, quantity: index, unit_price: 5, amount: index * 5, status: "Pendiente" }) })).data;
+    await call("/order_lines", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ order_id: order.id, product_id: product.id, quantity: index, unit_price: 5, amount: index * 5 }) });
+    const loaded = (await call("/orders")).data.find((row) => Number(row.id) === Number(order.id));
+    const deliveryNoteId = Number(loaded?.delivery_note_id || 0);
+    assert.ok(deliveryNoteId, "El pedido completo debe tener albarán");
+    notes.push({ id: deliveryNoteId, orderId: order.id });
+  }
+  const grouped = await call("/delivery_notes/bulk-invoice", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ delivery_note_ids: notes.map((note) => note.id) }) });
+  assert.equal(grouped.status, 201);
+  const payment = await call("/payments", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ invoice_id: grouped.data.id, amount: 1, method: "Transferencia" }) });
+  assert.equal(payment.status, 201);
+  const blocked = await call(`/invoices/${grouped.data.id}/annul-release-delivery-notes`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) });
+  assert.equal(blocked.status, 409);
+  assert.match(blocked.data.error, /Anula primero los cobros activos/);
+  await call(`/payments/${payment.data.id}`, { method: "DELETE" });
+  const annulled = await call(`/invoices/${grouped.data.id}/annul-release-delivery-notes`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) });
+  assert.equal(annulled.status, 200);
+  assert.equal(annulled.data.status, "Anulada");
+  assert.equal(annulled.data.released_delivery_notes.length, 2);
+  const historicalLine = (await call("/invoice_lines")).data.find((line) => Number(line.invoice_id) === Number(grouped.data.id));
+  assert.ok(historicalLine, "La factura anulada conserva sus líneas para auditoría");
+  const editAnnulledInvoice = await call(`/invoices/${grouped.data.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...grouped.data, notes: "Intento de modificación" }) });
+  assert.equal(editAnnulledInvoice.status, 409);
+  const addToAnnulled = await call("/invoice_lines", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ invoice_id: grouped.data.id, product_id: product.id, quantity: 1, unit_price: 5, amount: 5 }) });
+  assert.equal(addToAnnulled.status, 409);
+  const editAnnulled = await call(`/invoice_lines/${historicalLine.id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...historicalLine, quantity: 99 }) });
+  assert.equal(editAnnulled.status, 409);
+  const deleteAnnulled = await call(`/invoice_lines/${historicalLine.id}`, { method: "DELETE" });
+  assert.equal(deleteAnnulled.status, 409);
+  let invoices = (await call("/invoices")).data;
+  assert.equal(invoices.find((row) => Number(row.id) === Number(grouped.data.id)).status, "Anulada");
+  const regenerated = await call("/delivery_notes/bulk-invoice", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ delivery_note_ids: notes.map((note) => note.id) }) });
+  assert.equal(regenerated.status, 201, regenerated.data.error);
+  assert.notEqual(Number(regenerated.data.id), Number(grouped.data.id));
+  invoices = (await call("/invoices")).data;
+  assert.equal(invoices.find((row) => Number(row.id) === Number(grouped.data.id)).status, "Anulada");
+  assert.equal(invoices.find((row) => Number(row.id) === Number(regenerated.data.id)).status, "Pendiente");
+  for (const note of notes) {
+    const row = (await call("/delivery_notes")).data.find((item) => Number(item.id) === note.id);
+    assert.equal(row.invoice_code, regenerated.data.code);
+  }
+});
+
 test("las facturas añaden GTR una sola vez y mantienen el saldo tras un cobro parcial", async () => {
   const client = (await call("/clients", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "__TEST_CLIENTE_GTR__" }) })).data;
   const product = (await call("/products", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "__TEST_PRODUCTO_GTR__", unit_price: 100, vat: 21 }) })).data;
