@@ -2372,9 +2372,6 @@ function Contacts({ onNavigate }: { onNavigate: (section: string) => void }) {
           ]} />
           <div>
           <h2>Contactos</h2>
-          <p className="muted">
-            {loading ? "Cargando contactos…" : `${rows.length} contactos de clientes y proveedores.`}
-          </p>
           </div>
         </div>
         <ListFilterHeader className="contacts-filter-header" ariaLabel="Filtros de contactos">
