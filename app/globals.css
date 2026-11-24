@@ -8234,13 +8234,12 @@ body.reparto-modal-open {
   box-shadow: 0 2px 5px rgba(38, 52, 61, .12);
 }
 .crm-shell .contacts-toolbar {
-  position: sticky;
-  top: 74px;
-  z-index: 24;
-  padding: 8px 10px;
-  border: 1px solid #d1d5db;
-  background: #f4f6f7;
-  box-shadow: 0 2px 5px rgba(38, 52, 61, .12);
+  position: static;
+  padding: 0 0 8px;
+  border: 0;
+  border-bottom: 1px solid var(--ui-line);
+  background: transparent;
+  box-shadow: none;
 }
 .crm-shell .contacts-table-wrap,
 .crm-shell .contact-detail { border-radius: 0; }
