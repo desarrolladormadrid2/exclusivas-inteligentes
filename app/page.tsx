@@ -4316,9 +4316,11 @@ function GoodsReceiptForm({ lookups, actor, initialPurchaseOrderId = "", onIniti
   const clients = lookups.clients || [];
   const suppliers = lookups.suppliers || [];
   const warehouses = lookups.warehouses || [];
+  const isTestWarehouse = (warehouse: any) => /^(?:__(?:QA|TEST)(?:_|\b)|(?:QA|TEST|PRUEBA|DEMO|PW|E2E|SIM)[-_ ])/i.test(String(warehouse.name || "")) || /\b(?:QA|TEST|PRUEBA|DEMO|PW|E2E|SIM)(?:[-_ ]|\b)/i.test(String(warehouse.name || ""));
+  const availableWarehouses = warehouses.filter((warehouse: any) => !isTestWarehouse(warehouse));
   useEffect(() => {
-    if (!header.warehouse_id && warehouses.length === 1) setHeader((current) => current.warehouse_id ? current : { ...current, warehouse_id: String(warehouses[0].id) });
-  }, [header.warehouse_id, warehouses]);
+    if (!header.warehouse_id && availableWarehouses.length === 1) setHeader((current) => current.warehouse_id ? current : { ...current, warehouse_id: String(availableWarehouses[0].id) });
+  }, [header.warehouse_id, availableWarehouses]);
   const purchaseOrders = (lookups.purchase_orders || []).filter((item: any) => !["Recibido", "Recibida", "Cancelado", "Cancelada"].includes(String(item.status || "")) && item.receipt_validation_status !== "Pendiente" && (!header.supplier_id || Number(item.supplier_id) === Number(header.supplier_id)));
   const matchingProducts = productSearch.trim()
     ? products.filter((item: any) => `${item.name || ""} ${item.sku || ""} ${item.brand || ""} ${item.category || ""}`.toLowerCase().includes(productSearch.trim().toLowerCase())).slice(0, 8)
@@ -4392,7 +4394,9 @@ function GoodsReceiptForm({ lookups, actor, initialPurchaseOrderId = "", onIniti
       const response = await fetch(`/api/purchase_orders/${purchaseOrderId}/detail`);
       const purchase = await response.json();
       if (!response.ok) throw new Error(purchase.error || "No se pudo cargar el pedido vinculado.");
-      setHeader((current) => ({ ...current, supplier_id: String(purchase.supplier_id || current.supplier_id), purchase_order_id: purchaseOrderId, warehouse_id: String(purchase.delivery_warehouse_id || current.warehouse_id) }));
+      const purchaseWarehouseId = String(purchase.delivery_warehouse_id || "");
+      const purchaseWarehouseIsAvailable = availableWarehouses.some((warehouse: any) => String(warehouse.id) === purchaseWarehouseId);
+      setHeader((current) => ({ ...current, supplier_id: String(purchase.supplier_id || current.supplier_id), purchase_order_id: purchaseOrderId, warehouse_id: purchaseWarehouseIsAvailable ? purchaseWarehouseId : current.warehouse_id }));
       const remainingLines = (purchase.lines || []).filter((line: any) => Number(line.remaining_quantity ?? line.quantity) > 0);
       if (!remainingLines.length) { setLines([]); setMessage(`${purchase.code}: no quedan cantidades pendientes de recibir.`); return; }
       setLines(remainingLines.map((line: any) => {
@@ -4469,7 +4473,7 @@ function GoodsReceiptForm({ lookups, actor, initialPurchaseOrderId = "", onIniti
       {header.counterparty_type === "Cliente" ? <label>Cliente *<select ref={counterpartySelectRef} required value={header.client_id} onChange={(event) => setHeader({ ...header, client_id: event.target.value })}><option value="">Seleccionar cliente…</option>{clients.map((item: any) => <option key={item.id} value={item.id}>{item.name}{item.city ? ` · ${item.city}` : ""}</option>)}</select></label> : <label>Proveedor *<select ref={counterpartySelectRef} required value={header.supplier_id} onChange={(event) => setHeader({ ...header, supplier_id: event.target.value, purchase_order_id: "" })}><option value="">Seleccionar proveedor…</option>{suppliers.map((item: any) => <option key={item.id} value={item.id}>{item.name}{item.external_code ? ` · ${item.external_code}` : ""}</option>)}</select></label>}
       {header.counterparty_type === "Proveedor" && <label>Pedido de compra relacionado<select value={header.purchase_order_id} onChange={(event) => void loadPurchaseOrder(event.target.value)}><option value="">Sin pedido de compra</option>{purchaseOrders.map((item: any) => <option key={item.id} value={item.id}>{item.code} · {item.status}</option>)}</select></label>}
       {header.counterparty_type === "Proveedor" && <label>Factura de compra relacionada<select value={header.purchase_invoice_id} onChange={(event) => setHeader({ ...header, purchase_invoice_id: event.target.value })}><option value="">Sin factura vinculada</option>{(lookups.invoices || []).map((item: any) => <option key={item.id} value={item.id}>{item.code} · {item.status || "Pendiente"}</option>)}</select></label>}
-      <label>Almacén de destino *<select ref={warehouseSelectRef} required aria-invalid={Boolean(message && !header.warehouse_id)} value={header.warehouse_id} onChange={(event) => { setHeader({ ...header, warehouse_id: event.target.value }); setMessage(""); }}><option value="">Seleccionar almacén…</option>{warehouses.map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+      <label>Almacén de destino *<select ref={warehouseSelectRef} required aria-invalid={Boolean(message && !header.warehouse_id)} value={header.warehouse_id} onChange={(event) => { setHeader({ ...header, warehouse_id: event.target.value }); setMessage(""); }}><option value="">Seleccionar almacén…</option>{availableWarehouses.map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       <label>Fecha de recepción *<input required type="date" value={header.receipt_date} onChange={(event) => setHeader({ ...header, receipt_date: event.target.value })} /></label>
       <details className="goods-receipt-options"><summary>Opciones avanzadas</summary><label className="goods-receipt-stock-toggle"><span>Inventario</span><span><input type="checkbox" checked={Boolean(header.stock_applied)} onChange={(event) => setHeader({ ...header, stock_applied: event.target.checked })} /> Actualizar stock al validar</span><small>Al validar se suman únicamente las unidades correctas y no dañadas.</small></label></details>
       <label className="goods-receipt-wide">Notas generales<textarea value={header.notes} onChange={(event) => setHeader({ ...header, notes: event.target.value })} placeholder="Observaciones de la recepción…" /></label>
