@@ -8036,6 +8036,8 @@ body.reparto-modal-open {
   .crm-shell .contacts-table-wide .contacts-table :is(th, td).contact-column-phone { width: 13%; }
   .crm-shell .contacts-table-wide .contacts-table :is(th, td).contact-column-type { width: 10%; }
   .crm-shell .contacts-table-wide .contacts-table :is(th, td).contact-column-actions { width: 16%; }
+  .crm-shell .contacts-table td.contact-column-person,
+  .crm-shell .contacts-table td.contact-column-email { white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
 
   .crm-shell .table-scroll th,
   .crm-shell .history-scroll th,
