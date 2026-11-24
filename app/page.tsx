@@ -7,6 +7,7 @@ import QRCode from "qrcode";
 import JsBarcode from "jsbarcode";
 import BarcodeScanner from "./components/BarcodeScanner";
 import { ListFilterHeader, ListTableShell } from "./components/ListPrimitives";
+import HeaderViewControl from "./components/HeaderViewControl";
 import SupplierPurchasingManager from "./SupplierPurchasingManager";
 import { APP_VERSION } from "./version";
 
@@ -19,18 +20,6 @@ declare global {
 const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : "Local";
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
-
-function HeaderViewControl({ label, options }: { label: string; options: Array<{ label: string; checked: boolean; onChange: () => void }> }) {
-  const [open, setOpen] = useState(false);
-  return <div className="section-view-control header-columns-accordion">
-    <button type="button" className="columns-toggle columns-icon-toggle" aria-label={`Configurar vista de ${label}`} title={`Configurar vista de ${label}`} aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" /><path d="M9.15 4.5v15M14.85 4.5v15" /></svg>
-    </button>
-    {open && <div className="columns-options" role="group" aria-label={`Opciones de vista de ${label}`}>
-      {options.map((option) => <label key={option.label}><input type="checkbox" checked={option.checked} onChange={option.onChange} />{option.label}</label>)}
-    </div>}
-  </div>;
-}
 
 const WEEKDAY_OPTIONS = [
   { value: "1", label: "Lunes" },
@@ -2237,6 +2226,7 @@ function Contacts({ onNavigate }: { onNavigate: (section: string) => void }) {
   const [editingDraft, setEditingDraft] = useState<any>({});
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [visibleContactColumns, setVisibleContactColumns] = useState({ email: true, phone: true, type: true });
   useEffect(() => {
     setLoading(true);
     const loadContacts = async () => {
@@ -2374,12 +2364,19 @@ function Contacts({ onNavigate }: { onNavigate: (section: string) => void }) {
   return (
     <div className="contacts-page">
       <div className="manager-head contacts-toolbar">
-        <div>
+        <div className="manager-section-title">
+          <HeaderViewControl label="Contactos" options={[
+            { label: "Correo", checked: visibleContactColumns.email, onChange: () => setVisibleContactColumns((current) => ({ ...current, email: !current.email })) },
+            { label: "Teléfono", checked: visibleContactColumns.phone, onChange: () => setVisibleContactColumns((current) => ({ ...current, phone: !current.phone })) },
+            { label: "Tipo", checked: visibleContactColumns.type, onChange: () => setVisibleContactColumns((current) => ({ ...current, type: !current.type })) },
+          ]} />
+          <div>
           <p className="eyebrow">RELACIONES COMERCIALES</p>
           <h2>Contactos</h2>
           <p className="muted">
             {loading ? "Cargando contactos…" : `${rows.length} contactos de clientes y proveedores.`}
           </p>
+          </div>
         </div>
         <ListFilterHeader className="contacts-filter-header" ariaLabel="Filtros de contactos">
           <label className="contacts-date-filter">
@@ -2424,15 +2421,15 @@ function Contacts({ onNavigate }: { onNavigate: (section: string) => void }) {
             <thead>
               <tr>
                 <th>Empresa</th>
-                <th>Correo</th>
-                <th>Teléfono</th>
-                <th>Tipo</th>
+                {visibleContactColumns.email && <th>Correo</th>}
+                {visibleContactColumns.phone && <th>Teléfono</th>}
+                {visibleContactColumns.type && <th>Tipo</th>}
                 <th>Acciones</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={5}><div className="data-loading" role="status"><span className="loading-spinner" aria-hidden="true" /> Cargando contactos…</div></td></tr>
+                <tr><td colSpan={2 + Number(visibleContactColumns.email) + Number(visibleContactColumns.phone) + Number(visibleContactColumns.type)}><div className="data-loading" role="status"><span className="loading-spinner" aria-hidden="true" /> Cargando contactos…</div></td></tr>
               ) : filtered.map((row) => (
                 <tr
                   key={row.id}
@@ -2443,9 +2440,9 @@ function Contacts({ onNavigate }: { onNavigate: (section: string) => void }) {
                     <span className="contact-avatar">{row.name?.slice(0, 1).toUpperCase()}</span>
                     <b>{row.name}</b>
                   </td>
-                  <td>{row.email || "—"}</td>
-                  <td>{row.phone || "—"}</td>
-                  <td>
+                  {visibleContactColumns.email && <td>{row.email || "—"}</td>}
+                  {visibleContactColumns.phone && <td>{row.phone || "—"}</td>}
+                  {visibleContactColumns.type && <td>
                     <span
                       className={
                         row.type === "Proveedor"
@@ -2455,7 +2452,7 @@ function Contacts({ onNavigate }: { onNavigate: (section: string) => void }) {
                     >
                       {row.type}
                     </span>
-                  </td>
+                  </td>}
                   <td className="contacts-actions">
                     <button className="contact-action" onClick={(event) => { event.stopPropagation(); beginEdit(row); }}>Editar</button>
                     <button
@@ -10876,6 +10873,7 @@ function ScheduledTasks() {
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [visibleTaskColumns, setVisibleTaskColumns] = useState({ action: true, type: true, nextRun: true, status: true, result: true });
   const [form, setForm] = useState<any>({
     title: "",
     action_text: "",
@@ -10946,13 +10944,22 @@ function ScheduledTasks() {
   return (
     <div className="scheduled-page">
       <div className="manager-head">
-        <div>
+        <div className="manager-section-title">
+          <HeaderViewControl label="Tareas programadas" options={[
+            { label: "Acción", checked: visibleTaskColumns.action, onChange: () => setVisibleTaskColumns((current) => ({ ...current, action: !current.action })) },
+            { label: "Tipo", checked: visibleTaskColumns.type, onChange: () => setVisibleTaskColumns((current) => ({ ...current, type: !current.type })) },
+            { label: "Próxima ejecución", checked: visibleTaskColumns.nextRun, onChange: () => setVisibleTaskColumns((current) => ({ ...current, nextRun: !current.nextRun })) },
+            { label: "Estado", checked: visibleTaskColumns.status, onChange: () => setVisibleTaskColumns((current) => ({ ...current, status: !current.status })) },
+            { label: "Último resultado", checked: visibleTaskColumns.result, onChange: () => setVisibleTaskColumns((current) => ({ ...current, result: !current.result })) },
+          ]} />
+          <div>
           <p className="eyebrow">AUTOMATIZACIÓN LOCAL</p>
           <h2>Tareas programadas</h2>
           <p className="muted">
             Acciones únicas o recurrentes que ejecuta el asistente contra el
             CRM.
           </p>
+          </div>
         </div>
         <span className="db-badge">● Motor activo</span>
       </div>
@@ -11021,11 +11028,11 @@ function ScheduledTasks() {
             <thead>
               <tr>
                 <th>Tarea</th>
-                <th>Acción</th>
-                <th>Tipo</th>
-                <th>Próxima ejecución</th>
-                <th>Estado</th>
-                <th>Último resultado</th>
+                {visibleTaskColumns.action && <th>Acción</th>}
+                {visibleTaskColumns.type && <th>Tipo</th>}
+                {visibleTaskColumns.nextRun && <th>Próxima ejecución</th>}
+                {visibleTaskColumns.status && <th>Estado</th>}
+                {visibleTaskColumns.result && <th>Último resultado</th>}
                 <th>Acciones</th>
               </tr>
             </thead>
@@ -11039,24 +11046,24 @@ function ScheduledTasks() {
                         Creada por {row.created_by}
                       </small>
                     </td>
-                    <td>{row.action_text}</td>
-                    <td>
+                    {visibleTaskColumns.action && <td>{row.action_text}</td>}
+                    {visibleTaskColumns.type && <td>
                       {row.schedule_type}
                       {row.recurrence ? ` · ${row.recurrence}` : ""}
-                    </td>
-                    <td>
+                    </td>}
+                    {visibleTaskColumns.nextRun && <td>
                       {row.next_run
                         ? new Date(row.next_run).toLocaleString("es-ES")
                         : "—"}
-                    </td>
-                    <td>
+                    </td>}
+                    {visibleTaskColumns.status && <td>
                       <span
                         className={`task-status task-${String(row.status).toLowerCase()}`}
                       >
                         {row.status}
                       </span>
-                    </td>
-                    <td>{row.last_result || "Pendiente"}</td>
+                    </td>}
+                    {visibleTaskColumns.result && <td>{row.last_result || "Pendiente"}</td>}
                     <td>
                       <button className="row-action" onClick={() => void runNow(row)} disabled={row.status !== "Activa"}>
                         Ejecutar ahora
@@ -11078,7 +11085,7 @@ function ScheduledTasks() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={7}>No hay tareas programadas todavía.</td>
+                  <td colSpan={2 + Object.values(visibleTaskColumns).filter(Boolean).length}>No hay tareas programadas todavía.</td>
                 </tr>
               )}
             </tbody>

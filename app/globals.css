@@ -7695,7 +7695,6 @@ body.reparto-modal-open {
 .supplier-manager-head { display: grid; grid-template-columns: minmax(180px, auto) minmax(0, 1fr) auto; align-items: center; gap: 10px; margin-bottom: 0; }
 .supplier-manager-title .eyebrow { margin-bottom: 2px; }
 .supplier-manager-title h2 { margin: 0; }
-.supplier-manager-title .muted { display: none; }
 .supplier-manager-actions { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .supplier-manager-head > .supplier-purchase-tabs { min-width: 0; justify-content: center; border-bottom: 0; }
 
