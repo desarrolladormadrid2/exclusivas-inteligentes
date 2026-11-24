@@ -3690,6 +3690,7 @@ footer span {
 .shared-list-filter-header:not(.table-tools) > label { display:grid; gap:4px; color:#607781; font-size:10px; font-weight:700; }
 .shared-list-filter-header:not(.table-tools) :is(input,select,button) { box-sizing:border-box; height:34px; min-height:34px; border-radius:0; }
 .shared-list-filter-header :is(input,select) { border-color:#cbd7dc; }
+.shared-list-filter-header.contacts-filter-header > .button.primary { background:var(--red); border-color:var(--red); color:#fff; }
 .shared-list-table-shell { box-sizing:border-box; width:100%; min-width:0; max-width:100%; }
 .shared-list-table-shell > table { border-collapse:collapse; }
 .shared-list-table-shell th,
