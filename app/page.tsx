@@ -2227,6 +2227,13 @@ function Contacts({ onNavigate }: { onNavigate: (section: string) => void }) {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [visibleContactColumns, setVisibleContactColumns] = useState({ contact: true, email: true, phone: true, type: true });
+  function getPeople(row: any) {
+    try {
+      const people = JSON.parse(String(row.contacts_json || "[]"));
+      if (Array.isArray(people) && people.length) return people.map((person: any) => ({ name: String(person?.name || ""), email: String(person?.email || ""), phone: String(person?.phone || "") }));
+    } catch {}
+    return row.contact || row.email || row.phone ? [{ name: String(row.contact || ""), email: String(row.email || ""), phone: String(row.phone || "") }] : [];
+  }
   useEffect(() => {
     setLoading(true);
     const loadContacts = async () => {
@@ -2237,8 +2244,8 @@ function Contacts({ onNavigate }: { onNavigate: (section: string) => void }) {
         ]);
         const clients = clientsResponse.ok ? await clientsResponse.json() : [];
         const suppliers = suppliersResponse.ok ? await suppliersResponse.json() : [];
-        const clientRows = (Array.isArray(clients) ? clients : []).map((client: any) => ({ ...client, id: "cliente-" + client.id, name: client.name, email: client.email || "", phone: client.phone || "", contact: client.contact || "", address: client.address || "", city: client.city || "", type: "Cliente", invoices: [], payments: [] }));
-        const supplierRows = (Array.isArray(suppliers) ? suppliers : []).map((supplier: any) => ({ ...supplier, id: "proveedor-" + supplier.id, name: supplier.name, email: supplier.email || "", phone: supplier.phone || "", contact: supplier.contact || "", address: supplier.address || "", city: supplier.city || "", type: "Proveedor", purchases: [] }));
+        const clientRows = (Array.isArray(clients) ? clients : []).map((client: any) => ({ ...client, id: "cliente-" + client.id, name: client.name, email: client.email || "", phone: client.phone || "", contact: client.contact || "", contacts: getPeople(client), address: client.address || "", city: client.city || "", type: "Cliente", invoices: [], payments: [] }));
+        const supplierRows = (Array.isArray(suppliers) ? suppliers : []).map((supplier: any) => ({ ...supplier, id: "proveedor-" + supplier.id, name: supplier.name, email: supplier.email || "", phone: supplier.phone || "", contact: supplier.contact || "", contacts: getPeople(supplier), address: supplier.address || "", city: supplier.city || "", type: "Proveedor", purchases: [] }));
         setRows([...clientRows, ...supplierRows]);
         setLoading(false);
         const [invoicesResult, paymentsResult, purchasesResult] = await Promise.allSettled([
@@ -2303,7 +2310,7 @@ function Contacts({ onNavigate }: { onNavigate: (section: string) => void }) {
     };
   });
   const filtered = periodRows.filter((row) =>
-    (row.name + " " + row.contact + " " + row.email + " " + row.phone + " " + row.type)
+    (row.name + " " + (row.contacts || []).map((person: any) => `${person.name} ${person.email} ${person.phone}`).join(" ") + " " + row.email + " " + row.phone + " " + row.type)
       .toLocaleLowerCase()
       .includes(query.toLocaleLowerCase()),
   );
@@ -2314,31 +2321,29 @@ function Contacts({ onNavigate }: { onNavigate: (section: string) => void }) {
       type: row.type || "Contacto",
       external_code: row.external_code || "",
       tax_id: row.tax_id || "",
-      email: row.email || "",
-      phone: row.phone || "",
+      contacts: row.contacts?.length ? row.contacts.map((person: any) => ({ ...person })) : [{ name: "", email: "", phone: "" }],
       contact: row.contact || "",
       address: row.address || "",
       city: row.city || "",
       payment_terms: row.payment_terms || "",
       active: Number(row.active ?? 1),
-      source_balance: row.balance || 0,
-      source_activity: row.activity || 0,
-      source_created_at: row.created_at || "",
     });
   }
   async function saveEdit(row: any) {
     const resource = row.type === "Cliente" ? "clients" : "suppliers";
     const id = row.id.split("-").slice(1).join("-");
-    const { name, external_code, tax_id, email, phone, contact, address, city, payment_terms, active } = editingDraft;
+    const { name, external_code, tax_id, address, city, payment_terms, active } = editingDraft;
+    const contacts = (editingDraft.contacts || []).map((person: any) => ({ name: String(person.name || "").trim(), email: String(person.email || "").trim(), phone: String(person.phone || "").trim() })).filter((person: any) => person.name || person.email || person.phone);
+    const primaryContact = contacts[0] || { name: "", email: "", phone: "" };
     const response = await fetch(`/api/${resource}/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", "X-Actor": "Contactos" },
-      body: JSON.stringify({ name, external_code, tax_id, email, phone, contact, address, city, payment_terms, active }),
+      body: JSON.stringify({ name, external_code, tax_id, email: primaryContact.email, phone: primaryContact.phone, contact: primaryContact.name, contacts_json: JSON.stringify(contacts), address, city, payment_terms, active }),
     });
     if (response.ok) {
       setRows((current) =>
         current.map((item) =>
-          item.id === row.id ? { ...item, ...editingDraft } : item,
+          item.id === row.id ? { ...item, ...editingDraft, contacts, contact: primaryContact.name, email: primaryContact.email, phone: primaryContact.phone } : item,
         ),
       );
       setEditingId("");
@@ -2438,9 +2443,9 @@ function Contacts({ onNavigate }: { onNavigate: (section: string) => void }) {
                     <span className="contact-avatar">{row.name?.slice(0, 1).toUpperCase()}</span>
                     <b>{row.name}</b>
                   </td>
-                  {visibleContactColumns.contact && <td className="contact-column-person" data-label="Persona de contacto">{row.contact || "—"}</td>}
-                  {visibleContactColumns.email && <td className="contact-column-email" data-label="Correo">{row.email || "—"}</td>}
-                  {visibleContactColumns.phone && <td className="contact-column-phone" data-label="Teléfono">{row.phone || "—"}</td>}
+                  {visibleContactColumns.contact && <td className="contact-column-person" data-label="Persona de contacto">{(row.contacts || []).map((person: any) => person.name).filter(Boolean).join(" · ") || "—"}</td>}
+                  {visibleContactColumns.email && <td className="contact-column-email" data-label="Correo">{(row.contacts || []).map((person: any) => person.email).filter(Boolean).join(" · ") || row.email || "—"}</td>}
+                  {visibleContactColumns.phone && <td className="contact-column-phone" data-label="Teléfono">{(row.contacts || []).map((person: any) => person.phone).filter(Boolean).join(" · ") || row.phone || "—"}</td>}
                   {visibleContactColumns.type && <td className="contact-column-type" data-label="Tipo">
                     <span
                       className={
@@ -2486,15 +2491,21 @@ function Contacts({ onNavigate }: { onNavigate: (section: string) => void }) {
               <label>Empresa / nombre *<input required value={editingDraft.name || ""} onChange={(event) => setEditingDraft({ ...editingDraft, name: event.target.value })} /></label>
               <label>Código externo<input value={editingDraft.external_code || ""} onChange={(event) => setEditingDraft({ ...editingDraft, external_code: event.target.value })} /></label>
               <label>NIF / CIF<input value={editingDraft.tax_id || ""} onChange={(event) => setEditingDraft({ ...editingDraft, tax_id: event.target.value })} /></label>
-              <label>Persona de contacto<input value={editingDraft.contact || ""} onChange={(event) => setEditingDraft({ ...editingDraft, contact: event.target.value })} /></label>
-              <label>Email<input type="email" value={editingDraft.email || ""} onChange={(event) => setEditingDraft({ ...editingDraft, email: event.target.value })} /></label>
-              <label>Teléfono<input value={editingDraft.phone || ""} onChange={(event) => setEditingDraft({ ...editingDraft, phone: event.target.value })} /></label>
+              <fieldset className="contact-people-editor contact-edit-wide">
+                <legend>Personas de contacto</legend>
+                {(editingDraft.contacts || []).map((person: any, index: number) => <div className="contact-person-edit-row" key={index}>
+                  <label>Nombre<input value={person.name || ""} onChange={(event) => setEditingDraft({ ...editingDraft, contacts: editingDraft.contacts.map((item: any, itemIndex: number) => itemIndex === index ? { ...item, name: event.target.value } : item) })} /></label>
+                  <label>Email<input type="email" value={person.email || ""} onChange={(event) => setEditingDraft({ ...editingDraft, contacts: editingDraft.contacts.map((item: any, itemIndex: number) => itemIndex === index ? { ...item, email: event.target.value } : item) })} /></label>
+                  <label>Teléfono<input value={person.phone || ""} onChange={(event) => setEditingDraft({ ...editingDraft, contacts: editingDraft.contacts.map((item: any, itemIndex: number) => itemIndex === index ? { ...item, phone: event.target.value } : item) })} /></label>
+                  <button type="button" className="contact-person-remove" aria-label={`Quitar persona ${index + 1}`} onClick={() => setEditingDraft({ ...editingDraft, contacts: editingDraft.contacts.filter((_: any, itemIndex: number) => itemIndex !== index) })}>Quitar</button>
+                </div>)}
+                <button type="button" className="button secondary contact-person-add" onClick={() => setEditingDraft({ ...editingDraft, contacts: [...(editingDraft.contacts || []), { name: "", email: "", phone: "" }] })}>+ Añadir persona</button>
+              </fieldset>
               <label>Ciudad<input value={editingDraft.city || ""} onChange={(event) => setEditingDraft({ ...editingDraft, city: event.target.value })} /></label>
               <label>Condiciones de pago<input value={editingDraft.payment_terms || ""} onChange={(event) => setEditingDraft({ ...editingDraft, payment_terms: event.target.value })} /></label>
               <label className="contact-edit-wide">Dirección<textarea rows={3} value={editingDraft.address || ""} onChange={(event) => setEditingDraft({ ...editingDraft, address: event.target.value })} /></label>
               <label>Estado<select value={String(editingDraft.active ?? 1)} onChange={(event) => setEditingDraft({ ...editingDraft, active: Number(event.target.value) })}><option value="1">Activo</option><option value="0">Baja</option></select></label>
             </div>
-            <div className="contact-source-summary"><span>Saldo origen <b>{Number(editingDraft.source_balance || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</b></span><span>Actividad origen <b>{Number(editingDraft.source_activity || 0)} movimiento{Number(editingDraft.source_activity || 0) === 1 ? "" : "s"}</b></span><span>Alta origen <b>{editingDraft.source_created_at || "—"}</b></span></div>
             <footer className="preview-actions"><button type="button" className="button secondary" onClick={() => setEditingId("")}>Cancelar</button><button type="submit" className="button primary">Guardar cambios</button></footer>
           </form>
         </div>
@@ -4291,6 +4302,8 @@ function PendingSupplierReceipts({ refreshSignal, onReceive, onValidate }: { ref
 
 function GoodsReceiptForm({ lookups, actor, initialPurchaseOrderId = "", onInitialPurchaseOrderConsumed, onCreated }: { lookups: any; actor: string; initialPurchaseOrderId?: string; onInitialPurchaseOrderConsumed?: () => void; onCreated: (receipt: any) => void }) {
   const [header, setHeader] = useState({ code: `ENT-${new Date().getFullYear()}-${String(Date.now()).slice(-7)}`, counterparty_type: "Proveedor", client_id: "", supplier_id: "", purchase_order_id: "", purchase_invoice_id: "", warehouse_id: "", receipt_date: tabletTodayInput(), validation_status: "Pendiente", validated_by: "", stock_applied: true, notes: "" });
+  const counterpartySelectRef = useRef<HTMLSelectElement | null>(null);
+  const warehouseSelectRef = useRef<HTMLSelectElement | null>(null);
   const [productSearch, setProductSearch] = useState("");
   const [lines, setLines] = useState<any[]>([]);
   const [lineEditor, setLineEditor] = useState<{ index: number; draft: any } | null>(null);
@@ -4303,6 +4316,9 @@ function GoodsReceiptForm({ lookups, actor, initialPurchaseOrderId = "", onIniti
   const clients = lookups.clients || [];
   const suppliers = lookups.suppliers || [];
   const warehouses = lookups.warehouses || [];
+  useEffect(() => {
+    if (!header.warehouse_id && warehouses.length === 1) setHeader((current) => current.warehouse_id ? current : { ...current, warehouse_id: String(warehouses[0].id) });
+  }, [header.warehouse_id, warehouses]);
   const purchaseOrders = (lookups.purchase_orders || []).filter((item: any) => !["Recibido", "Recibida", "Cancelado", "Cancelada"].includes(String(item.status || "")) && item.receipt_validation_status !== "Pendiente" && (!header.supplier_id || Number(item.supplier_id) === Number(header.supplier_id)));
   const matchingProducts = productSearch.trim()
     ? products.filter((item: any) => `${item.name || ""} ${item.sku || ""} ${item.brand || ""} ${item.category || ""}`.toLowerCase().includes(productSearch.trim().toLowerCase())).slice(0, 8)
@@ -4405,8 +4421,19 @@ function GoodsReceiptForm({ lookups, actor, initialPurchaseOrderId = "", onIniti
   }
   async function receive(event: any, validate = false) {
     event.preventDefault();
-    const counterpartyLabel = header.counterparty_type === "Cliente" ? "cliente" : "proveedor";
-    if (!(header.counterparty_type === "Cliente" ? header.client_id : header.supplier_id) || !header.warehouse_id) { setMessage(`Selecciona el ${counterpartyLabel} y el almacén de destino.`); return; }
+    const missingCounterparty = !(header.counterparty_type === "Cliente" ? header.client_id : header.supplier_id);
+    if (missingCounterparty) {
+      setMessage(`Selecciona el ${header.counterparty_type === "Cliente" ? "cliente" : "proveedor"} de la entrada.`);
+      counterpartySelectRef.current?.focus();
+      counterpartySelectRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+      return;
+    }
+    if (!header.warehouse_id) {
+      setMessage("Elige el almacén de destino para poder sumar las unidades al stock.");
+      warehouseSelectRef.current?.focus();
+      warehouseSelectRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+      return;
+    }
     if (!lines.length) { setMessage("Busca y añade al menos un producto."); return; }
     if (validate && lines.some((line) => !line.reviewed)) { setMessage("Revisa cada producto con “Validar” o registra su incidencia antes de sumar el stock."); return; }
     setSaving(true); setMessage("");
@@ -4439,10 +4466,10 @@ function GoodsReceiptForm({ lookups, actor, initialPurchaseOrderId = "", onIniti
     <div className="goods-receipt-header-grid">
       <label>Código de entrada<input value={header.code} onChange={(event) => setHeader({ ...header, code: event.target.value })} /></label>
       <label>Origen de la entrada *<select required value={header.counterparty_type} onChange={(event) => setHeader({ ...header, counterparty_type: event.target.value, client_id: "", supplier_id: "", purchase_order_id: "", purchase_invoice_id: "" })}><option value="Proveedor">Proveedor</option><option value="Cliente">Cliente</option></select></label>
-      {header.counterparty_type === "Cliente" ? <label>Cliente *<select required value={header.client_id} onChange={(event) => setHeader({ ...header, client_id: event.target.value })}><option value="">Seleccionar cliente…</option>{clients.map((item: any) => <option key={item.id} value={item.id}>{item.name}{item.city ? ` · ${item.city}` : ""}</option>)}</select></label> : <label>Proveedor *<select required value={header.supplier_id} onChange={(event) => setHeader({ ...header, supplier_id: event.target.value, purchase_order_id: "" })}><option value="">Seleccionar proveedor…</option>{suppliers.map((item: any) => <option key={item.id} value={item.id}>{item.name}{item.external_code ? ` · ${item.external_code}` : ""}</option>)}</select></label>}
+      {header.counterparty_type === "Cliente" ? <label>Cliente *<select ref={counterpartySelectRef} required value={header.client_id} onChange={(event) => setHeader({ ...header, client_id: event.target.value })}><option value="">Seleccionar cliente…</option>{clients.map((item: any) => <option key={item.id} value={item.id}>{item.name}{item.city ? ` · ${item.city}` : ""}</option>)}</select></label> : <label>Proveedor *<select ref={counterpartySelectRef} required value={header.supplier_id} onChange={(event) => setHeader({ ...header, supplier_id: event.target.value, purchase_order_id: "" })}><option value="">Seleccionar proveedor…</option>{suppliers.map((item: any) => <option key={item.id} value={item.id}>{item.name}{item.external_code ? ` · ${item.external_code}` : ""}</option>)}</select></label>}
       {header.counterparty_type === "Proveedor" && <label>Pedido de compra relacionado<select value={header.purchase_order_id} onChange={(event) => void loadPurchaseOrder(event.target.value)}><option value="">Sin pedido de compra</option>{purchaseOrders.map((item: any) => <option key={item.id} value={item.id}>{item.code} · {item.status}</option>)}</select></label>}
       {header.counterparty_type === "Proveedor" && <label>Factura de compra relacionada<select value={header.purchase_invoice_id} onChange={(event) => setHeader({ ...header, purchase_invoice_id: event.target.value })}><option value="">Sin factura vinculada</option>{(lookups.invoices || []).map((item: any) => <option key={item.id} value={item.id}>{item.code} · {item.status || "Pendiente"}</option>)}</select></label>}
-      <label>Almacén de destino *<select required value={header.warehouse_id} onChange={(event) => setHeader({ ...header, warehouse_id: event.target.value })}><option value="">Seleccionar almacén…</option>{warehouses.map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+      <label>Almacén de destino *<select ref={warehouseSelectRef} required aria-invalid={Boolean(message && !header.warehouse_id)} value={header.warehouse_id} onChange={(event) => { setHeader({ ...header, warehouse_id: event.target.value }); setMessage(""); }}><option value="">Seleccionar almacén…</option>{warehouses.map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       <label>Fecha de recepción *<input required type="date" value={header.receipt_date} onChange={(event) => setHeader({ ...header, receipt_date: event.target.value })} /></label>
       <details className="goods-receipt-options"><summary>Opciones avanzadas</summary><label className="goods-receipt-stock-toggle"><span>Inventario</span><span><input type="checkbox" checked={Boolean(header.stock_applied)} onChange={(event) => setHeader({ ...header, stock_applied: event.target.checked })} /> Actualizar stock al validar</span><small>Al validar se suman únicamente las unidades correctas y no dañadas.</small></label></details>
       <label className="goods-receipt-wide">Notas generales<textarea value={header.notes} onChange={(event) => setHeader({ ...header, notes: event.target.value })} placeholder="Observaciones de la recepción…" /></label>

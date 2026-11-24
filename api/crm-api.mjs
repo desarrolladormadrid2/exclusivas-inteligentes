@@ -773,8 +773,8 @@ if (remoteMode && process.env.RUN_REMOTE_MIGRATIONS === "1") {
   }
 }
 for (const [table, columns] of [
-  ["clients", ["city TEXT", "tax_id TEXT", "weekly_closed_day TEXT", "invoice_delivery_method TEXT", "equivalence_surcharge_enabled INTEGER DEFAULT 0", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
-  ["suppliers", ["active INTEGER DEFAULT 1", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
+  ["clients", ["city TEXT", "tax_id TEXT", "contact TEXT", "contacts_json TEXT", "payment_terms TEXT", "weekly_closed_day TEXT", "invoice_delivery_method TEXT", "equivalence_surcharge_enabled INTEGER DEFAULT 0", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
+  ["suppliers", ["active INTEGER DEFAULT 1", "contacts_json TEXT", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
   ["orders", ["unit_price REAL DEFAULT 0", "discount REAL DEFAULT 0", "vat REAL DEFAULT 21", "notes TEXT", "loading_notes TEXT", "driver_notes TEXT", "delivery_date TEXT", "address TEXT", "collection_point_id INTEGER", "prepared_by TEXT", "shipped_by TEXT", "delivered_by TEXT", "preparation_date TEXT", "shipping_date TEXT", "delivery_city TEXT", "urgent INTEGER DEFAULT 0", "created_by TEXT", "stock_alert INTEGER DEFAULT 0", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
   ["products", ["sku TEXT", "cost_price REAL DEFAULT 0", "category TEXT", "format TEXT", "unit TEXT", "vat REAL DEFAULT 21", "stock_reserved REAL DEFAULT 0", "active INTEGER DEFAULT 1", "product_status TEXT DEFAULT 'Activo'", "min_stock REAL DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
   ["delivery_notes", ["created_at TEXT", "updated_at TEXT", "deleted INTEGER DEFAULT 0"]],
@@ -786,8 +786,8 @@ for (const [table, columns] of [
 }
 if (remoteMode && process.env.RUN_REMOTE_MIGRATIONS === "1") {
   for (const [table, columns] of [
-    ["clients", ["city TEXT", "tax_id TEXT", "weekly_closed_day TEXT", "invoice_delivery_method TEXT", "equivalence_surcharge_enabled INTEGER DEFAULT 0", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
-    ["suppliers", ["active INTEGER DEFAULT 1", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
+    ["clients", ["city TEXT", "tax_id TEXT", "contact TEXT", "contacts_json TEXT", "payment_terms TEXT", "weekly_closed_day TEXT", "invoice_delivery_method TEXT", "equivalence_surcharge_enabled INTEGER DEFAULT 0", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
+    ["suppliers", ["active INTEGER DEFAULT 1", "contacts_json TEXT", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
     ["orders", ["unit_price REAL DEFAULT 0", "discount REAL DEFAULT 0", "vat REAL DEFAULT 21", "notes TEXT", "loading_notes TEXT", "driver_notes TEXT", "delivery_date TEXT", "address TEXT", "collection_point_id INTEGER", "prepared_by TEXT", "shipped_by TEXT", "delivered_by TEXT", "preparation_date TEXT", "shipping_date TEXT", "delivery_city TEXT", "urgent INTEGER DEFAULT 0", "created_by TEXT", "stock_alert INTEGER DEFAULT 0", "deleted INTEGER DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
     ["products", ["sku TEXT", "cost_price REAL DEFAULT 0", "category TEXT", "format TEXT", "unit TEXT", "vat REAL DEFAULT 21", "stock_reserved REAL DEFAULT 0", "active INTEGER DEFAULT 1", "product_status TEXT DEFAULT 'Activo'", "min_stock REAL DEFAULT 0", "created_at TEXT", "updated_at TEXT"]],
     ["delivery_notes", ["created_at TEXT", "updated_at TEXT", "deleted INTEGER DEFAULT 0"]],
@@ -1812,8 +1812,8 @@ function normalizeReturnDisposition(input = {}) {
   };
 }
 const lookupFields = {
-  clients: ["id", "name", "city", "address", "billing_address", "billing_city", "opening_time", "closing_time", "weekly_closed_day", "invoice_delivery_method", "equivalence_surcharge_enabled", "latitude", "longitude", "geocoding_status", "phone", "email", "active", "external_code"],
-  suppliers: ["id", "name", "tax_id", "contact", "phone", "email", "address", "city", "latitude", "longitude", "geocoding_status", "active", "minimum_order", "transport_cost", "lead_time_days", "reliability_percent", "rappel_percent", "external_code", "source_system", "source_warehouse_code", "source_balance", "source_overdue_balance", "source_payments", "source_dataverse_matched"],
+  clients: ["id", "name", "city", "address", "billing_address", "billing_city", "opening_time", "closing_time", "weekly_closed_day", "invoice_delivery_method", "equivalence_surcharge_enabled", "latitude", "longitude", "geocoding_status", "contact", "contacts_json", "phone", "email", "active", "external_code"],
+  suppliers: ["id", "name", "tax_id", "contact", "contacts_json", "phone", "email", "address", "city", "latitude", "longitude", "geocoding_status", "active", "minimum_order", "transport_cost", "lead_time_days", "reliability_percent", "rappel_percent", "external_code", "source_system", "source_warehouse_code", "source_balance", "source_overdue_balance", "source_payments", "source_dataverse_matched"],
   warehouses: ["id", "name", "address"],
   collection_points: ["id", "code", "name", "client_id", "address", "city", "contact", "phone", "email", "opening_hours", "opening_time", "closing_time", "geocoding_status", "latitude", "longitude"],
   // Listado compacto: la tabla no necesita descargar todos los metadatos ni
