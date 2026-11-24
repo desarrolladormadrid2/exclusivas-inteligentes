@@ -20,6 +20,18 @@ const APP_ENVIRONMENT = process.env.NODE_ENV === "production" ? "Producción" : 
 const PRIMARY_WAREHOUSE_ADDRESS = "Calle Inglaterra, Nº5, Parcela 109, Local 3, 34004 Palencia";
 const DEFAULT_DELIVERY_SERVICE_MINUTES = 15;
 
+function HeaderViewControl({ label, options }: { label: string; options: Array<{ label: string; checked: boolean; onChange: () => void }> }) {
+  const [open, setOpen] = useState(false);
+  return <div className="section-view-control header-columns-accordion">
+    <button type="button" className="columns-toggle columns-icon-toggle" aria-label={`Configurar vista de ${label}`} title={`Configurar vista de ${label}`} aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" /><path d="M9.15 4.5v15M14.85 4.5v15" /></svg>
+    </button>
+    {open && <div className="columns-options" role="group" aria-label={`Opciones de vista de ${label}`}>
+      {options.map((option) => <label key={option.label}><input type="checkbox" checked={option.checked} onChange={option.onChange} />{option.label}</label>)}
+    </div>}
+  </div>;
+}
+
 const WEEKDAY_OPTIONS = [
   { value: "1", label: "Lunes" },
   { value: "2", label: "Martes" },
@@ -1384,16 +1396,17 @@ function VehicleLoadLeafletMap({ points, origin, selectedStopId, onSelect }: { p
 
 function VehicleLoadPlanningMap({ locations, origin }: { locations: any[]; origin: { latitude: number; longitude: number; label: string } }) {
   const [selectedStopId, setSelectedStopId] = useState<number | null>(null);
+  const [showStops, setShowStops] = useState(true);
   const valid = locations.filter((location) => isPlausibleRouteCoordinate(location.latitude, location.longitude, origin));
   if (!locations.length) return null;
-  if (!valid.length) return <section className="vehicle-load-planning-map panel"><header className="vehicle-load-planning-head"><div><h3>Mapa de pedidos</h3><p className="muted">Geolocaliza las direcciones para dibujar la ruta.</p></div><strong>0/{locations.length} ubicados</strong></header><div className="vehicle-load-planning-empty">No hay pedidos geolocalizados para este día.</div></section>;
+  if (!valid.length) return <section className="vehicle-load-planning-map panel"><header className="vehicle-load-planning-head"><div className="vehicle-load-title"><HeaderViewControl label="Mapa de pedidos" options={[{ label: "Lista de paradas", checked: showStops, onChange: () => setShowStops((value) => !value) }]} /><div><h3>Mapa de pedidos</h3><p className="muted">Geolocaliza las direcciones para dibujar la ruta.</p></div></div><strong>0/{locations.length} ubicados</strong></header><div className="vehicle-load-planning-empty">No hay pedidos geolocalizados para este día.</div></section>;
   const points = valid;
   const approximateCount = points.filter((item) => item.coordinates_estimated).length;
   const selectStop = (id: number) => {
     setSelectedStopId(id);
     window.requestAnimationFrame(() => document.querySelector(`[data-map-stop-id="${id}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
   };
-  return <section className="vehicle-load-planning-map panel"><header className="vehicle-load-planning-head"><div><h3>Mapa de la zona de entregas</h3><p className="muted">El zoom mantiene los pedidos en su ubicación. Pulsa un número o una parada para localizarla.</p></div><strong>{valid.length}/{locations.length} en mapa{approximateCount ? ` · ${approximateCount} aprox.` : ""}</strong></header><div className="vehicle-load-planning-body"><div className="vehicle-load-planning-canvas"><VehicleLoadLeafletMap points={points} origin={origin} selectedStopId={selectedStopId} onSelect={selectStop} /></div><ol className="vehicle-load-planning-stops"><li className="is-origin"><b>N</b><span><strong>Salida</strong><small>{origin.label}</small></span></li>{valid.map((item: any, index: number) => { const selected = Number(selectedStopId) === Number(item.id); return <li key={item.id} data-map-stop-id={item.id} className={selected ? "is-selected" : ""} role="button" tabIndex={0} onClick={() => selectStop(Number(item.id))} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectStop(Number(item.id)); } }}><b>{index + 1}</b><span><strong>{item.client_name || "Cliente sin nombre"}</strong><small>{item.opening_time && item.closing_time ? `Recepción ${String(item.opening_time).slice(0, 5)}–${String(item.closing_time).slice(0, 5)}` : "Horario pendiente"}{item.coordinates_estimated ? " · Ubicación aproximada" : item.distance_km === null ? " · Distancia pendiente" : ` · ${String(item.distance_km).replace(".", ",")} km`}</small></span></li>; })}</ol></div>{valid.length < locations.length && <p className="vehicle-load-planning-warning">{locations.length - valid.length} pedido{locations.length - valid.length === 1 ? " sin" : "s sin"} coordenadas. No se puede calcular su posición en la ruta hasta geolocalizarlo.</p>}</section>;
+  return <section className="vehicle-load-planning-map panel"><header className="vehicle-load-planning-head"><div className="vehicle-load-title"><HeaderViewControl label="Mapa de pedidos" options={[{ label: "Lista de paradas", checked: showStops, onChange: () => setShowStops((value) => !value) }]} /><div><h3>Mapa de la zona de entregas</h3><p className="muted">El zoom mantiene los pedidos en su ubicación. Pulsa un número o una parada para localizarla.</p></div></div><strong>{valid.length}/{locations.length} en mapa{approximateCount ? ` · ${approximateCount} aprox.` : ""}</strong></header><div className={`vehicle-load-planning-body${showStops ? "" : " without-stops"}`}><div className="vehicle-load-planning-canvas"><VehicleLoadLeafletMap points={points} origin={origin} selectedStopId={selectedStopId} onSelect={selectStop} /></div>{showStops && <ol className="vehicle-load-planning-stops"><li className="is-origin"><b>N</b><span><strong>Salida</strong><small>{origin.label}</small></span></li>{valid.map((item: any, index: number) => { const selected = Number(selectedStopId) === Number(item.id); return <li key={item.id} data-map-stop-id={item.id} className={selected ? "is-selected" : ""} role="button" tabIndex={0} onClick={() => selectStop(Number(item.id))} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectStop(Number(item.id)); } }}><b>{index + 1}</b><span><strong>{item.client_name || "Cliente sin nombre"}</strong><small>{item.opening_time && item.closing_time ? `Recepción ${String(item.opening_time).slice(0, 5)}–${String(item.closing_time).slice(0, 5)}` : "Horario pendiente"}{item.coordinates_estimated ? " · Ubicación aproximada" : item.distance_km === null ? " · Distancia pendiente" : ` · ${String(item.distance_km).replace(".", ",")} km`}</small></span></li>; })}</ol>}</div>{valid.length < locations.length && <p className="vehicle-load-planning-warning">{locations.length - valid.length} pedido{locations.length - valid.length === 1 ? " sin" : "s sin"} coordenadas. No se puede calcular su posición en la ruta hasta geolocalizarlo.</p>}</section>;
 }
 
 function haversineKm(aLat: number, aLon: number, bLat: number, bLon: number) {
@@ -1418,6 +1431,7 @@ function RoutesManager({ user }: { user: any }) {
   const [message, setMessage] = useState("");
   const [activeRoute, setActiveRoute] = useState<any>(null);
   const [routeDraft, setRouteDraft] = useState<any>(null);
+  const [routeCardFields, setRouteCardFields] = useState({ address: true, schedule: true, geolocation: true });
   async function load() {
     setLoading(true);
     try {
@@ -1465,7 +1479,7 @@ function RoutesManager({ user }: { user: any }) {
     } catch (error) { setMessage(error instanceof Error ? error.message : "No se ha podido guardar la ruta."); }
     finally { setSaving(false); }
   }
- return <section className="routes-manager"><div className="manager-head"><div><p className="eyebrow">LOGÍSTICA · PLANIFICACIÓN</p><h2>Rutas de reparto</h2><p className="muted">Agrupa entregas geolocalizadas y prioriza las franjas de apertura para preparar la ruta.</p></div><button type="button" className="button secondary" onClick={() => void load()}>Actualizar</button></div><div className="routes-toolbar"><label>Fecha de entrega<input type="date" value={routeDate} onChange={(event) => { setRouteDate(event.target.value); setSelected([]); setActiveRoute(null); setRouteDraft(null); }} /></label><label>Radio operativo (m)<input type="number" min="50" max="5000" step="50" value={radius} onChange={(event) => setRadius(Math.max(50, Number(event.target.value) || 150))} /></label><label>Repartidor<input value={driver} onChange={(event) => setDriver(event.target.value)} placeholder="Nombre" /></label><label>Vehículo<input value={vehicle} onChange={(event) => setVehicle(event.target.value)} placeholder="Matrícula o referencia" /></label></div>{message && <p className="routes-message" role="status">{message}</p>}<div className="routes-layout"><div className="routes-shipments panel"><div className="panel-head"><div><h3>Entregas disponibles</h3><p className="muted">{dayShipments.length} envíos para el {routeDate}</p></div><button type="button" className="button primary" disabled={saving || !selected.length} onClick={() => void createRoute()}>{saving ? "Planificando…" : `Crear ruta (${selected.length})`}</button></div>{loading ? <div className="data-loading" role="status">Cargando entregas…</div> : <div className="route-shipment-list">{dayShipments.length ? dayShipments.map((item) => { const located = Number.isFinite(Number(item.latitude)) && Number.isFinite(Number(item.longitude)); return <label className={`route-shipment${selected.includes(Number(item.id)) ? " selected" : ""}`} key={item.id}><input type="checkbox" checked={selected.includes(Number(item.id))} onChange={(event) => setSelected((current) => event.target.checked ? [...current, Number(item.id)] : current.filter((id) => id !== Number(item.id)))} /><span><b>{item.code}</b><strong>{item.client_name}</strong><small>{[item.address, item.city].filter(Boolean).join(" · ") || "Sin dirección"}</small><small>{item.opening_time && item.closing_time ? `Horario del cliente: ${item.opening_time}–${item.closing_time}` : "Horario pendiente de indicar"}</small></span><em className={located ? "located" : "not-located"}>{located ? "Geolocalizado" : "Sin coordenadas"}</em></label>; }) : <p className="empty-state">No hay envíos para esta fecha.</p>}</div>}</div><div className="routes-existing panel"><div className="panel-head"><div><h3>Rutas planificadas</h3><p className="muted">Histórico y seguimiento de paradas.</p></div></div>{routes.length ? routes.map((route) => <button type="button" className={`route-card${activeRoute?.id === route.id ? " active" : ""}`} key={route.id} onClick={() => { setActiveRoute(route); setRouteDraft(null); }}><span><b>{route.code}</b><small>{route.route_date} · {route.driver || "Sin repartidor"} · {route.status || "Planificada"}</small></span><strong>{route.stops?.length || 0}</strong></button>) : <p className="empty-state">Todavía no hay rutas.</p>}</div></div>{activeRoute && <div className="route-detail panel"><div className="panel-head"><div><p className="eyebrow">{activeRoute.code}</p><h3>Orden de ruta · {activeRoute.route_date}</h3><p className="muted">{activeRoute.driver || "Sin repartidor"} · {activeRoute.vehicle || "Sin vehículo"} · Radio {activeRoute.radius_meters || 150} m</p></div><div className="route-detail-actions">{activeRoute.maps_url && <a className="button primary" href={activeRoute.maps_url} target="_blank" rel="noreferrer">Navegar con Google Maps</a>}<button type="button" className="button secondary" onClick={() => setRouteDraft({ driver: activeRoute.driver || "", vehicle: activeRoute.vehicle || "", status: activeRoute.status || "Planificada", radius_meters: activeRoute.radius_meters || 150, notes: activeRoute.notes || "" })}>Editar ruta</button></div></div>{routeDraft && <div className="route-edit-panel"><div><b>Editar planificación</b><small>Los cambios se guardan también para la vista del repartidor.</small></div><div className="route-edit-fields"><label>Repartidor<input value={routeDraft.driver} onChange={(event) => setRouteDraft((current: any) => ({ ...current, driver: event.target.value }))} /></label><label>Vehículo<input value={routeDraft.vehicle} onChange={(event) => setRouteDraft((current: any) => ({ ...current, vehicle: event.target.value }))} /></label><label>Estado<select value={routeDraft.status} onChange={(event) => setRouteDraft((current: any) => ({ ...current, status: event.target.value }))}><option>Planificada</option><option>En curso</option><option>Completada</option><option>Cancelada</option></select></label><label>Radio operativo (m)<input type="number" min="50" max="5000" value={routeDraft.radius_meters} onChange={(event) => setRouteDraft((current: any) => ({ ...current, radius_meters: event.target.value }))} /></label><label className="route-edit-wide">Notas<textarea rows={2} value={routeDraft.notes} onChange={(event) => setRouteDraft((current: any) => ({ ...current, notes: event.target.value }))} placeholder="Ej. cargar primero las entregas con apertura a las 09:00…" /></label></div><div className="route-edit-actions"><button type="button" className="button secondary" onClick={() => setRouteDraft(null)}>Cancelar</button><button type="button" className="button primary" disabled={saving} onClick={() => void saveRouteEdit()}>{saving ? "Guardando…" : "Guardar cambios"}</button></div></div>}<div className="route-metrics"><div><b>{Number(activeRoute.total_distance_km || 0).toLocaleString("es-ES", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} km</b><span>distancia estimada</span></div><div><b>{Math.floor(Number(activeRoute.estimated_minutes || 0) / 60)} h {Number(activeRoute.estimated_minutes || 0) % 60} min</b><span>tiempo con paradas</span></div><div><b>{activeRoute.stops?.length || 0}</b><span>entregas</span></div></div>{(activeRoute.time_window_warnings || []).length > 0 && <div className="route-time-warnings" role="alert"><b>Revisar horarios</b>{activeRoute.time_window_warnings.map((warning: any) => <span key={`${warning.stop_id}-${warning.message}`}>Parada {warning.position} · {warning.client_name}: {warning.message}</span>)}</div>}<IntegratedMap locations={activeRoute.stops || selectedLocations} radiusMeters={Number(activeRoute.radius_meters || 150)} /><ol className="route-stop-list">{(activeRoute.stops || []).map((stop: any) => <li key={stop.id}><b>{stop.position}. {stop.client_name}</b><span>{[stop.address, stop.city].filter(Boolean).join(" · ")}</span><small>{stop.opening_time && stop.closing_time ? `Horario ${stop.opening_time}–${stop.closing_time} · ` : "Horario pendiente · "}{stop.distance_km ? `${stop.distance_km} km desde la parada anterior` : "Salida"}</small></li>)}</ol></div>}</section>;
+ return <section className="routes-manager"><div className="manager-head"><div className="manager-section-title"><HeaderViewControl label="Rutas de reparto" options={[{ label: "Dirección", checked: routeCardFields.address, onChange: () => setRouteCardFields((current) => ({ ...current, address: !current.address })) }, { label: "Horario de entrega", checked: routeCardFields.schedule, onChange: () => setRouteCardFields((current) => ({ ...current, schedule: !current.schedule })) }, { label: "Estado de geolocalización", checked: routeCardFields.geolocation, onChange: () => setRouteCardFields((current) => ({ ...current, geolocation: !current.geolocation })) }]} /><div><p className="eyebrow">LOGÍSTICA · PLANIFICACIÓN</p><h2>Rutas de reparto</h2><p className="muted">Agrupa entregas geolocalizadas y prioriza las franjas de apertura para preparar la ruta.</p></div></div><button type="button" className="button secondary" onClick={() => void load()}>Actualizar</button></div><div className="routes-toolbar"><label>Fecha de entrega<input type="date" value={routeDate} onChange={(event) => { setRouteDate(event.target.value); setSelected([]); setActiveRoute(null); setRouteDraft(null); }} /></label><label>Radio operativo (m)<input type="number" min="50" max="5000" step="50" value={radius} onChange={(event) => setRadius(Math.max(50, Number(event.target.value) || 150))} /></label><label>Repartidor<input value={driver} onChange={(event) => setDriver(event.target.value)} placeholder="Nombre" /></label><label>Vehículo<input value={vehicle} onChange={(event) => setVehicle(event.target.value)} placeholder="Matrícula o referencia" /></label></div>{message && <p className="routes-message" role="status">{message}</p>}<div className="routes-layout"><div className="routes-shipments panel"><div className="panel-head"><div><h3>Entregas disponibles</h3><p className="muted">{dayShipments.length} envíos para el {routeDate}</p></div><button type="button" className="button primary" disabled={saving || !selected.length} onClick={() => void createRoute()}>{saving ? "Planificando…" : `Crear ruta (${selected.length})`}</button></div>{loading ? <div className="data-loading" role="status">Cargando entregas…</div> : <div className="route-shipment-list">{dayShipments.length ? dayShipments.map((item) => { const located = Number.isFinite(Number(item.latitude)) && Number.isFinite(Number(item.longitude)); return <label className={`route-shipment${selected.includes(Number(item.id)) ? " selected" : ""}`} key={item.id}><input type="checkbox" checked={selected.includes(Number(item.id))} onChange={(event) => setSelected((current) => event.target.checked ? [...current, Number(item.id)] : current.filter((id) => id !== Number(item.id)))} /><span><b>{item.code}</b><strong>{item.client_name}</strong>{routeCardFields.address && <small>{[item.address, item.city].filter(Boolean).join(" · ") || "Sin dirección"}</small>}{routeCardFields.schedule && <small>{item.opening_time && item.closing_time ? `Horario del cliente: ${item.opening_time}–${item.closing_time}` : "Horario pendiente de indicar"}</small>}</span>{routeCardFields.geolocation && <em className={located ? "located" : "not-located"}>{located ? "Geolocalizado" : "Sin coordenadas"}</em>}</label>; }) : <p className="empty-state">No hay envíos para esta fecha.</p>}</div>}</div><div className="routes-existing panel"><div className="panel-head"><div><h3>Rutas planificadas</h3><p className="muted">Histórico y seguimiento de paradas.</p></div></div>{routes.length ? routes.map((route) => <button type="button" className={`route-card${activeRoute?.id === route.id ? " active" : ""}`} key={route.id} onClick={() => { setActiveRoute(route); setRouteDraft(null); }}><span><b>{route.code}</b><small>{route.route_date} · {route.driver || "Sin repartidor"} · {route.status || "Planificada"}</small></span><strong>{route.stops?.length || 0}</strong></button>) : <p className="empty-state">Todavía no hay rutas.</p>}</div></div>{activeRoute && <div className="route-detail panel"><div className="panel-head"><div><p className="eyebrow">{activeRoute.code}</p><h3>Orden de ruta · {activeRoute.route_date}</h3><p className="muted">{activeRoute.driver || "Sin repartidor"} · {activeRoute.vehicle || "Sin vehículo"} · Radio {activeRoute.radius_meters || 150} m</p></div><div className="route-detail-actions">{activeRoute.maps_url && <a className="button primary" href={activeRoute.maps_url} target="_blank" rel="noreferrer">Navegar con Google Maps</a>}<button type="button" className="button secondary" onClick={() => setRouteDraft({ driver: activeRoute.driver || "", vehicle: activeRoute.vehicle || "", status: activeRoute.status || "Planificada", radius_meters: activeRoute.radius_meters || 150, notes: activeRoute.notes || "" })}>Editar ruta</button></div></div>{routeDraft && <div className="route-edit-panel"><div><b>Editar planificación</b><small>Los cambios se guardan también para la vista del repartidor.</small></div><div className="route-edit-fields"><label>Repartidor<input value={routeDraft.driver} onChange={(event) => setRouteDraft((current: any) => ({ ...current, driver: event.target.value }))} /></label><label>Vehículo<input value={routeDraft.vehicle} onChange={(event) => setRouteDraft((current: any) => ({ ...current, vehicle: event.target.value }))} /></label><label>Estado<select value={routeDraft.status} onChange={(event) => setRouteDraft((current: any) => ({ ...current, status: event.target.value }))}><option>Planificada</option><option>En curso</option><option>Completada</option><option>Cancelada</option></select></label><label>Radio operativo (m)<input type="number" min="50" max="5000" value={routeDraft.radius_meters} onChange={(event) => setRouteDraft((current: any) => ({ ...current, radius_meters: event.target.value }))} /></label><label className="route-edit-wide">Notas<textarea rows={2} value={routeDraft.notes} onChange={(event) => setRouteDraft((current: any) => ({ ...current, notes: event.target.value }))} placeholder="Ej. cargar primero las entregas con apertura a las 09:00…" /></label></div><div className="route-edit-actions"><button type="button" className="button secondary" onClick={() => setRouteDraft(null)}>Cancelar</button><button type="button" className="button primary" disabled={saving} onClick={() => void saveRouteEdit()}>{saving ? "Guardando…" : "Guardar cambios"}</button></div></div>}<div className="route-metrics"><div><b>{Number(activeRoute.total_distance_km || 0).toLocaleString("es-ES", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} km</b><span>distancia estimada</span></div><div><b>{Math.floor(Number(activeRoute.estimated_minutes || 0) / 60)} h {Number(activeRoute.estimated_minutes || 0) % 60} min</b><span>tiempo con paradas</span></div><div><b>{activeRoute.stops?.length || 0}</b><span>entregas</span></div></div>{(activeRoute.time_window_warnings || []).length > 0 && <div className="route-time-warnings" role="alert"><b>Revisar horarios</b>{activeRoute.time_window_warnings.map((warning: any) => <span key={`${warning.stop_id}-${warning.message}`}>Parada {warning.position} · {warning.client_name}: {warning.message}</span>)}</div>}<IntegratedMap locations={activeRoute.stops || selectedLocations} radiusMeters={Number(activeRoute.radius_meters || 150)} /><ol className="route-stop-list">{(activeRoute.stops || []).map((stop: any) => <li key={stop.id}><b>{stop.position}. {stop.client_name}</b><span>{[stop.address, stop.city].filter(Boolean).join(" · ")}</span><small>{stop.opening_time && stop.closing_time ? `Horario ${stop.opening_time}–${stop.closing_time} · ` : "Horario pendiente · "}{stop.distance_km ? `${stop.distance_km} km desde la parada anterior` : "Salida"}</small></li>)}</ol></div>}</section>;
 }
 
 function VehicleOperationsPanel({ user, routeDate, vehicles, onReload }: { user: any; routeDate: string; vehicles: any[]; onReload: () => void }) {
@@ -9713,6 +9727,7 @@ function Balance() {
 }
 
 function Reports() {
+  const [reportSections, setReportSections] = useState({ financial: true, period: true, charts: true });
   const todayReport = new Date();
   const isoReportDay = (date: Date) =>
     `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -10046,10 +10061,17 @@ function Reports() {
   return (
     <div className="reports">
       <div className="manager-head">
-        <div>
+        <div className="manager-section-title">
+          <HeaderViewControl label="Visión general" options={[
+            { label: "Indicadores y cuenta de resultados", checked: reportSections.financial, onChange: () => setReportSections((current) => ({ ...current, financial: !current.financial })) },
+            { label: "Resumen del periodo", checked: reportSections.period, onChange: () => setReportSections((current) => ({ ...current, period: !current.period })) },
+            { label: "Gráficos y actividad", checked: reportSections.charts, onChange: () => setReportSections((current) => ({ ...current, charts: !current.charts })) },
+          ]} />
+          <div>
           <p className="eyebrow">INFORMES OPERATIVOS</p>
           <h2>Visión general</h2>
           <p className="muted">Indicadores calculados desde la base de datos.</p>
+          </div>
         </div>
       </div>
       {loading && <div className="data-loading" role="status"><span className="loading-spinner" aria-hidden="true" /><LoadingIndicator label="Cargando informes…" /></div>}
@@ -10063,7 +10085,7 @@ function Reports() {
           Exportar
         </button>
       </div>
-      <div className="financial-kpis">
+      <div className={`financial-kpis${reportSections.financial ? "" : " report-view-hidden"}`}>
         <article>
           <span>Ingresos</span>
           <strong>{moneyReport(data.rangeSales)}</strong>
@@ -10087,7 +10109,7 @@ function Reports() {
           <small>Cobrado menos gastos</small>
         </article>
       </div>
-      <div className="financial-report-grid">
+      <div className={`financial-report-grid${reportSections.financial ? "" : " report-view-hidden"}`}>
         <section className="financial-pl-card">
           <div className="financial-card-title">
             <span>Cuenta de resultados</span>
@@ -10183,7 +10205,7 @@ function Reports() {
           </section>
         </aside>
       </div>
-      <div className="panel report-range-panel">
+      <div className={`panel report-range-panel${reportSections.period ? "" : " report-view-hidden"}`}>
         <div>
           <b>Periodo financiero</b>
           <span className="muted">
@@ -10227,7 +10249,7 @@ function Reports() {
           </button>
         </div>
       </div>
-      <div className="report-range-cards">
+      <div className={`report-range-cards${reportSections.period ? "" : " report-view-hidden"}`}>
         <article>
           <span>VENTAS DEL PERIODO</span>
           <strong>{moneyReport(data.rangeSales)}</strong>
@@ -10249,7 +10271,7 @@ function Reports() {
           <small>Movimientos registrados</small>
         </article>
       </div>
-      <div className="report-cards">
+      <div className={`report-cards${reportSections.period ? "" : " report-view-hidden"}`}>
         <article>
           <span>VENTAS</span>
           <strong>
@@ -10303,7 +10325,7 @@ function Reports() {
           <strong>{data.invoices}</strong>
         </article>
       </div>
-      <div className="panel chart-panel">
+      <div className={`panel chart-panel${reportSections.charts ? "" : " report-view-hidden"}`}>
         <div className="report-section-head">
           <div>
             <h3>Actividad por módulo</h3>
@@ -10328,7 +10350,7 @@ function Reports() {
           ))}
         </div>
       </div>
-      <div className="report-grid-two">
+      <div className={`report-grid-two${reportSections.charts ? "" : " report-view-hidden"}`}>
         <div className="panel report-detail-panel">
           <div className="report-section-head">
             <div>
@@ -10463,7 +10485,7 @@ function Reports() {
           </div>
         </div>
       </div>
-      <div className="report-visual-grid">
+      <div className={`report-visual-grid${reportSections.charts ? "" : " report-view-hidden"}`}>
         <section className="panel report-visual-panel report-span-two">
           <div className="report-section-head">
             <div>
