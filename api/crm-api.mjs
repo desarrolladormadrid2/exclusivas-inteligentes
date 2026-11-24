@@ -1940,6 +1940,11 @@ function applyGoodsReceiptStock(receipt, actor, appliedAt = new Date().toISOStri
   const receiptCode = String(receipt.code || `ENT-${receipt.id}`);
   const receiptDate = String(receipt.receipt_date || appliedAt.slice(0, 10));
   const warehouseId = Number(receipt.warehouse_id || 0) || null;
+  const ensureReceiptProductActive = (productId, productName) => {
+    const product = db.prepare("SELECT id,deleted FROM products WHERE id=?").get(Number(productId));
+    if (!product) throw new Error(`No se puede sumar stock: el producto “${productName || `ID ${productId}`}” ya no existe en el catálogo.`);
+    if (Number(product.deleted || 0) !== 0) db.prepare("UPDATE products SET deleted='0',deleted_at=NULL,deleted_by=NULL,updated_at=? WHERE id=?").run(appliedAt, Number(productId));
+  };
   let stockAddedQuantity = 0;
   for (const line of lines) {
     const received = Math.max(0, Number(line.received_quantity || 0));
@@ -1948,6 +1953,7 @@ function applyGoodsReceiptStock(receipt, actor, appliedAt = new Date().toISOStri
     const wrongProduct = String(line.status || "") === "Producto equivocado";
     const usableOriginal = wrongProduct ? 0 : Math.max(0, received - damaged - substituted);
     if (usableOriginal > 0) {
+      ensureReceiptProductActive(line.product_id, line.product_name_snapshot);
       stockAddedQuantity += usableOriginal;
       insertMovement.run(line.product_id, warehouseId, "Entrada", usableOriginal, receiptCode, receiptDate, `Recepción ${receiptCode} · ${line.product_name_snapshot || "Producto"}`, Number(receipt.id), actor);
       db.prepare("UPDATE products SET stock=COALESCE(stock,0)+?,cost_price=CASE WHEN ? > 0 THEN ? ELSE cost_price END,real_cost=CASE WHEN ? > 0 THEN ? ELSE real_cost END,updated_at=? WHERE id=?").run(usableOriginal, Number(line.unit_cost || 0), Number(line.unit_cost || 0), Number(line.unit_cost || 0), Number(line.unit_cost || 0), appliedAt, line.product_id);
@@ -1961,6 +1967,7 @@ function applyGoodsReceiptStock(receipt, actor, appliedAt = new Date().toISOStri
       updateLineLot.run(lotId, line.id);
     }
     if (line.substitute_product_id && substituted > 0) {
+      ensureReceiptProductActive(line.substitute_product_id, line.product_name_snapshot);
       stockAddedQuantity += substituted;
       insertMovement.run(line.substitute_product_id, warehouseId, "Entrada", substituted, receiptCode, receiptDate, `Sustitución en recepción ${receiptCode} · ${line.product_name_snapshot || "Producto"}`, Number(receipt.id), actor);
       db.prepare("UPDATE products SET stock=COALESCE(stock,0)+?,updated_at=? WHERE id=?").run(substituted, appliedAt, line.substitute_product_id);
@@ -4091,7 +4098,7 @@ export async function crmApiHandler(req, res) {
         const lines = [];
         for (const input of inputLines) {
           const productId = Number(input.product_id || 0);
-          const product = productId ? db.prepare("SELECT id,name,sku,unit,stock FROM products WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(productId) : null;
+          const product = productId ? db.prepare("SELECT id,name,sku,unit,stock,deleted FROM products WHERE id=?").get(productId) : null;
           const expected = Number(input.expected_quantity || 0);
           const received = Number(input.received_quantity || 0);
           const damaged = Math.min(received, Math.max(0, Number(input.damaged_quantity || 0)));
@@ -4099,8 +4106,15 @@ export async function crmApiHandler(req, res) {
           const substituteProductId = Number(input.substitute_product_id || 0) || null;
           const lotCode = String(input.lot_code || "").trim().slice(0, 120);
           const expiryDate = String(input.expiry_date || "").trim().slice(0, 10) || null;
-          const quantityUnit = String(input.quantity_unit || product.unit || "unidad").trim().slice(0, 40) || "unidad";
-          if (!product) return send(res, 400, { error: "Uno de los productos no existe" });
+          const quantityUnit = String(input.quantity_unit || product?.unit || "unidad").trim().slice(0, 40) || "unidad";
+          const productLabel = String(input.product_name || input.name || product?.name || `ID ${productId || "no indicado"}`).trim();
+          const productReference = String(input.sku || product?.sku || "").trim();
+          const productDescription = `“${productLabel}”${productReference ? ` (${productReference})` : ""}`;
+          if (!product) return send(res, 400, { error: `El producto ${productDescription} ya no existe en el catálogo. Actualiza la línea del pedido antes de recibirlo.` });
+          if (Number(product.deleted || 0) !== 0) {
+            const linkedPurchaseOrderLine = purchaseOrderId && db.prepare("SELECT id FROM purchase_order_lines WHERE purchase_order_id=? AND product_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 LIMIT 1").get(purchaseOrderId, productId);
+            if (!linkedPurchaseOrderLine) return send(res, 400, { error: `El producto ${productDescription} está dado de baja. Reactívalo en Productos antes de recibirlo.` });
+          }
           if (!Number.isFinite(expected) || expected < 0 || !Number.isFinite(received) || received < 0) return send(res, 400, { error: `Cantidad no válida para ${product.name}` });
           if (expiryDate && !/^\d{4}-\d{2}-\d{2}$/.test(expiryDate)) return send(res, 400, { error: `Fecha de caducidad no válida para ${product.name}` });
           if (substituted > 0 && !substituteProductId) return send(res, 400, { error: `Selecciona el producto sustituto para ${product.name}` });

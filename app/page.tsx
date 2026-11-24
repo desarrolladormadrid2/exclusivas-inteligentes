@@ -4301,7 +4301,11 @@ function PendingSupplierReceipts({ refreshSignal, onReceive, onValidate }: { ref
 }
 
 function GoodsReceiptForm({ lookups, actor, initialPurchaseOrderId = "", onInitialPurchaseOrderConsumed, onCreated }: { lookups: any; actor: string; initialPurchaseOrderId?: string; onInitialPurchaseOrderConsumed?: () => void; onCreated: (receipt: any) => void }) {
-  const [header, setHeader] = useState({ code: `ENT-${new Date().getFullYear()}-${String(Date.now()).slice(-7)}`, counterparty_type: "Proveedor", client_id: "", supplier_id: "", purchase_order_id: "", purchase_invoice_id: "", warehouse_id: "", receipt_date: tabletTodayInput(), validation_status: "Pendiente", validated_by: "", stock_applied: true, notes: "" });
+  const warehouses = lookups.warehouses || [];
+  const isTestWarehouse = (warehouse: any) => /^(?:__(?:QA|TEST)(?:_|\b)|(?:QA|TEST|PRUEBA|DEMO|PW|E2E|SIM)[-_ ])/i.test(String(warehouse.name || "")) || /\b(?:QA|TEST|PRUEBA|DEMO|PW|E2E|SIM)(?:[-_ ]|\b)/i.test(String(warehouse.name || ""));
+  const availableWarehouses = warehouses.filter((warehouse: any) => !isTestWarehouse(warehouse));
+  const defaultWarehouseId = availableWarehouses.length === 1 ? String(availableWarehouses[0].id) : "";
+  const [header, setHeader] = useState(() => ({ code: `ENT-${new Date().getFullYear()}-${String(Date.now()).slice(-7)}`, counterparty_type: "Proveedor", client_id: "", supplier_id: "", purchase_order_id: "", purchase_invoice_id: "", warehouse_id: defaultWarehouseId, receipt_date: tabletTodayInput(), validation_status: "Pendiente", validated_by: "", stock_applied: true, notes: "" }));
   const counterpartySelectRef = useRef<HTMLSelectElement | null>(null);
   const warehouseSelectRef = useRef<HTMLSelectElement | null>(null);
   const [productSearch, setProductSearch] = useState("");
@@ -4315,9 +4319,6 @@ function GoodsReceiptForm({ lookups, actor, initialPurchaseOrderId = "", onIniti
   const products = lookups.products || [];
   const clients = lookups.clients || [];
   const suppliers = lookups.suppliers || [];
-  const warehouses = lookups.warehouses || [];
-  const isTestWarehouse = (warehouse: any) => /^(?:__(?:QA|TEST)(?:_|\b)|(?:QA|TEST|PRUEBA|DEMO|PW|E2E|SIM)[-_ ])/i.test(String(warehouse.name || "")) || /\b(?:QA|TEST|PRUEBA|DEMO|PW|E2E|SIM)(?:[-_ ]|\b)/i.test(String(warehouse.name || ""));
-  const availableWarehouses = warehouses.filter((warehouse: any) => !isTestWarehouse(warehouse));
   useEffect(() => {
     if (!header.warehouse_id && availableWarehouses.length === 1) setHeader((current) => current.warehouse_id ? current : { ...current, warehouse_id: String(availableWarehouses[0].id) });
   }, [header.warehouse_id, availableWarehouses]);
@@ -4457,7 +4458,7 @@ function GoodsReceiptForm({ lookups, actor, initialPurchaseOrderId = "", onIniti
         throw new Error(serverMessage || `No se pudo ${validate ? "validar la entrada ni actualizar el stock" : "guardar la entrada"} (respuesta ${response.status}).`);
       }
       onCreated(created);
-      setHeader({ code: `ENT-${new Date().getFullYear()}-${String(Date.now()).slice(-7)}`, counterparty_type: "Proveedor", client_id: "", supplier_id: "", purchase_order_id: "", purchase_invoice_id: "", warehouse_id: "", receipt_date: tabletTodayInput(), validation_status: "Pendiente", validated_by: "", stock_applied: true, notes: "" });
+      setHeader({ code: `ENT-${new Date().getFullYear()}-${String(Date.now()).slice(-7)}`, counterparty_type: "Proveedor", client_id: "", supplier_id: "", purchase_order_id: "", purchase_invoice_id: "", warehouse_id: defaultWarehouseId, receipt_date: tabletTodayInput(), validation_status: "Pendiente", validated_by: "", stock_applied: true, notes: "" });
       setLines([]); setProductSearch("");
     } catch (error: any) {
       const reason = String(error?.message || "").trim();
