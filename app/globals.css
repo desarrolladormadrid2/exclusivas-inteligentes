@@ -4316,9 +4316,8 @@ select.form-control option:hover {
   .contacts-table td:first-child b { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
   .contacts-table td::before { color: #71818a; font-size: 10px; font-weight: 700; text-transform: uppercase; }
   .contacts-table td:first-child::before { display: none; }
-  .contacts-table td:nth-child(2)::before { content: "Correo"; }
-  .contacts-table td:nth-child(3)::before { content: "Teléfono"; }
-  .contacts-table td:nth-child(4)::before { content: "Tipo"; }
+  .contacts-table td[data-label]::before { content: attr(data-label); }
+  .contacts-table td[data-label="Persona de contacto"] { grid-template-columns: 145px minmax(0, 1fr); }
   .contacts-table td.contacts-actions {
     display: flex;
     flex-wrap: wrap;
@@ -4849,9 +4848,8 @@ select.form-control option:hover {
   .crm-shell .contacts-table td:first-child b { min-width: 0; overflow-wrap: anywhere; }
   .crm-shell .contacts-table td::before { color: #71818a; font-size: 9px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
   .crm-shell .contacts-table td:first-child::before { display: none; }
-  .crm-shell .contacts-table td:nth-child(2)::before { content: "Correo"; }
-  .crm-shell .contacts-table td:nth-child(3)::before { content: "Teléfono"; }
-  .crm-shell .contacts-table td:nth-child(4)::before { content: "Tipo"; }
+  .crm-shell .contacts-table td[data-label]::before { content: attr(data-label); }
+  .crm-shell .contacts-table td[data-label="Persona de contacto"] { grid-template-columns: 145px minmax(0, 1fr); }
   .crm-shell .contacts-table td.contacts-actions { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 8px; margin-top: 4px; border-top: 1px solid #eef2f3; }
   .crm-shell .contacts-table td.contacts-actions::before { content: "Acciones"; width: 78px; }
 }
@@ -8031,6 +8029,13 @@ body.reparto-modal-open {
   .crm-shell .users-table,
   .crm-shell .trash-table,
   .crm-shell .scheduled-list table { border-collapse: collapse; }
+  .crm-shell .contacts-table-wide .contacts-table { width: 100%; table-layout: fixed; }
+  .crm-shell .contacts-table-wide .contacts-table :is(th, td).contact-column-company { width: 25%; }
+  .crm-shell .contacts-table-wide .contacts-table :is(th, td).contact-column-person { width: 18%; }
+  .crm-shell .contacts-table-wide .contacts-table :is(th, td).contact-column-email { width: 18%; }
+  .crm-shell .contacts-table-wide .contacts-table :is(th, td).contact-column-phone { width: 13%; }
+  .crm-shell .contacts-table-wide .contacts-table :is(th, td).contact-column-type { width: 10%; }
+  .crm-shell .contacts-table-wide .contacts-table :is(th, td).contact-column-actions { width: 16%; }
 
   .crm-shell .table-scroll th,
   .crm-shell .history-scroll th,

@@ -2226,7 +2226,7 @@ function Contacts({ onNavigate }: { onNavigate: (section: string) => void }) {
   const [editingDraft, setEditingDraft] = useState<any>({});
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
-  const [visibleContactColumns, setVisibleContactColumns] = useState({ email: true, phone: true, type: true });
+  const [visibleContactColumns, setVisibleContactColumns] = useState({ contact: true, email: true, phone: true, type: true });
   useEffect(() => {
     setLoading(true);
     const loadContacts = async () => {
@@ -2303,7 +2303,7 @@ function Contacts({ onNavigate }: { onNavigate: (section: string) => void }) {
     };
   });
   const filtered = periodRows.filter((row) =>
-    (row.name + " " + row.email + " " + row.phone + " " + row.type)
+    (row.name + " " + row.contact + " " + row.email + " " + row.phone + " " + row.type)
       .toLocaleLowerCase()
       .includes(query.toLocaleLowerCase()),
   );
@@ -2366,6 +2366,7 @@ function Contacts({ onNavigate }: { onNavigate: (section: string) => void }) {
       <div className="manager-head contacts-toolbar">
         <div className="manager-section-title">
           <HeaderViewControl label="Contactos" options={[
+            { label: "Persona de contacto", checked: visibleContactColumns.contact, onChange: () => setVisibleContactColumns((current) => ({ ...current, contact: !current.contact })) },
             { label: "Correo", checked: visibleContactColumns.email, onChange: () => setVisibleContactColumns((current) => ({ ...current, email: !current.email })) },
             { label: "Teléfono", checked: visibleContactColumns.phone, onChange: () => setVisibleContactColumns((current) => ({ ...current, phone: !current.phone })) },
             { label: "Tipo", checked: visibleContactColumns.type, onChange: () => setVisibleContactColumns((current) => ({ ...current, type: !current.type })) },
@@ -2416,29 +2417,31 @@ function Contacts({ onNavigate }: { onNavigate: (section: string) => void }) {
           <table className="contacts-table">
             <thead>
               <tr>
-                <th>Empresa</th>
-                {visibleContactColumns.email && <th>Correo</th>}
-                {visibleContactColumns.phone && <th>Teléfono</th>}
-                {visibleContactColumns.type && <th>Tipo</th>}
-                <th>Acciones</th>
+                <th className="contact-column-company">Empresa</th>
+                {visibleContactColumns.contact && <th className="contact-column-person">Persona de contacto</th>}
+                {visibleContactColumns.email && <th className="contact-column-email">Correo</th>}
+                {visibleContactColumns.phone && <th className="contact-column-phone">Teléfono</th>}
+                {visibleContactColumns.type && <th className="contact-column-type">Tipo</th>}
+                <th className="contact-column-actions">Acciones</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={2 + Number(visibleContactColumns.email) + Number(visibleContactColumns.phone) + Number(visibleContactColumns.type)}><div className="data-loading" role="status"><span className="loading-spinner" aria-hidden="true" /> Cargando contactos…</div></td></tr>
+                <tr><td colSpan={2 + Number(visibleContactColumns.contact) + Number(visibleContactColumns.email) + Number(visibleContactColumns.phone) + Number(visibleContactColumns.type)}><div className="data-loading" role="status"><span className="loading-spinner" aria-hidden="true" /> Cargando contactos…</div></td></tr>
               ) : filtered.map((row) => (
                 <tr
                   key={row.id}
                   className={editingId === row.id ? "selected" : ""}
                   onClick={() => beginEdit(row)}
                 >
-                  <td>
+                  <td className="contact-column-company">
                     <span className="contact-avatar">{row.name?.slice(0, 1).toUpperCase()}</span>
                     <b>{row.name}</b>
                   </td>
-                  {visibleContactColumns.email && <td>{row.email || "—"}</td>}
-                  {visibleContactColumns.phone && <td>{row.phone || "—"}</td>}
-                  {visibleContactColumns.type && <td>
+                  {visibleContactColumns.contact && <td className="contact-column-person" data-label="Persona de contacto">{row.contact || "—"}</td>}
+                  {visibleContactColumns.email && <td className="contact-column-email" data-label="Correo">{row.email || "—"}</td>}
+                  {visibleContactColumns.phone && <td className="contact-column-phone" data-label="Teléfono">{row.phone || "—"}</td>}
+                  {visibleContactColumns.type && <td className="contact-column-type" data-label="Tipo">
                     <span
                       className={
                         row.type === "Proveedor"
@@ -2449,7 +2452,7 @@ function Contacts({ onNavigate }: { onNavigate: (section: string) => void }) {
                       {row.type}
                     </span>
                   </td>}
-                  <td className="contacts-actions">
+                  <td className="contacts-actions contact-column-actions">
                     <button className="contact-action" onClick={(event) => { event.stopPropagation(); beginEdit(row); }}>Editar</button>
                     <button
                       className="contact-action delete"
