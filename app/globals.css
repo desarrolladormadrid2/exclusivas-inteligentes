@@ -931,9 +931,9 @@ input[type="checkbox"] { accent-color: #b91c1c; }
 }
 .manager-section-title { position:relative; display:flex; align-items:center; gap:8px; min-width:0; }
 .header-columns-accordion { position:relative; flex:0 0 auto; border:0; background:transparent; }
-.manager-section-title .header-columns-accordion .columns-toggle.columns-icon-toggle { display:flex; align-items:center; justify-content:center; box-sizing:border-box; width:36px; height:36px; min-width:36px; padding:0; border:1px solid #b91c1c; border-radius:50%; background:transparent; color:#b91c1c; font-size:0; line-height:0; cursor:pointer; }
+.manager-section-title .header-columns-accordion .columns-toggle.columns-icon-toggle { display:flex; align-items:center; justify-content:center; box-sizing:border-box; width:30px; height:30px; min-width:30px; padding:0; border:0; border-radius:0; background:transparent; color:#71818a; font-size:0; line-height:0; cursor:pointer; }
 .manager-section-title .columns-icon-toggle > svg { display:block; width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:square; stroke-linejoin:miter; }
-.manager-section-title .header-columns-accordion .columns-toggle.columns-icon-toggle:hover,.manager-section-title .header-columns-accordion .columns-toggle.columns-icon-toggle:focus-visible,.manager-section-title .header-columns-accordion .columns-toggle.columns-icon-toggle[aria-expanded="true"] { border-color:#b91c1c; color:#b91c1c; outline:0; }
+.manager-section-title .header-columns-accordion .columns-toggle.columns-icon-toggle:hover,.manager-section-title .header-columns-accordion .columns-toggle.columns-icon-toggle:focus-visible,.manager-section-title .header-columns-accordion .columns-toggle.columns-icon-toggle[aria-expanded="true"] { background:#eef2f3; color:#34434b; outline:0; }
 .header-columns-accordion .columns-options { position:absolute; z-index:35; top:calc(100% + 5px); left:0; display:grid; grid-template-columns:repeat(2,minmax(150px,1fr)); gap:5px 12px; width:min(560px,calc(100vw - 36px)); max-height:min(55vh,420px); overflow:auto; padding:10px; border:1px solid #cbd5db; background:#fff; box-shadow:0 8px 20px rgba(38,52,61,.18); }
 .db-badge {
   color: var(--green);
