@@ -428,6 +428,52 @@ function appendGtrDeliveryLine(deliveryNoteId) {
 function removeGtrDeliveryLines(deliveryNoteId) {
   db.prepare("DELETE FROM delivery_note_lines WHERE delivery_note_id=? AND (line_type='GTR' OR product_id=(SELECT id FROM products WHERE sku='GTR-SERVICIO' LIMIT 1))").run(Number(deliveryNoteId));
 }
+function ensureOrderDeliveryNote(orderId) {
+  const id = Number(orderId || 0);
+  const order = id ? db.prepare("SELECT o.*,c.name client_name FROM orders o LEFT JOIN clients c ON c.id=o.client_id WHERE o.id=? AND CAST(COALESCE(o.deleted,0) AS INTEGER)=0").get(id) : null;
+  if (!order || !Number(order.client_id || 0) || !String(order.client_name || "").trim()) return null;
+  const orderLineFilter = hasColumn("order_lines", "deleted") ? " AND CAST(COALESCE(deleted,0) AS INTEGER)=0" : "";
+  const aliasedOrderLineFilter = hasColumn("order_lines", "deleted") ? " AND CAST(COALESCE(ol.deleted,0) AS INTEGER)=0" : "";
+  const lines = db.prepare(`SELECT * FROM order_lines WHERE order_id=?${orderLineFilter} ORDER BY id`).all(id);
+  const hasAnyOrderLine = Boolean(db.prepare("SELECT 1 FROM order_lines WHERE order_id=? LIMIT 1").get(id));
+  const hasLegacyLine = !hasAnyOrderLine && Number(order.product_id || 0) > 0 && Number(order.quantity || 0) > 0;
+  if (!lines.length && !hasLegacyLine) {
+    const emptyNote = db.prepare("SELECT * FROM delivery_notes WHERE order_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 1").get(id);
+    if (emptyNote) {
+      const billed = db.prepare("SELECT i.id FROM invoices i WHERE CAST(COALESCE(i.deleted,0) AS INTEGER)=0 AND COALESCE(i.status,'')<>'Anulada' AND (i.delivery_note_id=? OR EXISTS(SELECT 1 FROM invoice_delivery_notes idn WHERE idn.invoice_id=i.id AND idn.delivery_note_id=?) OR EXISTS(SELECT 1 FROM invoice_orders io WHERE io.invoice_id=i.id AND io.order_id=?)) LIMIT 1").get(Number(emptyNote.id), Number(emptyNote.id), id);
+      if (!billed) {
+        const now = new Date().toISOString();
+        db.prepare("UPDATE delivery_notes SET deleted=1,deleted_at=?,deleted_by='Sistema',updated_at=? WHERE id=?").run(now, now, Number(emptyNote.id));
+        db.prepare("DELETE FROM delivery_note_lines WHERE delivery_note_id=?").run(Number(emptyNote.id));
+        invalidateReadCache("delivery_notes");
+      }
+    }
+    return null;
+  }
+  let note = db.prepare("SELECT * FROM delivery_notes WHERE order_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 1").get(id);
+  if (note) {
+    const billed = db.prepare("SELECT i.id FROM invoices i WHERE CAST(COALESCE(i.deleted,0) AS INTEGER)=0 AND COALESCE(i.status,'')<>'Anulada' AND (i.delivery_note_id=? OR EXISTS(SELECT 1 FROM invoice_delivery_notes idn WHERE idn.invoice_id=i.id AND idn.delivery_note_id=?) OR EXISTS(SELECT 1 FROM invoice_orders io WHERE io.invoice_id=i.id AND io.order_id=?)) LIMIT 1").get(Number(note.id), Number(note.id), id);
+    if (billed) return { id: Number(note.id), code: note.code, invoice_id: Number(billed.id) };
+    db.prepare("UPDATE delivery_notes SET client_id=?,client_name_snapshot=?,delivery_date=?,updated_at=? WHERE id=?").run(Number(order.client_id), order.client_name, order.delivery_date || order.shipping_date || null, new Date().toISOString(), Number(note.id));
+    db.prepare("DELETE FROM delivery_note_lines WHERE delivery_note_id=?").run(Number(note.id));
+  } else {
+    const now = new Date().toISOString();
+    const code = `ALB-${new Date().getFullYear()}-${String(Date.now()).slice(-7)}`;
+    const created = db.prepare("INSERT INTO delivery_notes(code,order_id,client_id,status,client_name_snapshot,delivery_date,created_at,updated_at) VALUES(?,?,?,'Pendiente',?,?,?,?)").run(code, id, Number(order.client_id), order.client_name, order.delivery_date || order.shipping_date || null, now, now);
+    note = { id: Number(created.lastInsertRowid), code, gtr_enabled: 1 };
+  }
+  const noteId = Number(note.id);
+  if (lines.length) {
+    db.prepare("INSERT INTO delivery_note_lines(delivery_note_id,product_id,quantity,product_name_snapshot,unit_price,vat,amount) SELECT ?,ol.product_id,ol.quantity,COALESCE(NULLIF(TRIM(ol.product_name_snapshot),''),p.name),ol.unit_price,ol.vat,ol.amount FROM order_lines ol LEFT JOIN products p ON p.id=ol.product_id WHERE ol.order_id=?" + aliasedOrderLineFilter).run(noteId, id);
+  } else {
+    db.prepare("INSERT INTO delivery_note_lines(delivery_note_id,product_id,quantity,product_name_snapshot,unit_price,vat,amount) SELECT ?,?, ?,p.name,?,?,? FROM products p WHERE p.id=?").run(noteId, Number(order.product_id), Number(order.quantity), Number(order.unit_price || 0), Number(order.vat || 21), Number(order.amount || 0), Number(order.product_id));
+  }
+  if (Number(note.gtr_enabled ?? 1) !== 0) appendGtrDeliveryLine(noteId);
+  invalidateReadCache("delivery_note_lines");
+  invalidateReadCache("delivery_notes");
+  markCommercialDocumentPdfStale("delivery", noteId);
+  return { id: noteId, code: note.code };
+}
 function appendGtrInvoiceLine(invoiceId) {
   const productId = ensureGtrServiceProduct();
   const activeLineFilter = hasColumn("invoice_lines", "deleted") ? " AND CAST(COALESCE(deleted,0) AS INTEGER)=0" : "";
@@ -930,6 +976,7 @@ try { db.exec(`
    WHERE product_name_snapshot IS NULL OR TRIM(product_name_snapshot)='';
 `); } catch {}
 db.exec(`CREATE TABLE IF NOT EXISTS invoice_orders(id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_id INTEGER NOT NULL,order_id INTEGER NOT NULL,UNIQUE(invoice_id,order_id),UNIQUE(order_id));`);
+db.exec(`CREATE TABLE IF NOT EXISTS invoice_delivery_notes(id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_id INTEGER NOT NULL,delivery_note_id INTEGER NOT NULL,UNIQUE(invoice_id,delivery_note_id),UNIQUE(delivery_note_id));`);
 // Estas cachés se inicializan antes de la reconciliación de arranque porque
 // el recálculo de facturas puede invalidarlas durante esa primera pasada.
 const readCache = new Map();
@@ -1775,7 +1822,8 @@ const lookupProfiles = {
 };
 function listSelectFor(resource) {
   if (resource === "delivery_notes") {
-    return `delivery_notes.*,(SELECT id FROM shipments WHERE shipments.order_id=delivery_notes.order_id AND CAST(COALESCE(shipments.deleted,0) AS INTEGER)=0 ORDER BY shipments.id DESC LIMIT 1) AS shipment_id,(SELECT code FROM invoices WHERE CAST(COALESCE(invoices.deleted,0) AS INTEGER)=0 AND COALESCE(invoices.status,'')<>'Anulada' AND (invoices.delivery_note_id=delivery_notes.id OR invoices.order_id=delivery_notes.order_id OR EXISTS(SELECT 1 FROM invoice_orders WHERE invoice_orders.invoice_id=invoices.id AND invoice_orders.order_id=delivery_notes.order_id)) ORDER BY invoices.id DESC LIMIT 1) AS invoice_code`;
+    const linkedInvoice = `SELECT invoices.id FROM invoices WHERE CAST(COALESCE(invoices.deleted,0) AS INTEGER)=0 AND COALESCE(invoices.status,'')<>'Anulada' AND (invoices.delivery_note_id=delivery_notes.id OR EXISTS(SELECT 1 FROM invoice_delivery_notes WHERE invoice_delivery_notes.invoice_id=invoices.id AND invoice_delivery_notes.delivery_note_id=delivery_notes.id) OR invoices.order_id=delivery_notes.order_id OR EXISTS(SELECT 1 FROM invoice_orders WHERE invoice_orders.invoice_id=invoices.id AND invoice_orders.order_id=delivery_notes.order_id)) ORDER BY invoices.id DESC LIMIT 1`;
+    return `delivery_notes.*,(SELECT id FROM shipments WHERE shipments.order_id=delivery_notes.order_id AND CAST(COALESCE(shipments.deleted,0) AS INTEGER)=0 ORDER BY shipments.id DESC LIMIT 1) AS shipment_id,(SELECT code FROM invoices WHERE id=(${linkedInvoice})) AS invoice_code,(SELECT status FROM invoices WHERE id=(${linkedInvoice})) AS invoice_status,(SELECT GROUP_CONCAT(DISTINCT NULLIF(TRIM(payments.method),'')) FROM payments WHERE payments.invoice_id=(${linkedInvoice}) AND CAST(COALESCE(payments.deleted,0) AS INTEGER)=0 AND COALESCE(payments.status,'Aplicado')<>'Anulado' AND payments.voided_at IS NULL) AS invoice_payment_method`;
   }
   if (resource === "quotes") {
     return `quotes.*,(SELECT TRIM(COALESCE(clients.name,'') || CASE WHEN TRIM(COALESCE(clients.city,''))<>'' THEN ' · ' || TRIM(clients.city) ELSE '' END) FROM clients WHERE clients.id=quotes.client_id) AS client_name_snapshot`;
@@ -1805,7 +1853,7 @@ function lookupSelectFor(resource, profile = "") {
     const available = new Set(db.prepare(`PRAGMA table_info(${resource})`).all().map((column) => String(column.name || "")));
     const tablePrefix = ["orders", "shipments", "invoices", "payments"].includes(resource) ? `${resource}.` : "";
     const columns = requested.filter((column) => available.has(column)).map((column) => `${tablePrefix}"${column.replaceAll('"', '""')}"`);
-    if (resource === "orders") columns.push("order_client.name AS client_name", "order_client.city AS client_city");
+    if (resource === "orders") columns.push("order_client.name AS client_name", "order_client.city AS client_city", "(SELECT dn.id FROM delivery_notes dn WHERE dn.order_id=orders.id AND CAST(COALESCE(dn.deleted,0) AS INTEGER)=0 ORDER BY dn.id DESC LIMIT 1) AS delivery_note_id", "(SELECT dn.code FROM delivery_notes dn WHERE dn.order_id=orders.id AND CAST(COALESCE(dn.deleted,0) AS INTEGER)=0 ORDER BY dn.id DESC LIMIT 1) AS delivery_note_code");
     listColumnsCache.set(cacheKey, columns.length ? columns.join(",") : "*");
   }
   return listColumnsCache.get(cacheKey);
@@ -1839,8 +1887,9 @@ function invalidateRelatedReadCaches(resource) {
     invalidateReadCache("stock");
     invalidateReadCache("product_lots");
   }
-  if (["payments", "billing", "invoices", "delivery_notes"].includes(resource)) {
+  if (["payments", "billing", "invoices", "delivery_notes", "invoice_delivery_notes"].includes(resource)) {
     invalidateReadCache("invoices");
+    invalidateReadCache("delivery_notes");
   }
 }
 function cachedRows(resource, includeDeleted, includeInactive) {
@@ -3537,6 +3586,9 @@ export async function crmApiHandler(req, res) {
             insertLine.run(orderId, line.productId, productName, line.quantity, line.quantityRequested, line.quantityUnit, line.unitsFactor, line.unitPrice, line.discount, line.vat, line.amount, 0, 0, "Pendiente", now, now);
             db.prepare("UPDATE products SET stock_reserved=COALESCE(stock_reserved,0)+? WHERE id=?").run(line.quantity, line.productId);
           }
+          const deliveryNote = ensureOrderDeliveryNote(orderId);
+          const deliveryNoteId = Number(deliveryNote?.id || 0);
+          const deliveryCode = deliveryNote?.code || "";
           const shipmentCode = `ENV-${new Date().getFullYear()}-${String(Date.now()).slice(-7)}`;
           db.prepare("INSERT INTO shipments(code,order_id,client_id,client_name_snapshot,status,preparation_date,expected_delivery_at,address,packages,incidents,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)").run(shipmentCode, orderId, Number(client.id), client.name, "Preparando", null, null, client.address || "", 1, "", `Preparación creada desde el presupuesto ${quote.code}.`, now, now);
           db.prepare("UPDATE quotes SET status='Convertido',converted_order_id=?,updated_at=? WHERE id=?").run(orderId, now, quoteId);
@@ -3545,12 +3597,16 @@ export async function crmApiHandler(req, res) {
           invalidateRelatedReadCaches("quotes");
           invalidateRelatedReadCaches("orders");
           invalidateReadCache("order_lines");
+          invalidateReadCache("delivery_note_lines");
+          invalidateReadCache("delivery_notes");
           invalidateReadCache("shipments");
           invalidateReadCache("products");
           markCommercialDocumentPdfStale("quote", quoteId);
           let orderPdf = null;
           try { orderPdf = await ensureCommercialDocumentPdf("order", orderId, actor); } catch (error) { orderPdf = { pdf_status: "Pendiente · PDF no generado", pdf_error: error?.message || "No se pudo generar el PDF" }; }
-          return send(res, 201, { id: orderId, code, client_id: Number(client.id), amount, status: "Pendiente", source_quote_id: quoteId, source_quote_code: quote.code, stock_alerts: stockShortages, pdf_status: orderPdf.pdf_status, pdf_generated_at: orderPdf.pdf_generated_at || null, share_url: orderPdf.share_token ? documentShareUrl(req, "order", orderPdf.share_token) : null, pdf_error: orderPdf.pdf_error || null });
+          let deliveryPdf = null;
+          try { deliveryPdf = await ensureCommercialDocumentPdf("delivery", deliveryNoteId, actor); } catch (error) { deliveryPdf = { pdf_status: "Pendiente · PDF no generado", pdf_error: error?.message || "No se pudo generar el PDF del albarán" }; }
+          return send(res, 201, { id: orderId, code, client_id: Number(client.id), amount, status: "Pendiente", source_quote_id: quoteId, source_quote_code: quote.code, delivery_note_id: deliveryNoteId, delivery_note_code: deliveryCode, delivery_note_pdf_status: deliveryPdf.pdf_status || null, stock_alerts: stockShortages, pdf_status: orderPdf.pdf_status, pdf_generated_at: orderPdf.pdf_generated_at || null, share_url: orderPdf.share_token ? documentShareUrl(req, "order", orderPdf.share_token) : null, pdf_error: orderPdf.pdf_error || null });
         } catch (error) {
           if (!remoteMode) { try { db.exec("ROLLBACK"); } catch {} }
           return send(res, 500, { error: error?.message || "No se pudo convertir el presupuesto en pedido" });
@@ -4393,7 +4449,7 @@ export async function crmApiHandler(req, res) {
         if (delivery) {
           if (!Number(order.client_id) || !String(order.client_name || "").trim()) return send(res, 409, { error: "El pedido no tiene un cliente disponible; no se puede crear un albarán sin conservar su identidad" });
           const existingDelivery = db.prepare("SELECT id,code FROM delivery_notes WHERE order_id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0 ORDER BY id DESC LIMIT 1").get(order.id);
-          if (existingDelivery) return send(res, 409, { error: `El pedido ${order.code} ya tiene el albarán ${existingDelivery.code}`, ...existingDelivery });
+          if (existingDelivery) return send(res, 200, { ...existingDelivery, order_id: order.id, client_id: order.client_id, idempotent: true });
         }
         if (!delivery) {
           const existingInvoice = db.prepare("SELECT i.code FROM invoices i LEFT JOIN invoice_orders io ON io.invoice_id=i.id AND io.order_id=? WHERE (i.order_id=? OR io.order_id=?) AND COALESCE(i.status,'')<>'Anulada' AND CAST(COALESCE(i.deleted,0) AS INTEGER)=0 LIMIT 1").get(order.id, order.id, order.id);
@@ -4462,22 +4518,72 @@ export async function crmApiHandler(req, res) {
           pdf_error: pdf?.pdf_error || null,
         });
       }
+      if (t === "delivery_notes" && req.method === "POST" && p[2] === "bulk-invoice") {
+        const d = await read(req);
+        const ids = [...new Set((Array.isArray(d.delivery_note_ids) ? d.delivery_note_ids : []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+        if (!ids.length) return send(res, 400, { error: "Selecciona al menos un albarán" });
+        const marks = ids.map(() => "?").join(",");
+        const notes = db.prepare(`SELECT dn.*,c.name client_name FROM delivery_notes dn LEFT JOIN clients c ON c.id=dn.client_id WHERE dn.id IN (${marks}) AND CAST(COALESCE(dn.deleted,0) AS INTEGER)=0 ORDER BY dn.id`).all(...ids);
+        if (notes.length !== ids.length) return send(res, 400, { error: "Uno de los albaranes ya no está disponible" });
+        const clients = new Set(notes.map((note) => Number(note.client_id || 0)));
+        if (clients.size !== 1 || !Number(notes[0].client_id)) return send(res, 400, { error: "Solo se pueden agrupar albaranes de un mismo cliente" });
+        const alreadyBilled = db.prepare(`SELECT dn.code,COALESCE(i.code,'Factura existente') invoice_code FROM delivery_notes dn LEFT JOIN invoices i ON CAST(COALESCE(i.deleted,0) AS INTEGER)=0 AND COALESCE(i.status,'')<>'Anulada' AND (i.delivery_note_id=dn.id OR EXISTS(SELECT 1 FROM invoice_delivery_notes idn WHERE idn.invoice_id=i.id AND idn.delivery_note_id=dn.id) OR (dn.order_id IS NOT NULL AND (i.order_id=dn.order_id OR EXISTS(SELECT 1 FROM invoice_orders io WHERE io.invoice_id=i.id AND io.order_id=dn.order_id)))) WHERE dn.id IN (${marks}) AND i.id IS NOT NULL`).all(...ids);
+        if (alreadyBilled.length) return send(res, 409, { error: `Ya facturados: ${alreadyBilled.map((note) => `${note.code} (${note.invoice_code})`).join(", ")}` });
+        const orderIds = [...new Set(notes.map((note) => Number(note.order_id || 0)).filter((id) => id > 0))];
+        const orders = orderIds.length ? db.prepare(`SELECT * FROM orders WHERE id IN (${orderIds.map(() => "?").join(",")})`).all(...orderIds) : [];
+        const orderById = new Map(orders.map((order) => [Number(order.id), order]));
+        const invoiceOrderConflict = orderIds.length ? db.prepare(`SELECT io.order_id,i.code FROM invoice_orders io JOIN invoices i ON i.id=io.invoice_id WHERE io.order_id IN (${orderIds.map(() => "?").join(",")}) AND CAST(COALESCE(i.deleted,0) AS INTEGER)=0 AND COALESCE(i.status,'')<>'Anulada' LIMIT 1`).get(...orderIds) : null;
+        if (invoiceOrderConflict) return send(res, 409, { error: `El pedido #${invoiceOrderConflict.order_id} ya pertenece a la factura ${invoiceOrderConflict.code}` });
+        const snapshot = invoiceSnapshotData({ clientId: notes[0].client_id, order: orderById.get(Number(notes[0].order_id || 0)) || null });
+        const code = `FAC-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+        const now = new Date().toISOString();
+        if (!remoteMode) db.exec("BEGIN");
+        try {
+          const created = db.prepare("INSERT INTO invoices(code,order_id,delivery_note_id,client_id,amount,status,issue_date,created_at,updated_at,client_name_snapshot,client_legal_name_snapshot,client_tax_id_snapshot,client_billing_address_snapshot,client_billing_city_snapshot,client_delivery_address_snapshot,client_delivery_city_snapshot,client_email_snapshot,client_phone_snapshot,equivalence_surcharge_enabled,customer_snapshot_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(code, orderIds[0] || null, ids[0], notes[0].client_id, 0, "Pendiente", now.slice(0, 10), now, now, snapshot.client_name_snapshot, snapshot.client_legal_name_snapshot, snapshot.client_tax_id_snapshot, snapshot.client_billing_address_snapshot, snapshot.client_billing_city_snapshot, snapshot.client_delivery_address_snapshot, snapshot.client_delivery_city_snapshot, snapshot.client_email_snapshot, snapshot.client_phone_snapshot, snapshot.equivalence_surcharge_enabled, snapshot.customer_snapshot_json);
+          const invoiceId = Number(created.lastInsertRowid);
+          db.prepare("UPDATE invoices SET gtr_enabled=? WHERE id=?").run(notes.some((note) => Number(note.gtr_enabled ?? 1) !== 0) ? 1 : 0, invoiceId);
+          const noteRelation = db.prepare("INSERT INTO invoice_delivery_notes(invoice_id,delivery_note_id) VALUES(?,?)");
+          const invoiceLine = db.prepare("INSERT INTO invoice_lines(invoice_id,product_id,quantity,unit_price,discount,vat,amount,description,line_type,accounting_account) SELECT ?,d.product_id,d.quantity,COALESCE(d.unit_price,o.unit_price,0),COALESCE(o.discount,0),COALESCE(d.vat,o.vat,21),COALESCE(d.amount,d.quantity*COALESCE(d.unit_price,o.unit_price,0)),d.description,d.line_type,d.accounting_account FROM delivery_note_lines d LEFT JOIN delivery_notes dn ON dn.id=d.delivery_note_id LEFT JOIN order_lines o ON o.id=(SELECT ol.id FROM order_lines ol WHERE ol.order_id=dn.order_id AND ol.product_id=d.product_id ORDER BY ol.id LIMIT 1) WHERE d.delivery_note_id=? AND COALESCE(d.line_type,'')<>'GTR' AND COALESCE(d.product_id,0)<>COALESCE((SELECT id FROM products WHERE sku='GTR-SERVICIO' LIMIT 1),-1)");
+          for (const note of notes) {
+            noteRelation.run(invoiceId, Number(note.id));
+            invoiceLine.run(invoiceId, Number(note.id));
+          }
+          if (orderIds.length) {
+            const relation = db.prepare("INSERT INTO invoice_orders(invoice_id,order_id) VALUES(?,?)");
+            for (const orderId of orderIds) {
+              relation.run(invoiceId, orderId);
+              db.prepare("UPDATE orders SET status='Facturado',updated_at=? WHERE id=?").run(now, orderId);
+            }
+          }
+          const taxTotals = recalculateInvoiceTax(invoiceId, actor);
+          if (!remoteMode) db.exec("COMMIT");
+          invalidateReadCache("invoice_lines");
+          invalidateReadCache("invoice_delivery_notes");
+          invalidateReadCache("delivery_notes");
+          invalidateReadCache("invoice_orders");
+          invalidateReadCache("orders");
+          let pdf = null;
+          try { pdf = await ensureInvoicePdf(invoiceId, actor); } catch (error) { pdf = { pdf_status: "Pendiente · PDF no generado", pdf_error: error?.message || "No se pudo generar el PDF" }; }
+          return send(res, 201, { id: invoiceId, code, client_id: notes[0].client_id, delivery_note_ids: ids, order_ids: orderIds, status: "Pendiente", amount: Number(taxTotals?.total_amount || 0), base_amount: Number(taxTotals?.base_amount || 0), vat_amount: Number(taxTotals?.vat_amount || 0), equivalence_surcharge_amount: Number(taxTotals?.equivalence_surcharge_amount || 0), pdf_status: pdf.pdf_status, pdf_generated_at: pdf.pdf_generated_at || null, share_url: pdf.share_token ? invoiceShareUrl(req, pdf.share_token) : null, pdf_error: pdf.pdf_error || null });
+        } catch (error) { if (!remoteMode) { try { db.exec("ROLLBACK"); } catch {} } return send(res, 500, { error: error?.message || "No se pudo agrupar la factura" }); }
+      }
       if (t === "delivery_notes" && req.method === "POST" && p[2] === "convert-invoice") {
-        const delivery = db.prepare("SELECT * FROM delivery_notes WHERE id=?").get(p[3]);
+        const delivery = db.prepare("SELECT * FROM delivery_notes WHERE id=? AND CAST(COALESCE(deleted,0) AS INTEGER)=0").get(p[3]);
         if (!delivery) return send(res, 404, { error: "Albarán no encontrado" });
         const order = delivery.order_id
           ? db.prepare("SELECT * FROM orders WHERE id=?").get(delivery.order_id)
           : null;
         const existing = db.prepare(
-          "SELECT id,code FROM invoices WHERE CAST(COALESCE(deleted,0) AS INTEGER)=0 AND COALESCE(status,'')<>'Anulada' AND (delivery_note_id=? OR (order_id IS NOT NULL AND order_id=?) OR EXISTS(SELECT 1 FROM invoice_orders io WHERE io.invoice_id=invoices.id AND io.order_id=?)) LIMIT 1",
-        ).get(delivery.id, delivery.order_id || 0, delivery.order_id || 0);
-        if (existing) return send(res, 409, { error: `La factura ${existing.code} ya existe`, ...existing });
+          "SELECT id,code,status FROM invoices WHERE CAST(COALESCE(deleted,0) AS INTEGER)=0 AND COALESCE(status,'')<>'Anulada' AND (delivery_note_id=? OR EXISTS(SELECT 1 FROM invoice_delivery_notes idn WHERE idn.invoice_id=invoices.id AND idn.delivery_note_id=?) OR (order_id IS NOT NULL AND order_id=?) OR EXISTS(SELECT 1 FROM invoice_orders io WHERE io.invoice_id=invoices.id AND io.order_id=?)) LIMIT 1",
+        ).get(delivery.id, delivery.id, delivery.order_id || 0, delivery.order_id || 0);
+        if (existing) return send(res, 200, { ...existing, idempotent: true, delivery_note_id: delivery.id });
         const code = `FAC-${new Date().getFullYear()}-${String(Date.now()).slice(-5)}`;
         const snapshot = invoiceSnapshotData({ clientId: delivery.client_id, order });
         const created = db.prepare(
           "INSERT INTO invoices(code,order_id,delivery_note_id,client_id,amount,status,issue_date,created_at,updated_at,client_name_snapshot,client_legal_name_snapshot,client_tax_id_snapshot,client_billing_address_snapshot,client_billing_city_snapshot,client_delivery_address_snapshot,client_delivery_city_snapshot,client_email_snapshot,client_phone_snapshot,equivalence_surcharge_enabled,customer_snapshot_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         ).run(code, delivery.order_id || null, delivery.id, delivery.client_id, order?.amount || 0, "Pendiente", new Date().toISOString().slice(0, 10), new Date().toISOString(), new Date().toISOString(), snapshot.client_name_snapshot, snapshot.client_legal_name_snapshot, snapshot.client_tax_id_snapshot, snapshot.client_billing_address_snapshot, snapshot.client_billing_city_snapshot, snapshot.client_delivery_address_snapshot, snapshot.client_delivery_city_snapshot, snapshot.client_email_snapshot, snapshot.client_phone_snapshot, snapshot.equivalence_surcharge_enabled, snapshot.customer_snapshot_json);
         const invoiceId = Number(created.lastInsertRowid);
+        db.prepare("INSERT OR IGNORE INTO invoice_delivery_notes(invoice_id,delivery_note_id) VALUES(?,?)").run(invoiceId, Number(delivery.id));
         db.prepare("UPDATE invoices SET gtr_enabled=? WHERE id=?").run(Number(delivery.gtr_enabled ?? 1) !== 0 ? 1 : 0, invoiceId);
         db.prepare(
           "INSERT INTO invoice_lines(invoice_id,product_id,quantity,unit_price,discount,vat,amount,description,line_type,accounting_account) SELECT ?,d.product_id,d.quantity,COALESCE(d.unit_price,o.unit_price,0),COALESCE(o.discount,0),COALESCE(d.vat,o.vat,21),COALESCE(d.amount,o.amount,d.quantity*COALESCE(d.unit_price,o.unit_price,0)),d.description,d.line_type,d.accounting_account FROM delivery_note_lines d LEFT JOIN order_lines o ON o.order_id=? AND o.product_id=d.product_id WHERE d.delivery_note_id=?",
@@ -4486,6 +4592,7 @@ export async function crmApiHandler(req, res) {
         if (delivery.order_id) db.prepare("INSERT INTO invoice_orders(invoice_id,order_id) VALUES(?,?)").run(invoiceId, delivery.order_id);
         if (delivery.order_id) db.prepare("UPDATE orders SET status='Facturado',updated_at=? WHERE id=?").run(new Date().toISOString(), delivery.order_id);
         invalidateReadCache("invoice_lines");
+        invalidateReadCache("invoice_delivery_notes");
         invalidateReadCache("delivery_notes");
         invalidateReadCache("orders");
         let pdf = null;
@@ -4592,7 +4699,7 @@ export async function crmApiHandler(req, res) {
                 ? `payments LEFT JOIN invoices AS payment_invoice ON payment_invoice.id=payments.invoice_id LEFT JOIN clients AS payment_client ON payment_client.id=payment_invoice.client_id`
               : t;
           const selection = t === "orders"
-            ? "orders.*,order_client.name AS client_name,order_client.city AS client_city,CASE WHEN orders.status='Facturado' OR EXISTS(SELECT 1 FROM invoice_orders io JOIN invoices bi ON bi.id=io.invoice_id WHERE io.order_id=orders.id AND COALESCE(bi.status,'')<>'Anulada' AND COALESCE(bi.deleted,0)=0) OR EXISTS(SELECT 1 FROM invoices bi WHERE bi.order_id=orders.id AND COALESCE(bi.status,'')<>'Anulada' AND COALESCE(bi.deleted,0)=0) THEN 'Facturado' ELSE 'Sin facturar' END AS billing_status"
+            ? "orders.*,order_client.name AS client_name,order_client.city AS client_city,(SELECT dn.id FROM delivery_notes dn WHERE dn.order_id=orders.id AND CAST(COALESCE(dn.deleted,0) AS INTEGER)=0 ORDER BY dn.id DESC LIMIT 1) AS delivery_note_id,(SELECT dn.code FROM delivery_notes dn WHERE dn.order_id=orders.id AND CAST(COALESCE(dn.deleted,0) AS INTEGER)=0 ORDER BY dn.id DESC LIMIT 1) AS delivery_note_code,CASE WHEN orders.status='Facturado' OR EXISTS(SELECT 1 FROM invoice_orders io JOIN invoices bi ON bi.id=io.invoice_id WHERE io.order_id=orders.id AND COALESCE(bi.status,'')<>'Anulada' AND COALESCE(bi.deleted,0)=0) OR EXISTS(SELECT 1 FROM invoices bi WHERE bi.order_id=orders.id AND COALESCE(bi.status,'')<>'Anulada' AND COALESCE(bi.deleted,0)=0) THEN 'Facturado' ELSE 'Sin facturar' END AS billing_status"
             : t === "shipments"
               ? "shipments.*,(SELECT shipping_date FROM orders WHERE orders.id=shipments.order_id) AS shipping_date"
               : t === "invoices"
@@ -4627,7 +4734,7 @@ export async function crmApiHandler(req, res) {
           : isLookup
           ? lookupSelectFor(t, lookupProfile)
           : t === "orders"
-            ? "orders.*,order_client.name AS client_name,order_client.city AS client_city,CASE WHEN orders.status='Facturado' OR EXISTS(SELECT 1 FROM invoice_orders io JOIN invoices bi ON bi.id=io.invoice_id WHERE io.order_id=orders.id AND COALESCE(bi.status,'')<>'Anulada' AND COALESCE(bi.deleted,0)=0) OR EXISTS(SELECT 1 FROM invoices bi WHERE bi.order_id=orders.id AND COALESCE(bi.status,'')<>'Anulada' AND COALESCE(bi.deleted,0)=0) THEN 'Facturado' ELSE 'Sin facturar' END AS billing_status"
+            ? "orders.*,order_client.name AS client_name,order_client.city AS client_city,(SELECT dn.id FROM delivery_notes dn WHERE dn.order_id=orders.id AND CAST(COALESCE(dn.deleted,0) AS INTEGER)=0 ORDER BY dn.id DESC LIMIT 1) AS delivery_note_id,(SELECT dn.code FROM delivery_notes dn WHERE dn.order_id=orders.id AND CAST(COALESCE(dn.deleted,0) AS INTEGER)=0 ORDER BY dn.id DESC LIMIT 1) AS delivery_note_code,CASE WHEN orders.status='Facturado' OR EXISTS(SELECT 1 FROM invoice_orders io JOIN invoices bi ON bi.id=io.invoice_id WHERE io.order_id=orders.id AND COALESCE(bi.status,'')<>'Anulada' AND COALESCE(bi.deleted,0)=0) OR EXISTS(SELECT 1 FROM invoices bi WHERE bi.order_id=orders.id AND COALESCE(bi.status,'')<>'Anulada' AND COALESCE(bi.deleted,0)=0) THEN 'Facturado' ELSE 'Sin facturar' END AS billing_status"
           : t === "shipments"
               ? "shipments.*,(SELECT shipping_date FROM orders WHERE orders.id=shipments.order_id) AS shipping_date"
             : t === "invoices"
@@ -5082,6 +5189,7 @@ export async function crmApiHandler(req, res) {
             if (line.product_id !== Number(d.product_id)) db.prepare("UPDATE products SET stock_reserved=COALESCE(stock_reserved,0)+? WHERE id=?").run(line.quantity, line.product_id);
           }
         }
+        const createdDeliveryNote = t === "orders" ? ensureOrderDeliveryNote(Number(r.lastInsertRowid)) : null;
         if (t === "purchase_orders" && purchaseOrderLines) {
           for (const line of purchaseOrderLines) {
             db.prepare("INSERT INTO purchase_order_lines(purchase_order_id,product_id,quantity,unit_cost,amount,quantity_unit,supplier_product_name,supplier_ref,supplier_alias_id,source_text,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").run(Number(r.lastInsertRowid), line.productId, line.quantity, line.unitCost, line.amount, line.quantityUnit, line.supplierProductName || null, line.supplierRef || null, line.supplierAliasId, line.sourceText || null, now, now);
@@ -5123,13 +5231,20 @@ export async function crmApiHandler(req, res) {
         }
         if (t === "invoice_lines" && d.invoice_id) { recalculateInvoiceTax(d.invoice_id, actor); markInvoicePdfStale(d.invoice_id); }
         if (t === "order_lines" && d.order_id) markCommercialDocumentPdfStale("order", d.order_id);
+        if (t === "order_lines" && Number(d.order_id || 0) > 0) {
+          const deliveryNote = ensureOrderDeliveryNote(Number(d.order_id));
+          if (deliveryNote) { try { await ensureCommercialDocumentPdf("delivery", deliveryNote.id, actor); } catch {} }
+        }
         if (t === "quote_lines" && d.quote_id) markCommercialDocumentPdfStale("quote", d.quote_id);
         const createdRecord = t === "purchase_orders"
           ? { id: Number(r.lastInsertRowid), ...d, ...purchasePaymentInfo({ id: Number(r.lastInsertRowid), ...d }) }
           : { id: Number(r.lastInsertRowid), ...d };
         if (t === "shipments") createdRecord.public_tracking_token = ensureShipmentTrackingToken(Number(r.lastInsertRowid));
         if (t === "products") Object.assign(createdRecord, db.prepare("SELECT photo_url,photo_public_id,photo_thumbnail_url,photo_web_url,photo_bytes,photo_width,photo_height,photo_format FROM products WHERE id=?").get(Number(r.lastInsertRowid)) || {});
-        if (t === "orders") createdRecord.stock_alerts = [...stockShortages, ...stockAlerts];
+        if (t === "orders") {
+          createdRecord.stock_alerts = [...stockShortages, ...stockAlerts];
+          if (createdDeliveryNote) Object.assign(createdRecord, { delivery_note_id: createdDeliveryNote.id, delivery_note_code: createdDeliveryNote.code });
+        }
         if (t === "invoices" && String(d.status || "") !== "Anulada") Object.assign(createdRecord, recalculateInvoicePaymentStatus(Number(r.lastInsertRowid), actor) || {});
         if (t === "orders" || t === "quotes") {
           try {
@@ -5138,6 +5253,15 @@ export async function crmApiHandler(req, res) {
           } catch (error) {
             createdRecord.pdf_status = "Pendiente · PDF no generado";
             createdRecord.pdf_error = error?.message || "No se pudo generar el PDF";
+          }
+        }
+        if (t === "orders" && createdDeliveryNote) {
+          try {
+            const deliveryPdf = await ensureCommercialDocumentPdf("delivery", createdDeliveryNote.id, actor);
+            createdRecord.delivery_note_pdf_status = deliveryPdf.pdf_status || null;
+          } catch (error) {
+            createdRecord.delivery_note_pdf_status = "Pendiente · PDF no generado";
+            createdRecord.delivery_note_pdf_error = error?.message || "No se pudo generar el PDF del albarán";
           }
         }
         if (t === "orders") {
@@ -5188,7 +5312,11 @@ export async function crmApiHandler(req, res) {
         }
         if (t === "order_lines") {
           const line = db.prepare("SELECT order_id FROM order_lines WHERE id=?").get(Number(p[2]));
-          if (line?.order_id) markCommercialDocumentPdfStale("order", line.order_id);
+          if (line?.order_id) {
+            markCommercialDocumentPdfStale("order", line.order_id);
+            const deliveryNote = ensureOrderDeliveryNote(Number(line.order_id));
+            if (deliveryNote) { try { await ensureCommercialDocumentPdf("delivery", deliveryNote.id, actor); } catch {} }
+          }
         }
         if (t === "quote_lines") {
           const line = db.prepare("SELECT quote_id FROM quote_lines WHERE id=?").get(Number(p[2]));
@@ -5637,7 +5765,11 @@ export async function crmApiHandler(req, res) {
           const line = db.prepare("SELECT quote_id FROM quote_lines WHERE id=?").get(Number(p[2]));
           if (line?.quote_id) markCommercialDocumentPdfStale("quote", line.quote_id);
         }
-        if (t === "orders") markCommercialDocumentPdfStale("order", Number(p[2]));
+        if (t === "orders") {
+          markCommercialDocumentPdfStale("order", Number(p[2]));
+          const deliveryNote = ensureOrderDeliveryNote(Number(p[2]));
+          if (deliveryNote) { try { await ensureCommercialDocumentPdf("delivery", deliveryNote.id, actor); } catch {} }
+        }
         if (t === "quotes") markCommercialDocumentPdfStale("quote", Number(p[2]));
         return send(res, 200, { id: Number(p[2]), ...d });
       }

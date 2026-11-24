@@ -2966,7 +2966,9 @@ footer span {
 .delivery-note-bulk-toolbar > span { color: #657780; }
 .delivery-note-select-column { width: 34px; text-align: center; }
 .delivery-note-invoice-status, .delivery-note-unbilled-status { display: inline-block; max-width: 150px; overflow: hidden; padding: 2px 5px; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-.delivery-note-invoice-status { border-left: 2px solid #16945b; background: #edf8f2; color: #147346; }
+.delivery-note-invoice-status { display: inline-flex; flex-direction: column; gap: 2px; max-width: 190px; overflow: visible; border-left: 2px solid #16945b; background: #edf8f2; color: #147346; white-space: normal; }
+.delivery-note-invoice-status b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.delivery-note-invoice-status small { color: #536773; font-size: 10px; line-height: 1.25; white-space: normal; }
 .delivery-note-unbilled-status { border-left: 2px solid #c98216; background: #fff7e8; color: #8a5606; }
 .row-actions-disclosure { position: relative; display: inline-block; }
 .row-actions-disclosure > summary { display: inline-flex; align-items: center; justify-content: center; min-width: 82px; min-height: 30px; padding: 4px 9px; border: 1px solid #cbd5dc; background: #fff; color: #293a44; cursor: pointer; list-style: none; font-size: 11px; font-weight: 700; }

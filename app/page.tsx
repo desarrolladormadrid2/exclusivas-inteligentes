@@ -6504,29 +6504,47 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
     const d = await r.json();
     if (!r.ok) return alert(d.error || "No se pudo generar la factura");
     setDocumentCreationNotice({ documentType: "Factura", code: d.code, id: d.id, module: "Facturas", shareUrl: d.share_url || "" });
+    setListRefreshKey((value) => value + 1);
+    if (preview && Number(preview.id) === Number(row.id)) setPreview((current: any) => current ? { ...current, invoice_code: d.code, invoice_status: d.status || "Pendiente", invoice_payment_method: "" } : current);
   }
-  async function invoiceSelectedDeliveryNotes() {
+  async function openOrderDeliveryNote(row: any) {
+    const deliveryId = Number(row.delivery_note_id || 0);
+    if (deliveryId) {
+      let note = (lookups.delivery_notes || []).find((item: any) => Number(item.id) === deliveryId);
+      if (!note) {
+        const response = await fetch(`/api/delivery_notes/${deliveryId}`, { cache: "no-store" });
+        note = response.ok ? await response.json() : null;
+      }
+      if (note) { await openPreview(note); return; }
+    }
+    await convertOrder(row, "delivery");
+  }
+  async function invoiceSelectedDeliveryNotes(mode: "separate" | "group") {
     const selected = filteredRows.filter((row: any) => selectedDeliveryNoteIds.includes(Number(row.id)) && !row.invoice_code);
     if (!listClient) return alert("Filtra primero por un cliente para evitar mezclar facturas.");
     if (!selected.length) return alert("Selecciona albaranes pendientes de facturar.");
     const clientIds = new Set(selected.map((row: any) => Number(row.client_id)));
-    const days = new Set(selected.map((row: any) => String(row.delivery_date || row.created_at || "").slice(0, 10)));
     if (clientIds.size !== 1 || !clientIds.has(Number(listClient))) return alert("Los albaranes seleccionados deben pertenecer al cliente filtrado.");
-    if (days.size !== 1 || days.has("")) return alert("Selecciona albaranes de un solo día. Usa el filtro de fecha para elegir la jornada.");
-    const byOrder = new Map<number, any>();
-    for (const row of selected) if (Number(row.order_id) > 0 && !byOrder.has(Number(row.order_id))) byOrder.set(Number(row.order_id), row);
-    const candidates = [...byOrder.values()];
-    if (!candidates.length) return alert("Los albaranes seleccionados no están vinculados a pedidos facturables.");
-    if (!window.confirm(`Se crearán ${candidates.length} facturas, una por pedido, para el cliente y el día seleccionados. ¿Continuar?`)) return;
+    const prompt = mode === "group"
+      ? `Se agruparán ${selected.length} albaranes del cliente en una sola factura. ¿Continuar?`
+      : `Se creará una factura independiente por cada uno de los ${selected.length} albaranes seleccionados. ¿Continuar?`;
+    if (!window.confirm(prompt)) return;
     setBulkDeliveryInvoiceSaving(true);
     const created: string[] = [];
     const failures: string[] = [];
     try {
-      for (const row of candidates) {
-        const response = await fetch(`/api/delivery_notes/convert-invoice/${row.id}`, { method: "POST", headers: actorHeaders });
+      if (mode === "group") {
+        const response = await fetch("/api/delivery_notes/bulk-invoice", { method: "POST", headers: actorHeaders, body: JSON.stringify({ delivery_note_ids: selected.map((row: any) => Number(row.id)) }) });
         const body = await response.json().catch(() => ({}));
-        if (!response.ok) failures.push(`${row.code}: ${body.error || "No se pudo generar"}`);
-        else created.push(body.code || row.code);
+        if (!response.ok) failures.push(body.error || "No se pudo agrupar la factura");
+        else created.push(body.code || "Factura agrupada");
+      } else {
+        for (const row of selected) {
+          const response = await fetch(`/api/delivery_notes/convert-invoice/${row.id}`, { method: "POST", headers: actorHeaders });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) failures.push(`${row.code}: ${body.error || "No se pudo generar"}`);
+          else created.push(body.code || row.code);
+        }
       }
       setSelectedDeliveryNoteIds([]);
       setListRefreshKey((value) => value + 1);
@@ -8218,7 +8236,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             <>
             {editing && <div className="order-record-toolbar" role="toolbar" aria-label="Acciones del pedido">
               <div><b>{isOrderSent(editing) ? "Pedido cerrado" : "Pedido editable"}</b><small>{isOrderSent(editing) ? "El pedido ya ha salido del almacén; consulta su documento desde aquí." : "Puedes modificar los datos y las líneas antes de enviarlo."}</small></div>
-              <div>{!isOrderSent(editing) && <>{editing.status === "Bloqueado" || editing.status === "Pospuesto" ? <button type="button" className="button primary" onClick={() => void manageOrder(editing, "Pendiente")}>Reactivar pedido</button> : <><button type="button" className="button secondary" onClick={() => void manageOrder(editing, "Bloqueado")}>Bloquear pedido</button><button type="button" className="button secondary" onClick={() => void manageOrder(editing, "Pospuesto")}>Posponer pedido</button></>}<button type="button" className="button danger" onClick={() => void manageOrder(editing, "Cancelado")}>Anular pedido</button></>}{<button type="button" className="button secondary" onClick={() => void openPreview(editing)}>Ver detalle</button>}{getOrderShipment(editing) ? <button type="button" className="button workflow" onClick={() => void openOrderLoadNote(editing)}>Abrir nota de carga</button> : <button type="button" className="button workflow" onClick={() => void createOrderLoadNote(editing)}>Crear nota de carga</button>}<button type="button" className="button secondary" onClick={() => void convertOrder(editing, "delivery")} disabled={Boolean(editing.delivery_note_id)}>Crear albarán</button><button type="button" className="button primary" onClick={() => void convertOrder(editing, "invoice")} disabled={getOrderBillingStatus(editing) === "Facturado"}>Crear factura</button></div>
+              <div>{!isOrderSent(editing) && <>{editing.status === "Bloqueado" || editing.status === "Pospuesto" ? <button type="button" className="button primary" onClick={() => void manageOrder(editing, "Pendiente")}>Reactivar pedido</button> : <><button type="button" className="button secondary" onClick={() => void manageOrder(editing, "Bloqueado")}>Bloquear pedido</button><button type="button" className="button secondary" onClick={() => void manageOrder(editing, "Pospuesto")}>Posponer pedido</button></>}<button type="button" className="button danger" onClick={() => void manageOrder(editing, "Cancelado")}>Anular pedido</button></>}{<button type="button" className="button secondary" onClick={() => void openPreview(editing)}>Ver detalle</button>}{getOrderShipment(editing) ? <button type="button" className="button workflow" onClick={() => void openOrderLoadNote(editing)}>Abrir nota de carga</button> : <button type="button" className="button workflow" onClick={() => void createOrderLoadNote(editing)}>Crear nota de carga</button>}<button type="button" className="button secondary" onClick={() => void openOrderDeliveryNote(editing)}>{editing.delivery_note_id ? `Abrir albarán · ${editing.delivery_note_code || ""}` : "Crear albarán"}</button></div>
             </div>}
             {editing && <OrderWorkflowPanel order={editing} shipment={getOrderShipment(editing)} billingStatus={getOrderBillingStatus(editing)} paymentStatus={getOrderPaymentStatus(editing)} invoice={getOrderInvoice(editing)} onOpenPayment={() => openPaymentFromOrder(editing)} onNavigate={onNavigate} />}
             <details className="order-general-accordion" open>
@@ -8424,7 +8442,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
             {quickViewOptions.map((option) => <button key={option.value} type="button" className={`saved-view-button${quickView === option.value ? " is-active" : ""}`} aria-pressed={quickView === option.value} onClick={() => { setQuickView(option.value); try { localStorage.setItem(`excluvas.quick-view.${c.api}`, option.value); } catch {} }}>{option.label}</button>)}
           </div>}
           </div>
-          {active === "Albaranes" && <div className="delivery-note-bulk-toolbar"><label><input type="checkbox" aria-label="Seleccionar albaranes pendientes visibles" checked={filteredRows.filter((row: any) => !row.invoice_code).length > 0 && filteredRows.filter((row: any) => !row.invoice_code).every((row: any) => selectedDeliveryNoteIds.includes(Number(row.id)))} onChange={(event) => setSelectedDeliveryNoteIds(event.target.checked ? filteredRows.filter((row: any) => !row.invoice_code).map((row: any) => Number(row.id)) : [])} /> Seleccionar albaranes sin factura</label><span>{filteredRows.filter((row: any) => selectedDeliveryNoteIds.includes(Number(row.id)) && !row.invoice_code).length} seleccionados</span><button type="button" className="button primary" disabled={bulkDeliveryInvoiceSaving || !selectedDeliveryNoteIds.some((id) => filteredRows.some((row: any) => Number(row.id) === id && !row.invoice_code))} onClick={() => void invoiceSelectedDeliveryNotes()}>{bulkDeliveryInvoiceSaving ? "Creando facturas…" : "Facturar pedidos seleccionados"}</button></div>}
+          {active === "Albaranes" && <div className="delivery-note-bulk-toolbar"><label><input type="checkbox" aria-label="Seleccionar albaranes pendientes visibles" checked={filteredRows.filter((row: any) => !row.invoice_code).length > 0 && filteredRows.filter((row: any) => !row.invoice_code).every((row: any) => selectedDeliveryNoteIds.includes(Number(row.id)))} onChange={(event) => setSelectedDeliveryNoteIds(event.target.checked ? filteredRows.filter((row: any) => !row.invoice_code).map((row: any) => Number(row.id)) : [])} /> Seleccionar albaranes sin factura</label><span>{filteredRows.filter((row: any) => selectedDeliveryNoteIds.includes(Number(row.id)) && !row.invoice_code).length} seleccionados</span><button type="button" className="button secondary" disabled={bulkDeliveryInvoiceSaving || !selectedDeliveryNoteIds.some((id) => filteredRows.some((row: any) => Number(row.id) === id && !row.invoice_code))} onClick={() => void invoiceSelectedDeliveryNotes("separate")}>{bulkDeliveryInvoiceSaving ? "Creando…" : "Una factura por albarán"}</button><button type="button" className="button primary" disabled={bulkDeliveryInvoiceSaving || !selectedDeliveryNoteIds.some((id) => filteredRows.some((row: any) => Number(row.id) === id && !row.invoice_code))} onClick={() => void invoiceSelectedDeliveryNotes("group")}>{bulkDeliveryInvoiceSaving ? "Creando…" : "Agrupar en una factura"}</button></div>}
           <div className="table-tools-filters">
           {active === "Pedidos" && <select className="billing-filter-select" value={billingFilter} onChange={(event) => setBillingFilter(event.target.value)} aria-label="Filtrar pedidos por facturación"><option value="todos">Facturación: todos</option><option value="pendientes">Sin facturar</option><option value="facturados">Facturados</option></select>}
           {active === "Pedidos" && <select className="billing-filter-select" value={shippingFilter} onChange={(event) => setShippingFilter(event.target.value)} aria-label="Filtrar pedidos por envío"><option value="todos">Envío: todos</option><option value="pendientes">Pendientes de enviar</option><option value="enviados">Enviados o entregados</option></select>}
@@ -8590,7 +8608,11 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                             renderInlineEditor(f, r)
                           ) : (
                               f === "invoice_code"
-                              ? r.invoice_code ? <span className="delivery-note-invoice-status">{r.invoice_code}</span> : <span className="delivery-note-unbilled-status">Sin factura</span>
+                              ? r.invoice_code ? <span className="delivery-note-invoice-status"><b>{r.invoice_code}</b><small>{r.invoice_status || "Pendiente"} · {r.invoice_payment_method ? `Cobro: ${r.invoice_payment_method}` : "Sin cobro"}</small></span> : <span className="delivery-note-unbilled-status">Sin factura</span>
+                              : f === "invoice_status"
+                              ? <span className={`billing-status billing-status-${String(r.invoice_status || "Sin factura").toLowerCase().replaceAll(" ", "-")}`}>{r.invoice_status || "Sin factura"}</span>
+                              : f === "invoice_payment_method"
+                              ? r.invoice_code ? (r.invoice_payment_method || "Sin cobro") : "—"
                               : f === "pending_invoice_count"
                               ? `${Number(r.pending_invoice_count || 0).toLocaleString("es-ES")} ${Number(r.pending_invoice_count || 0) === 1 ? "factura" : "facturas"}`
                               : f === "pending_invoice_total"
@@ -9159,8 +9181,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
               </button>}
             </div>
             {active === "Facturas" && <div className="invoice-document-actions"><button type="button" className="button workflow" onClick={() => void openInvoicePdf(preview)}>Ver PDF generado</button><button type="button" className="button secondary" onClick={() => void copyInvoiceLink(preview)}>Copiar enlace seguro</button><button type="button" className="button workflow" onClick={() => void sendInvoiceEmail(preview)}>Enviar por email</button><button type="button" className="button secondary" onClick={() => void prepareInvoicePdf(preview, true)}>Regenerar PDF</button>{getInvoiceOutstanding(preview) > 0.009 && <button type="button" className="button primary" onClick={() => openPaymentForInvoice(preview)}>Registrar cobro · {getInvoiceOutstanding(preview).toLocaleString("es-ES", { style: "currency", currency: "EUR" })}</button>}</div>}
-            {active === "Albaranes" && <div className="invoice-document-actions"><button type="button" className="button workflow" onClick={() => void openCommercialDocumentPdf(preview, "delivery")}>Ver PDF generado</button><button type="button" className="button secondary" onClick={() => void copyCommercialDocumentLink(preview, "delivery")}>Copiar enlace seguro</button><button type="button" className="button secondary" onClick={() => void prepareCommercialDocumentPdf(preview, "delivery", true)}>Regenerar PDF</button></div>}
-            {active === "Pedidos" && <><div className="document-pdf-actions"><button type="button" className="button workflow" onClick={() => void openCommercialDocumentPdf(preview, "order")}>Ver PDF generado</button><button type="button" className="button secondary" onClick={() => void copyCommercialDocumentLink(preview, "order")}>Copiar enlace seguro</button><button type="button" className="button secondary" onClick={() => void prepareCommercialDocumentPdf(preview, "order", true)}>Regenerar PDF</button></div><div className="order-preview-actions"><button type="button" className="button workflow" onClick={() => void (getOrderShipment(preview) ? openOrderLoadNote(preview) : createOrderLoadNote(preview))}>{getOrderShipment(preview) ? "Abrir nota de carga" : "Crear nota de carga"}</button>{!isOrderSent(preview) && <button type="button" className="button secondary" onClick={() => { setPreview(null); beginInline(preview); }}>Editar pedido</button>}<button type="button" className="button secondary" onClick={() => void convertOrder(preview, "delivery")}>Crear albarán</button><button type="button" className="button primary" onClick={() => void convertOrder(preview, "invoice")}>Crear factura</button></div></>}
+            {active === "Albaranes" && <div className="invoice-document-actions"><button type="button" className="button primary" disabled={Boolean(preview.invoice_code)} onClick={() => void convertDeliveryToInvoice(preview)}>{preview.invoice_code ? `Facturado · ${preview.invoice_code}` : "Crear factura desde este albarán"}</button><button type="button" className="button workflow" onClick={() => void openCommercialDocumentPdf(preview, "delivery")}>Ver PDF generado</button><button type="button" className="button secondary" onClick={() => void copyCommercialDocumentLink(preview, "delivery")}>Copiar enlace seguro</button><button type="button" className="button secondary" onClick={() => void prepareCommercialDocumentPdf(preview, "delivery", true)}>Regenerar PDF</button></div>}
+            {active === "Pedidos" && <><div className="document-pdf-actions"><button type="button" className="button workflow" onClick={() => void openCommercialDocumentPdf(preview, "order")}>Ver PDF generado</button><button type="button" className="button secondary" onClick={() => void copyCommercialDocumentLink(preview, "order")}>Copiar enlace seguro</button><button type="button" className="button secondary" onClick={() => void prepareCommercialDocumentPdf(preview, "order", true)}>Regenerar PDF</button></div><div className="order-preview-actions"><button type="button" className="button workflow" onClick={() => void (getOrderShipment(preview) ? openOrderLoadNote(preview) : createOrderLoadNote(preview))}>{getOrderShipment(preview) ? "Abrir nota de carga" : "Crear nota de carga"}</button>{!isOrderSent(preview) && <button type="button" className="button secondary" onClick={() => { setPreview(null); beginInline(preview); }}>Editar pedido</button>}<button type="button" className="button secondary" onClick={() => void openOrderDeliveryNote(preview)}>{preview.delivery_note_id ? `Abrir albarán · ${preview.delivery_note_code || ""}` : "Crear albarán"}</button></div></>}
             {active === "Presupuestos" && <><div className="document-pdf-actions"><button type="button" className="button workflow" onClick={() => void openCommercialDocumentPdf(preview, "quote")}>Ver PDF generado</button><button type="button" className="button secondary" onClick={() => void copyCommercialDocumentLink(preview, "quote")}>Copiar enlace seguro</button><button type="button" className="button secondary" onClick={() => void prepareCommercialDocumentPdf(preview, "quote", true)}>Regenerar PDF</button></div><div className="quote-preview-actions"><button type="button" className="button secondary" onClick={() => void sendQuoteToClient(preview)}>Enviar al cliente</button><button type="button" className="button primary" disabled={preview.status === "Convertido"} onClick={() => void convertQuoteToOrder(preview)}>{preview.status === "Convertido" ? "Convertido a pedido" : "Convertir a pedido"}</button></div></>}
           </div>
         </div>
