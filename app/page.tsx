@@ -6150,7 +6150,10 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       } else {
         setEntryDetail((current: any) => current ? { ...current, ...updated } : current);
       }
-      setRows((current) => current.map((row) => Number(row.id) === Number(entryDetail.id) ? { ...row, ...updated } : row));
+      setRows((current) => current.some((row) => Number(row.id) === Number(entryDetail.id))
+        ? current.map((row) => Number(row.id) === Number(entryDetail.id) ? { ...row, ...entryDetail, ...updated } : row)
+        : [{ ...entryDetail, ...updated }, ...current]);
+      refreshCurrentList();
     } catch (caught: any) {
       alert(caught?.message || "No se pudo actualizar la validación.");
     } finally {
@@ -8253,6 +8256,7 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                 setPendingReceiptRefresh((current) => current + 1);
                 setEntryListView(validated ? "pending" : "received");
                 closeForm(true);
+                refreshCurrentList();
               }}
             />
           ) : active === "Productos" ? (
@@ -8705,6 +8709,8 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
                               ? (r.purchase_order_code ? "Pedido de prueba" : "—")
                               : active === "Entradas" && f === "status"
                               ? <span className="goods-receipt-status"><b>{r.status || "Pendiente"}</b><small>{[r.receipt_date ? formatTableValue("receipt_date", r.receipt_date) : "Sin fecha", r.validation_status || "Validación pendiente", Number(r.stock_applied ?? 0) === 1 ? Number(r.stock_added_quantity ?? -1) > 0 ? `stock sumado (+${Number(r.stock_added_quantity)})` : Number(r.stock_added_quantity ?? -1) === 0 ? "validada sin unidades sumadas" : "stock incorporado" : r.validation_status === "Rechazada" ? "rechazada · sin stock" : "stock pendiente"].join(" · ")}</small></span>
+                              : active === "Envíos" && f === "status"
+                              ? <span className={`shipment-status-label ${["Preparado", "Preparado con incidencia", "Entregado"].includes(String(r.status || "")) ? "is-ready" : ["Preparando", "Enviado", "En reparto"].includes(String(r.status || "")) ? "is-progress" : ["Cancelado", "Incidencia"].includes(String(r.status || "")) ? "is-attention" : "is-pending"}`}>{r.status || "Pendiente"}</span>
                               : f === "counterparty_type"
                               ? (r.counterparty_type || "Proveedor")
                               : f === "stock_applied"

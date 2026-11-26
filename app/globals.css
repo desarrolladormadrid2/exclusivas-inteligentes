@@ -8356,6 +8356,11 @@ body.reparto-modal-open {
 .shipments-table [data-field="delivery_window_start"],.shipments-table [data-field="delivery_window_end"] { min-width:130px; }
 .shipments-table [data-field="expected_delivery_at"] { min-width:150px; }
 .shipments-table [data-field="tracking"] { min-width:170px; }
+.shipment-status-label { display:inline-flex; align-items:center; padding:3px 7px; border-radius:3px; font-weight:600; white-space:nowrap; }
+.shipment-status-label.is-ready { color:#187245; background:#e8f5ed; }
+.shipment-status-label.is-progress { color:#a85b00; background:#fff2df; }
+.shipment-status-label.is-pending { color:#5f6b76; background:#eef1f3; }
+.shipment-status-label.is-attention { color:#a3212b; background:#fff0f0; }
 .supplier-recommended-row { display:grid; grid-template-columns:minmax(250px, .85fr) minmax(210px, .65fr) minmax(460px, 1.5fr); align-items:start; gap:10px; padding:9px; border:1px solid #d4dce0; border-left:3px solid #b91c1c; }
 .supplier-recommended-row > header { min-width:0; }
 .supplier-recommended-table-wrap { min-width:0; overflow-x:auto; border:1px solid #d1d8dc; }
