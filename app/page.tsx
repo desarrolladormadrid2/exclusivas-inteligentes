@@ -4300,7 +4300,7 @@ function PendingSupplierReceipts({ refreshSignal, onReceive, onValidate }: { ref
   </section>;
 }
 
-function GoodsReceiptForm({ lookups, actor, initialPurchaseOrderId = "", onInitialPurchaseOrderConsumed, onCreated }: { lookups: any; actor: string; initialPurchaseOrderId?: string; onInitialPurchaseOrderConsumed?: () => void; onCreated: (receipt: any) => void }) {
+function GoodsReceiptForm({ lookups, actor, initialPurchaseOrderId = "", onInitialPurchaseOrderConsumed, onCreated }: { lookups: any; actor: string; initialPurchaseOrderId?: string; onInitialPurchaseOrderConsumed?: () => void; onCreated: (receipt: any, validated: boolean) => void }) {
   const warehouses = lookups.warehouses || [];
   const isTestWarehouse = (warehouse: any) => /^(?:__(?:QA|TEST)(?:_|\b)|(?:QA|TEST|PRUEBA|DEMO|PW|E2E|SIM)[-_ ])/i.test(String(warehouse.name || "")) || /\b(?:QA|TEST|PRUEBA|DEMO|PW|E2E|SIM)(?:[-_ ]|\b)/i.test(String(warehouse.name || ""));
   const availableWarehouses = warehouses.filter((warehouse: any) => !isTestWarehouse(warehouse));
@@ -4457,7 +4457,7 @@ function GoodsReceiptForm({ lookups, actor, initialPurchaseOrderId = "", onIniti
         const serverMessage = typeof created?.error === "string" ? created.error.trim() : "";
         throw new Error(serverMessage || `No se pudo ${validate ? "validar la entrada ni actualizar el stock" : "guardar la entrada"} (respuesta ${response.status}).`);
       }
-      onCreated(created);
+      onCreated(created, validate);
       setHeader({ code: `ENT-${new Date().getFullYear()}-${String(Date.now()).slice(-7)}`, counterparty_type: "Proveedor", client_id: "", supplier_id: "", purchase_order_id: "", purchase_invoice_id: "", warehouse_id: defaultWarehouseId, receipt_date: tabletTodayInput(), validation_status: "Pendiente", validated_by: "", stock_applied: true, notes: "" });
       setLines([]); setProductSearch("");
     } catch (error: any) {
@@ -6143,7 +6143,13 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
       const response = await fetch(`/api/goods_receipts/${entryDetail.id}`, { method: "PUT", headers: actorHeaders, body: JSON.stringify({ validation_status: status, validated_by: status === "Validada" ? (user?.username || "Usuario local") : null, validated_at: status === "Validada" ? now : null }) });
       const updated = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(updated.error || "No se pudo actualizar la validación.");
-      setEntryDetail((current: any) => current ? { ...current, ...updated } : current);
+      if (status === "Validada") {
+        setEntryDetail(null);
+        setEntryListView("pending");
+        setPendingReceiptRefresh((current) => current + 1);
+      } else {
+        setEntryDetail((current: any) => current ? { ...current, ...updated } : current);
+      }
       setRows((current) => current.map((row) => Number(row.id) === Number(entryDetail.id) ? { ...row, ...updated } : row));
     } catch (caught: any) {
       alert(caught?.message || "No se pudo actualizar la validación.");
@@ -8242,10 +8248,10 @@ function Manager({ active, user, onNavigate, assistantFormIntent, onAssistantFor
               actor={user?.username || "Usuario local"}
               initialPurchaseOrderId={pendingReceiptOrderId}
               onInitialPurchaseOrderConsumed={() => setPendingReceiptOrderId("")}
-              onCreated={(created) => {
+              onCreated={(created, validated) => {
                 setRows((current) => [created, ...current]);
                 setPendingReceiptRefresh((current) => current + 1);
-                setEntryListView("received");
+                setEntryListView(validated ? "pending" : "received");
                 closeForm(true);
               }}
             />
